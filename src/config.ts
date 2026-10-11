@@ -371,6 +371,11 @@ export interface AdapterConfig {
   /** Replace (string) or remove (null) the ACP_DELEGATE_NOTIFICATIONS appendix
    *  injected when the delegate tool is enabled. */
   delegatePrompt?: string | null;
+  /** Dedicated summary model (#241 port). `session` reuses the active model
+   *  and the captured prompt prefix; `provider/id` or a bare id resolves via
+   *  Pi's model registry. Omitted = the main model writes summaries. Managed
+   *  by `/acp compact`. */
+  compressionModelId?: string;
   coreOverrides?: Partial<Config>;
 }
 

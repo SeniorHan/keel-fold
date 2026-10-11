@@ -1,0 +1,98 @@
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
+
+/** Sentinel compressionModelId value meaning "use the session's own model".
+ *  The compression call reuses the session's prompt prefix (system prompt +
+ *  tools + messages) so it can hit the provider's prompt cache. Distinct from a
+ *  model ref ("provider/id" or a bare id). */
+export const SESSION_MODEL_REF = "session";
+
+/** A model known to Pi's model registry, addressed by provider + id. */
+export interface CompressionModelInfo {
+  provider: string;
+  id: string;
+  name?: string;
+}
+
+/** `model` is set when the ref is unambiguous; `ambiguous` lists candidates
+ *  when a bare id matches several providers. */
+export interface ResolveResult {
+  model: Model<Api> | null;
+  ambiguous: CompressionModelInfo[];
+}
+
+type ModelRegistryLike = ExtensionContext["modelRegistry"];
+
+/** Pi >= 1.x exposes request-authenticated nested completions on the
+ *  registry; 0.83 typings do not declare it, so it is probed at call time. */
+type RegistryComplete = (model: Model<Api>, context: Context, options?: { maxTokens?: number; signal?: AbortSignal }) => Promise<AssistantMessage>;
+
+/** Every chat model Pi knows, including providers registered by extensions
+ *  (the session's live registry — not a private models.json-only runtime). */
+export function listModels(registry: ModelRegistryLike): CompressionModelInfo[] {
+  return registry.getAll().map((m) => ({ provider: m.provider, id: m.id, name: m.name }));
+}
+
+/** Resolve "provider/id" (explicit, split at the first slash) or a bare id. */
+export function resolveModel(registry: ModelRegistryLike, ref: string): ResolveResult {
+  const refTrim = ref.trim();
+  if (!refTrim) return { model: null, ambiguous: [] };
+  const slash = refTrim.indexOf("/");
+  if (slash > 0) {
+    const model = registry.find(refTrim.slice(0, slash), refTrim.slice(slash + 1));
+    if (model) return { model, ambiguous: [] };
+  }
+  const matches = registry.getAll().filter((m) => m.id === refTrim);
+  if (matches.length === 1) return { model: matches[0]!, ambiguous: [] };
+  return { model: null, ambiguous: matches.map((m) => ({ provider: m.provider, id: m.id, name: m.name })) };
+}
+
+/** Run one summary call through the session's model registry (request-time
+ *  auth, extension-registered providers). Throws on host without nested
+ *  completion support, API error, abort, or empty output — the caller then
+ *  keeps the main model's fallback summary. */
+export async function summarizeWithModel(
+  ctx: ExtensionContext,
+  model: Model<Api>,
+  context: Context,
+  maxTokens: number,
+  signal?: AbortSignal,
+): Promise<string> {
+  const complete = (ctx.modelRegistry as unknown as { complete?: RegistryComplete }).complete;
+  if (typeof complete !== "function") throw new Error("host model registry has no complete() (needs pi >= 1.x)");
+  const msg = await complete.call(ctx.modelRegistry, model, context, { maxTokens, signal });
+  if (msg.stopReason === "error" || msg.stopReason === "aborted") {
+    throw new Error(msg.errorMessage ?? `compression model stopped: ${msg.stopReason}`);
+  }
+  const text = msg.content
+    .filter((c): c is { type: "text"; text: string } => c.type === "text")
+    .map((c) => c.text)
+    .join("")
+    .trim();
+  if (!text) throw new Error("compression model returned an empty summary");
+  return text;
+}
+
+/** System prompt for a dedicated model: reuse the kernel's tier-1 rules so
+ *  its output matches what the main model would produce. */
+export function buildSummarizeSystemPrompt(prompts: { compressPhilosophy: string; howToCompressRules: string }, topic: string | undefined): string {
+  const topicLine = topic ? `\nTopic for this range: ${topic}\n` : "";
+  return (
+    "You are a dedicated context-compression model. You receive a range of conversation " +
+    "messages and must write the single summary that replaces them. Follow the rules exactly.\n" +
+    `${topicLine}\n` +
+    `${prompts.compressPhilosophy}\n\n` +
+    `${prompts.howToCompressRules}\n\n` +
+    "Output ONLY the summary text (no preamble, no code fences)."
+  );
+}
+
+/** Truncate very large content, keeping head (goal/early context) and tail
+ *  (latest state) around a marker. */
+export function truncateContent(content: string, maxChars: number): string {
+  if (content.length <= maxChars) return content;
+  const marker = "\n\n[... truncated ...]\n\n";
+  const budget = maxChars - marker.length;
+  const head = Math.ceil(budget / 2);
+  return content.slice(0, head) + marker + content.slice(content.length - (budget - head));
+}

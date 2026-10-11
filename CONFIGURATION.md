@@ -138,6 +138,7 @@ All keys below are currently **ACTIVE**.
 | `degenerationGuard` | boolean \| object | `true` | 🟢 ACTIVE | Collapse degenerate single-codepoint runs (e.g. 4655×「【」) in assistant text/thinking of the outgoing view and inject a one-shot recovery notice — breaks the abort loop where pi replays degenerated thinking back to the provider on every request (#351). |
 | `hostSession` | boolean \| object | `false` | 🟢 ACTIVE | Turn-boundary policy for multi-session hosts: count injected `custom_message` entries as turn starts. Off by default (pi-native behavior). |
 | `rules` | boolean | `false` | 🟢 ACTIVE | Register the opt-in `acp_rule` record tool: short, principle-level reminders hard-protected from compression. Off by default. |
+| `compressionModelId` | string | _(unset)_ | 🟠 LOCAL FORK | Dedicated summary model (local port of PR #241). `"session"` = the active model in a separate call that reuses the captured prompt prefix (system prompt + active tools + sent messages); `"provider/id"` or a unique bare id = any model in Pi's live model registry (including extension-registered providers), fed the extracted range transcript. The main model still writes a short fallback summary per range, kept on any side-call failure. Needs Pi >= 1.x (`ctx.modelRegistry.complete`). Manage with `/acp compact [session\|provider/id\|reset]` (writes the global `acp.json`; a project `acp.json` value still wins). |
 
 **Delegate keys**
 

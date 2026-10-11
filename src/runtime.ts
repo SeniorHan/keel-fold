@@ -15,7 +15,7 @@ import { applyStrictReasoningGate, resolveReasoningDrop, type CompressReasoningC
 import { entriesToCoreMessages, EntryProjectionCache, extractText, matchesStoredText, messageIdentity, messageRef } from "./messages.js";
 import { SessionStateStore, deriveChildState, type LiveRefOrigin } from "./state.js";
 import { hasCompressHistory, rebuildStateFromLog } from "./state-rebuild.js";
-import { loadUserConfig, applyUserConfig } from "./user-config.js";
+import { loadUserConfig, applyUserConfig, saveCompressionModelId } from "./user-config.js";
 import { sanitizeSurfaceConfig } from "./surface.js";
 import { ThrottleEpisode } from "./throttle-retry.js";
 import { logInfo, logWarn, setDebugEnabled } from "./log.js";
@@ -183,6 +183,14 @@ export interface AcpRuntime {
    *  progress — reset the #250 loop breaker for the next attempt round;
    *  session_shutdown for memory hygiene). Compress does NOT renumber refs. */
   clearDeadCompress(sid: string): void;
+  /** Dedicated summary model ref (`session`, `provider/id`, bare id), or undefined. */
+  getCompressionModelRef(): string | undefined;
+  /** Persist the ref to the global acp.json (null clears) and apply it now. */
+  setCompressionModelRef(value: string | null): Promise<void>;
+  /** Exact transformed messages from the latest provider-bound context pass. */
+  setLastSentMessages(sid: string, messages: AgentMessage[]): void;
+  getLastSentMessages(sid: string): AgentMessage[] | null;
+  dropLastSentMessages(sid: string): void;
   /** Record one turn's FRESH-anchor provider usage sample and report whether
    *  the recent window is stable enough to calibrate the internal estimate
    *  against it (issue #455): >=3 of the last 4 samples agree within a 25%
@@ -445,6 +453,30 @@ export function createRuntime(adapter: AdapterConfig): AcpRuntime {
   }
   function clearDeadCompress(sid: string): void {
     deadCompressCounts.delete(sid);
+  }
+
+  function getCompressionModelRef(): string | undefined {
+    const ref = adapterRef.compressionModelId;
+    return typeof ref === "string" && ref.trim() ? ref.trim() : undefined;
+  }
+  async function setCompressionModelRef(value: string | null): Promise<void> {
+    await saveCompressionModelId(value);
+    const next = { ...adapterRef };
+    if (value === null) delete next.compressionModelId;
+    else next.compressionModelId = value;
+    adapterRef = next;
+    // Force the next reload to re-read merged global/project config.
+    lastUserConfigKey = undefined;
+  }
+  const lastSentMessages = new Map<string, AgentMessage[]>();
+  function setLastSentMessages(sid: string, messages: AgentMessage[]): void {
+    lastSentMessages.set(sid, messages);
+  }
+  function getLastSentMessages(sid: string): AgentMessage[] | null {
+    return lastSentMessages.get(sid) ?? null;
+  }
+  function dropLastSentMessages(sid: string): void {
+    lastSentMessages.delete(sid);
   }
 
   const throttleEpisodes = new Map<string, ThrottleEpisode>();
@@ -781,4 +813,4 @@ export function createRuntime(adapter: AdapterConfig): AcpRuntime {
   let refused = false;
   let refusalMessage: string | null = null;
   let delegateStoodDown = false;
-  return { core, store, get refused() { return refused; }, set refused(v: boolean) { refused = v; }, get refusalMessage() { return refusalMessage; }, set refusalMessage(v: string | null) { refusalMessage = v; }, get delegateStoodDown() { return delegateStoodDown; }, set delegateStoodDown(v: boolean) { delegateStoodDown = v; }, get adapter() { return adapterRef; }, setAdapter: (a) => { adapterRef = a; }, get prompts() { return promptsRef; }, setPrompts: (p) => { promptsRef = p; }, markNudgeShown, nudgeShownFor, nudgeShownTokensFor, clearNudgeTracking, clearNudgeTokenStamps, markNudgeRecorded, nudgeRecordedFor, noteCompressOutcomes, compressRetryCappedFor, clearCompressRetryTracking, liveContextLimit, configFor, reasoningDropFor, reloadConfig, stateFor, save, deriveChildState: deriveChild, acquireLock, overflowFor, overflowDrop, noteSentViewCount, peekSentViewCount, dropSentViewCount, dropProjectionCache, noteDeadCompress, clearDeadCompress, throttleFor, throttleDrop , noteTokenScale, dropTokenScale, noteHostUsage, dropHostUsageSamples, noteSizeDivergence, dropSizeDivergence, noteTerminalEscape, dropTerminalEscape, noteTruncationSkipped, dropTruncationSkipped, stripImagesFor };}
+  return { core, store, get refused() { return refused; }, set refused(v: boolean) { refused = v; }, get refusalMessage() { return refusalMessage; }, set refusalMessage(v: string | null) { refusalMessage = v; }, get delegateStoodDown() { return delegateStoodDown; }, set delegateStoodDown(v: boolean) { delegateStoodDown = v; }, get adapter() { return adapterRef; }, setAdapter: (a) => { adapterRef = a; }, get prompts() { return promptsRef; }, setPrompts: (p) => { promptsRef = p; }, markNudgeShown, nudgeShownFor, nudgeShownTokensFor, clearNudgeTracking, clearNudgeTokenStamps, markNudgeRecorded, nudgeRecordedFor, noteCompressOutcomes, compressRetryCappedFor, clearCompressRetryTracking, liveContextLimit, configFor, reasoningDropFor, reloadConfig, stateFor, save, deriveChildState: deriveChild, acquireLock, overflowFor, overflowDrop, noteSentViewCount, peekSentViewCount, dropSentViewCount, dropProjectionCache, noteDeadCompress, clearDeadCompress, throttleFor, throttleDrop , noteTokenScale, dropTokenScale, noteHostUsage, dropHostUsageSamples, noteSizeDivergence, dropSizeDivergence, noteTerminalEscape, dropTerminalEscape, noteTruncationSkipped, dropTruncationSkipped, stripImagesFor, getCompressionModelRef, setCompressionModelRef, setLastSentMessages, getLastSentMessages, dropLastSentMessages };}

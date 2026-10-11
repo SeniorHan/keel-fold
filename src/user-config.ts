@@ -1,5 +1,7 @@
 import { promises as fs } from "node:fs";
-import { acpJsonFiles } from "./config-dir.js";
+import { acpJsonFiles, userConfigPath } from "./config-dir.js";
+import { homedir } from "node:os";
+import { dirname } from "node:path";
 import type { Prompts } from "acp-kernel";
 import type { AdapterConfig, CompressConfig, DelegateConfig, HostSessionConfig, RepetitionGuardConfig } from "./config.js";
 import type { PiPromptSections } from "./system-prompt.js";
@@ -37,6 +39,7 @@ export interface UserAcpConfig {
   delegatePrompt?: string | null;
   hostSession?: boolean | HostSessionConfig;
   rules?: boolean;
+  compressionModelId?: string;
 }
 
 /** Read global + project acp.json, project overrides global. Returns {} on any
@@ -137,7 +140,7 @@ const KNOWN = new Set([
   "repetitionGuard", "degenerationGuard",
   "prompts", "acknowledgePromptsRisk",
   "promptSections", "nudgeSections", "toolPrompts", "delegatePrompt",
-  "hostSession", "rules",
+  "hostSession", "rules", "compressionModelId",
 ]);
 
 function pickKnown(parsed: Record<string, unknown>): UserAcpConfig {
@@ -212,4 +215,24 @@ function cleanProtectionList(key: string, value: unknown): string[] | undefined 
     return undefined;
   }
   return value.map((v) => v.trim());
+}
+
+/** Persist compressionModelId in the GLOBAL acp.json while preserving every
+ *  other key (#241 port, `/acp compact`). null removes it. Project-level
+ *  acp.json still overrides the global value. A present-but-unparseable file
+ *  is never overwritten. */
+export async function saveCompressionModelId(value: string | null): Promise<void> {
+  const file = userConfigPath(homedir(), "acp.json");
+  let current: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(await fs.readFile(file, "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) current = parsed as Record<string, unknown>;
+    else throw new Error(`${file} is not a JSON object`);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+  }
+  if (value === null) delete current.compressionModelId;
+  else current.compressionModelId = value;
+  await fs.mkdir(dirname(file), { recursive: true });
+  await fs.writeFile(file, `${JSON.stringify(current, null, 2)}\n`, "utf8");
 }

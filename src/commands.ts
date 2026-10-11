@@ -15,6 +15,7 @@ import { openFleetInspector } from "./fleet-inspector.js";
 import { resolveDelegate } from "./config.js";
 import { ensureSubagentAcpTools } from "./setup-subagent-tools.js";
 import { cacheReportText } from "./cache-tool.js";
+import { listModels, resolveModel, SESSION_MODEL_REF } from "./compress-model.js";
 
 declare const CURRENT_VERSION: string;
 
@@ -85,8 +86,12 @@ export function makeCommands(runtime: AcpRuntime, pi?: ExtensionAPI): Array<{ na
     {
       name: "acp",
       options: {
-        description: "Show ACP context usage, token breakdown, and compression status.",
-        handler: statusHandler,
+        description: "Show ACP context usage, token breakdown, and compression status. /acp compact [session|provider/id|reset] manages the dedicated summary model.",
+        handler: async (args: string, ctx: ExtensionCommandContext) => {
+          const argText = typeof args === "string" ? args : "";
+          if (argText.trim().split(/\s+/, 1)[0] !== "compact") return statusHandler(argText, ctx);
+          ctx.ui.notify(await handleCompact(argText, runtime, ctx));
+        },
       },
     },
     {
@@ -294,6 +299,49 @@ export function makeCommands(runtime: AcpRuntime, pi?: ExtensionAPI): Array<{ na
       },
     },
   ];
+}
+
+/** `/acp compact [session|provider/id|reset]` (#241 port): show or persist
+ *  the dedicated summary model in the global acp.json. */
+async function handleCompact(args: string, runtime: AcpRuntime, ctx: ExtensionCommandContext): Promise<string> {
+  const target = args.trim().split(/\s+/).slice(1).join(" ");
+  const registry = ctx.modelRegistry;
+  const persist = async (value: string | null): Promise<string | undefined> => {
+    await runtime.setCompressionModelRef(value);
+    await runtime.reloadConfig(ctx.cwd ?? process.cwd());
+    return runtime.getCompressionModelRef();
+  };
+  const projectNote = (effective: string | undefined) => `Global setting saved, but project acp.json keeps ${effective ?? "main-model summaries"} active.`;
+  if (!target) {
+    const current = runtime.getCompressionModelRef();
+    if (current === SESSION_MODEL_REF) return "Summary model: session (active model + shared prompt prefix). Falls back to the caller summary on error.\nReset: /acp compact reset";
+    if (current) {
+      const resolved = resolveModel(registry, current);
+      return resolved.model
+        ? `Summary model: ${resolved.model.provider}/${resolved.model.id}. Falls back to the caller summary on error.\nReset: /acp compact reset`
+        : `Summary model: ${current} — NOT resolvable now; compress keeps caller summaries.\nReset: /acp compact reset`;
+    }
+    return "Summary model: not set — the main model writes summaries.\nSet: /acp compact session | /acp compact <provider/id>";
+  }
+  if (target === "reset") {
+    const effective = await persist(null);
+    return effective ? projectNote(effective) : "Summary model cleared — the main model writes summaries.";
+  }
+  if (target === SESSION_MODEL_REF) {
+    const effective = await persist(SESSION_MODEL_REF);
+    return effective === SESSION_MODEL_REF ? "Summary model set to session." : projectNote(effective);
+  }
+  const resolved = resolveModel(registry, target);
+  if (!resolved.model) {
+    if (resolved.ambiguous.length > 0) {
+      return `Ambiguous model id "${target}". Use provider/id:\n${resolved.ambiguous.map((m) => `  ${m.provider}/${m.id}`).join("\n")}`;
+    }
+    const sample = listModels(registry).slice(0, 30).map((m) => `  ${m.provider}/${m.id}`).join("\n");
+    return `Model "${target}" not found in Pi's model registry.${sample ? `\nKnown models (first 30):\n${sample}` : ""}`;
+  }
+  const canonical = `${resolved.model.provider}/${resolved.model.id}`;
+  const effective = await persist(canonical);
+  return effective === canonical ? `Summary model set to ${canonical}. Falls back to the caller summary on error.` : projectNote(effective);
 }
 
 function resolveSessionDir(sm: ExtensionCommandContext["sessionManager"]): string | undefined {

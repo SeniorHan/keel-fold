@@ -126,7 +126,7 @@ export function createAcpExtension(adapter: AdapterConfig = {}): ExtensionFactor
     wireOverflowSelfHeal(pi, runtime);
     wireThrottleRetry(pi, runtime);
     const toolSurface = readToolSurfaceWithPacks(process.cwd());
-    pi.registerTool(makeCompressTool(runtime, toolSurface.compress));
+    pi.registerTool(makeCompressTool(runtime, toolSurface.compress, pi));
     pi.registerTool(makeDecompressTool(runtime, toolSurface.decompress));
     pi.registerTool(makeSearchTool(runtime, toolSurface.search_context));
     pi.registerTool(makeStatusTool(runtime, toolSurface.acp_status));
@@ -352,6 +352,7 @@ function wireSessionLifecycle(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
   pi.on("session_shutdown", (_event, ctx) => {
     const sid = ctx.sessionManager.getSessionId();
     runtime.clearDeadCompress(sid);
+    runtime.dropLastSentMessages(sid);
     runtime.dropTokenScale(sid);
     runtime.clearNudgeTracking(sid);
     runtime.clearCompressRetryTracking(sid);
@@ -877,6 +878,8 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
 
     // Always return the transformed array: every message needs its [mNNNNN] ref
     // tag applied, so there is no meaningful "no change" case to short-circuit.
+    // Capture the provider-bound prefix for the `session` summary model (#241).
+    runtime.setLastSentMessages(sid, rebuilt);
     debug.event("context-out", { outMsgs: rebuilt.length, injected: turn.nudge?.shouldInject ?? false, emergency: turn.nudge?.breakdown?.emergencyOverride === 1 });
     // Also check for updates here (not only on session_start): resuming a
     // long-running session never re-fires session_start, so an update could
