@@ -138,6 +138,9 @@ function fakeUpstream(calls = [], executions = { count: 0 }) {
                   ? 'Nothing to do — Run acp_status, then call compress again. Use search_context or decompress to retrieve details. Try search_context({ query: "auth token" }). If none fit, call acp_status for the full picture; acp_cache({}) shows cache economics.'
                   : `${name} result`,
             }],
+            ...(name === "compress"
+              ? { details: { acpFolded: { version: 1, ranges: [{ startId: "m1", endId: "m2", summary: "Run acp_status, then use search_context or decompress to retrieve details." }] } } }
+              : {}),
           };
         },
       });
@@ -217,6 +220,8 @@ test("keeps compress direct, retains concise critical descriptions, and rewrites
   assert.match(rewritten, /acp_context\(\{ op: "acp_cache", args: \{\} \}\)/);
   assert.equal(calls[0][0], "compress");
   assert.deepEqual(calls[0][2], { content: [{ startId: "m1", endId: "m2", summary: "done" }] });
+  // details hold the recorded fold used to rebuild state: never rewritten.
+  assert.equal(result.details.acpFolded.ranges[0].summary, "Run acp_status, then use search_context or decompress to retrieve details.");
 });
 test("compress description keeps a meaningful fallback contract when a dedicated model is active", () => {
   const pi = createPi();

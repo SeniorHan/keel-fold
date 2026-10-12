@@ -194,3 +194,53 @@ test("two sequential successful compress calls rebuild two blocks", async () => 
     assert.deepEqual(saved.blocks.map((b: any) => b.summary), ["first block summary long enough to clear the fifty char minimum", "second block summary long enough to clear the fifty char minimum"]);
     await rm(dir, { recursive: true, force: true });
 });
+
+test("Lean: rebuild prefers the fold recorded in the toolResult details over the call's fallback arguments", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pi-rebuild-"));
+    const stateFile = join(dir, "dedicated.session.jsonl");
+    const DETAILED = "Luna detailed summary: decisions, exact values and open objectives that the short caller fallback does not carry.";
+    const result = compressResultEntry("m9", "c1") as any;
+    // The second range failed at the summary model and was not folded; only m1..m2 was.
+    result.message.details = { acpFolded: { version: 1, ranges: [{ startId: "m1", endId: "m2", summary: DETAILED, topic: "t1" }] } };
+    const entries = [
+        entry("m1", "user", LONG), entry("m2", "user", LONG), entry("m3", "user", LONG), entry("m4", "user", LONG),
+        entry("m5", "user", LONG), entry("m6", "user", LONG), entry("m7", "user", LONG),
+        assistantCallEntry("m8", "c1", [
+            { startId: "m1", endId: "m2", summary: "short caller fallback, at least fifty characters long for the kernel" },
+            { startId: "m3", endId: "m4", summary: "short caller fallback for a range whose summary call failed upstream" },
+        ]),
+        result,
+        entry("m10", "user", "tail message"),
+    ];
+    const { api, handlers } = captureApi();
+    createAcpExtension(ADAPTER)(api as any);
+    await fire(handlers, entries, fakeCtx(entries, stateFile, "rebuild-details", dir));
+    const saved = JSON.parse(readFileSync(`${stateFile}.acp.json`, "utf8"));
+    assert.equal(saved.blocks.length, 1, "the failed range is not rebuilt");
+    assert.equal(saved.blocks[0].summary, DETAILED);
+    assert.equal(saved.blocks[0].topic, "t1");
+    assert.deepEqual(saved.blocks[0].effectiveMessageIds, ["m1", "m2"]);
+    await rm(dir, { recursive: true, force: true });
+});
+
+test("Lean: a recorded fold is rebuilt even when the call passed content as a JSON string", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pi-rebuild-"));
+    const stateFile = join(dir, "string-args.session.jsonl");
+    const DETAILED = "Luna detailed summary for a call whose content argument was a JSON string, not an array.";
+    const call = assistantCallEntry("m8", "c1", []) as any;
+    call.message.content[0].arguments = { content: JSON.stringify([{ startId: "m1", endId: "m2", summary: "short caller fallback, at least fifty characters long for the kernel" }]) };
+    const result = compressResultEntry("m9", "c1") as any;
+    result.message.details = { acpFolded: { version: 1, ranges: [{ startId: "m1", endId: "m2", summary: DETAILED }] } };
+    const entries = [
+        entry("m1", "user", LONG), entry("m2", "user", LONG), entry("m3", "user", LONG), entry("m4", "user", LONG),
+        entry("m5", "user", LONG), entry("m6", "user", LONG), entry("m7", "user", LONG),
+        call, result, entry("m10", "user", "tail message"),
+    ];
+    const { api, handlers } = captureApi();
+    createAcpExtension(ADAPTER)(api as any);
+    await fire(handlers, entries, fakeCtx(entries, stateFile, "rebuild-string", dir));
+    const saved = JSON.parse(readFileSync(`${stateFile}.acp.json`, "utf8"));
+    assert.equal(saved.blocks.length, 1);
+    assert.equal(saved.blocks[0].summary, DETAILED);
+    await rm(dir, { recursive: true, force: true });
+});

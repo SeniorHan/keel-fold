@@ -353,3 +353,22 @@ test("SessionStateStore reload preserves rules, nextRuleId, absorbed, terminalSt
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("Lean: overlapping saves serialize, leave no temp files, and the last call wins", async () => {
+  const { readdir } = await import("node:fs/promises");
+  const dir = await tempDir();
+  const file = path.join(dir, "session.jsonl");
+  const store = new SessionStateStore();
+  const saves = Array.from({ length: 20 }, (_, i) => {
+    const s = createInitialState();
+    s.nextBlockId = i + 1;
+    return store.save(s, file, "sid-race");
+  });
+  await Promise.all(saves);
+  const leftovers = (await readdir(dir)).filter((f) => f.startsWith(".acp-tmp-"));
+  assert.deepEqual(leftovers, [], "no temp files left behind");
+  const fresh = new SessionStateStore();
+  const loaded = await fresh.load(file, "sid-race");
+  assert.equal(loaded.nextBlockId, 20, "file holds the last save in call order");
+  await rm(dir, { recursive: true, force: true });
+});

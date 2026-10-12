@@ -41,9 +41,9 @@ pi install git:github.com/kunkun9527/billion-context-pi-lean@v0.1.83-lean.7
 /acp compact reset              # 恢复由主模型写摘要
 ```
 
-设置保存为 `~/.pi/acp.json` 里的 `compressionModelId`（项目的 `.pi/acp.json` 优先）。请写 `provider/id`：多个 provider 下同名的裸 id 会被判为歧义。模型从 Pi 的实时注册表解析，扩展注册的 provider 也能用。注册表里有某个模型，不代表 provider 真能服务它：调用失败时，块里保留主模型的回退摘要，`~/.pi/acp.log` 记录 `compression-model-failed`。
+设置保存为 `~/.pi/acp.json` 里的 `compressionModelId`（项目的 `.pi/acp.json` 优先）。请写 `provider/id`：多个 provider 下同名的裸 id 会被判为歧义。模型从 Pi 的实时注册表解析，扩展注册的 provider 也能用。注册表里有某个模型，不代表 provider 真能服务它：某个范围调用失败时，这个范围不压缩（稍后重试），`~/.pi/acp.log` 记录 `compression-model-failed`。模型根本解析不到、或宿主不支持嵌套调用时，才用主模型的回退摘要并给出警告。
 
-摘要模型按规则原样保留路径、数值、决策和未完成目标；输出被长度上限截断时会被拒收，保留回退摘要。
+摘要模型按规则原样保留路径、数值、决策和未完成目标；输出被长度上限截断时会被拒收，这个范围不压缩。
 
 ## 配置
 

@@ -264,29 +264,76 @@ test("fitToModel: earlier block summaries survive truncation even mid-range", ()
   assert.throws(() => fitToModel([{ text: "Z".repeat(130_000), pinned: true }], {}, 8000), /earlier block summaries/);
 });
 
-test("compress: dedicated failure keeps the caller fallback summary", async () => {
+test("Lean: the compress result records the dedicated summary in details (for state rebuild)", async () => {
+  const registry = fakeRegistry([model("cheap", "summarizer")], textReply(DEDICATED), []);
+  const { compress, ctx } = await setup("details", registry, { acpJson: { compressionModelId: "cheap/summarizer" } });
+  const out = await compress.execute("tc1", { content: [{ startId: "m00001", endId: "m00001", summary: FALLBACK }] }, undefined, undefined, ctx);
+  assert.deepEqual(out.details?.acpFolded?.version, 1);
+  const ranges = out.details.acpFolded.ranges;
+  assert.equal(ranges.length, 1);
+  assert.equal(ranges[0].startId, "m00001");
+  assert.ok(ranges[0].summary.includes(DEDICATED), ranges[0].summary);
+  // Without a dedicated model the arguments already hold the summary: no details.
+  const plain = await setup("details-none", fakeRegistry([], textReply(DEDICATED), []));
+  const out2 = await plain.compress.execute("tc1", { content: [{ startId: "m00001", endId: "m00001", summary: FALLBACK }] }, undefined, undefined, plain.ctx);
+  assert.equal(out2.details, undefined);
+});
+
+test("Lean: details record only the ranges the kernel actually folded", async () => {
+  const registry = fakeRegistry([model("cheap", "summarizer")], textReply(DEDICATED), []);
+  const { compress, ctx } = await setup("details-partial", registry, { acpJson: { compressionModelId: "cheap/summarizer" } });
+  const out = await compress.execute("tc1", { content: [
+    { startId: "m00001", endId: "m00001", summary: FALLBACK },
+    { startId: "m09998", endId: "m09999", summary: FALLBACK },
+  ] }, undefined, undefined, ctx);
+  const text = out.content.map((c: { text?: string }) => c.text ?? "").join("\n");
+  assert.match(text, /m09998|m09999/, "the kernel reported the bad range");
+  assert.deepEqual(out.details?.acpFolded?.ranges.map((r: { startId: string }) => r.startId), ["m00001"]);
+});
+
+test("Lean: a failed dedicated call does not fold the range (no short-fallback block)", async () => {
   const calls: Call[] = [];
   const registry = fakeRegistry([model("cheap", "summarizer")], async () => { throw new Error("Connection error."); }, calls);
   const { run, stateFile } = await setup("fallback", registry, { acpJson: { compressionModelId: "cheap/summarizer" } });
-  const text = await run(FALLBACK);
-  assert.match(text, /▣ ACP \|/);
-  assert.match(text, /produced no summaries; kept caller-provided fallback summaries/);
+  await assert.rejects(run(FALLBACK), /Summary model cheap\/summarizer failed for every range \(m00001\.\.m00001: Connection error\.\)\. Nothing was compressed/);
   assert.equal(calls.length, 1);
-  assert.ok((await readBlockSummaries(stateFile)).includes(FALLBACK));
+  assert.deepEqual(await readBlockSummaries(stateFile), [], "no block was created");
 });
 
-test("compress: error stopReason and hosts without complete() fall back too", async () => {
+test("Lean: partial failure folds only the ranges whose summary succeeded", async () => {
+  const calls: Call[] = [];
+  let n = 0;
+  const registry = fakeRegistry([model("cheap", "summarizer")], async () => {
+    n += 1;
+    if (n === 1) throw new Error("Connection error.");
+    return { role: "assistant", content: [{ type: "text", text: DEDICATED }], stopReason: "stop" };
+  }, calls);
+  const { compress, ctx, stateFile } = await setup("partial", registry, { acpJson: { compressionModelId: "cheap/summarizer" } });
+  const out = await compress.execute("tc1", { content: [
+    { startId: "m00001", endId: "m00001", summary: FALLBACK },
+    { startId: "m00002", endId: "m00003", summary: FALLBACK },
+  ] }, undefined, undefined, ctx);
+  const text = out.content?.[0]?.text ?? String(out);
+  assert.equal(calls.length, 2);
+  assert.match(text, /summaries written by cheap\/summarizer \(1\/2\)/, text);
+  assert.match(text, /⚠️ .*NOT compressed — summary model cheap\/summarizer failed for m00001\.\.m00001 \(Connection error\.\); retry that range later/, text);
+  const summaries = await readBlockSummaries(stateFile);
+  assert.equal(summaries.length, 1, JSON.stringify(summaries));
+  assert.ok(summaries[0]!.includes(DEDICATED));
+  assert.ok(!summaries.some((s) => s.includes(FALLBACK)), "the failed range's fallback is not folded");
+});
+
+test("Lean: error and length stops do not fold; a host without complete() still falls back", async () => {
   const errReg = fakeRegistry([model("cheap", "summarizer")], async () => ({ role: "assistant", content: [], stopReason: "error", errorMessage: "429" }), []);
   const a = await setup("stop-error", errReg, { acpJson: { compressionModelId: "cheap/summarizer" } });
-  await a.run(FALLBACK);
-  assert.ok((await readBlockSummaries(a.stateFile)).includes(FALLBACK));
+  await assert.rejects(a.run(FALLBACK), /failed for every range \(m00001\.\.m00001: 429\)/);
+  assert.deepEqual(await readBlockSummaries(a.stateFile), []);
 
-  // Output cut at the token limit: a half-written summary must not replace the fallback.
+  // Output cut at the token limit: neither the half-written summary nor the short fallback is folded.
   const lenReg = fakeRegistry([model("cheap", "summarizer")], async () => ({ role: "assistant", content: [{ type: "text", text: "DEDICATED-SUMMARY: cut mid-sen" }], stopReason: "length" }), []);
   const l = await setup("stop-length", lenReg, { acpJson: { compressionModelId: "cheap/summarizer" } });
-  await l.run(FALLBACK);
-  const lenSummaries = await readBlockSummaries(l.stateFile);
-  assert.ok(lenSummaries.includes(FALLBACK), JSON.stringify(lenSummaries));
+  await assert.rejects(l.run(FALLBACK), /hit its output limit/);
+  assert.deepEqual(await readBlockSummaries(l.stateFile), []);
 
   const oldHost = { getAll: () => [model("cheap", "summarizer")], find: () => model("cheap", "summarizer") };
   const b = await setup("no-complete", oldHost, { acpJson: { compressionModelId: "cheap/summarizer" } });

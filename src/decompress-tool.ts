@@ -12,6 +12,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { existsSync, lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { resolve, relative, isAbsolute, join, basename, dirname } from "node:path";
 import { tmpdir, homedir } from "node:os";
+import { createHash } from "node:crypto";
 
 /** Directory for auto-generated decompress output files. */
 const AUTO_DIR = join(homedir() || tmpdir(), ".cache", "pi", "acp-decompress");
@@ -52,7 +53,12 @@ export function makeDecompressTool(runtime: AcpRuntime, overrides?: ToolPromptOv
       if (runtime.refused) return { details: undefined, content: [{ type: "text", text: runtime.refusalMessage ?? UNSUPPORTED_HOST_MESSAGE }] };
       let result: string;
       try {
-        result = await handleDecompress(params as DecompressArgs, runtime, ctx, signal);
+        const release = await runtime.acquireLock(ctx.sessionManager.getSessionId());
+        try {
+          result = await handleDecompress(params as DecompressArgs, runtime, ctx, signal);
+        } finally {
+          release();
+        }
       } catch (e) {
         logThrow("decompress", e, { sid: ctx.sessionManager.getSessionId(), blockId: (params as DecompressArgs).blockId });
         throw e;
@@ -132,6 +138,16 @@ function resolveToFilePath(targetPath: string): string | { error: string } {
 
 /** Generate a unique auto file path for a block. Uses a timestamp so repeated
  *  decompressions of the same block never overwrite each other. */
+/** Lean: filename stem for a message ref. Raw entry refs can carry
+ *  characters Windows rejects in filenames (e.g. `4d9e965e#toolu_x|fc_toolu_x`);
+ *  keep safe refs readable and give unsafe ones a sanitized prefix plus a
+ *  short hash so distinct refs never collide. */
+export function messageFileStem(ref: string): string {
+  if (/^[A-Za-z0-9._-]{1,80}$/.test(ref)) return `msg-${ref}`;
+  const readable = ref.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 40);
+  return `msg-${readable}-${createHash("sha256").update(ref).digest("hex").slice(0, 10)}`;
+}
+
 function autoFilePath(blockId: string): string {
   // blockId already carries the "b" prefix (e.g. "b5"); use it as-is so the
   // filename reads "b5-<ts>.txt" rather than "bb5-<ts>.txt".
@@ -284,7 +300,7 @@ async function handleMessageRef(
     return `Message ${ref} (${role}, block ${ownerBlockId}, ${text.length} chars) restored inline:\n\n${text}`;
   }
 
-  const targetPath = args.toFile ? resolveToFilePath(args.toFile) : autoFilePath(`msg-${ref}`);
+  const targetPath = args.toFile ? resolveToFilePath(args.toFile) : autoFilePath(messageFileStem(ref));
   if (typeof targetPath === "object" && "error" in targetPath) {
     logError("decompress", { sid: ctx.sessionManager.getSessionId(), event: "message-path-rejected", ref, toFile: args.toFile });
     return targetPath.error;

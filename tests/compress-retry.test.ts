@@ -373,3 +373,25 @@ test("nudge ledger: per-session mark/query/clear isolation (#317)", () => {
   assert.equal(rt.nudgeShownFor("A", "u2"), true);
   assert.equal(rt.nudgeShownFor("B", "u2"), false);
 });
+
+test("Lean: acquireLock keeps a third waiter queued after the first releases", async () => {
+  const rt = createRuntime({});
+  const order: string[] = [];
+  const r1 = await rt.acquireLock("sid-lock");
+  const p2 = rt.acquireLock("sid-lock").then((rel) => { order.push("2-in"); return rel; });
+  const p3 = rt.acquireLock("sid-lock").then((rel) => { order.push("3-in"); return rel; });
+  r1();
+  const r2 = await p2;
+  // Before the fix, r1 deleted the slot, so a fresh caller here skipped the queue.
+  const p4 = rt.acquireLock("sid-lock").then((rel) => { order.push("4-in"); return rel; });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(order, ["2-in"], "3 and 4 wait while 2 holds the lock");
+  r2();
+  const r3 = await p3;
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(order, ["2-in", "3-in"]);
+  r3();
+  (await p4)();
+  r3();
+  assert.deepEqual(order, ["2-in", "3-in", "4-in"]);
+});

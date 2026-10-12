@@ -23,6 +23,7 @@ import { logInfo, logWarn, setDebugEnabled } from "./log.js";
 import { findPositionalPrefixRun, findUniqueLongestRun, type MatchRange } from "./sequence-match.js";
 import { OverflowEpisode } from "./overflow-selfheal.js";
 import { lastTurnBoundaryId, type TurnBoundaryPolicy } from "./turn-boundary.js";
+import { findOffBranchBlocks, markOffBranchBlocks, withBranchGuard } from "./branch-guard.js";
 // pi exposes `sessionManager.buildContextEntries()`; omp (oh-my-pi) only has
 // `getBranch()`. Both return chronological SessionEntry[]; feature-detect so
 // the adapter runs under either host (omp's runner silently swallows the TypeError).
@@ -368,11 +369,13 @@ function pruneOrphanRefs(state: CompressionState, messages: ReturnType<typeof en
 export const MAX_COMPRESS_ATTEMPTS = 3;
 
 export function createRuntime(adapter: AdapterConfig): AcpRuntime {
-  const core = createCore({
+  // Lean: withBranchGuard keeps blocks whose range was partly left on another
+  // branch inactive (see branch-guard.ts).
+  const core = withBranchGuard(createCore({
     // CJK-aware base counter (kernel default); the meter's real-scale floor
     // (src/index.ts) covers provider-anchored calibration.
     countTokens: defaultCountTokens,
-  });
+  }));
   const store = new SessionStateStore();
   const locks = new Map<string, Promise<void>>();
   const factoryAdapter = adapter;
@@ -631,11 +634,20 @@ export function createRuntime(adapter: AdapterConfig): AcpRuntime {
 
   async function acquireLock(sid: string): Promise<() => void> {
     const prev = locks.get(sid) ?? Promise.resolve();
-    let release!: () => void;
-    const next = new Promise<void>((resolve) => { release = () => { locks.delete(sid); resolve(); }; });
-    locks.set(sid, prev.then(() => next));
+    let resolveNext!: () => void;
+    const next = new Promise<void>((resolve) => { resolveNext = resolve; });
+    const tail = prev.then(() => next);
+    locks.set(sid, tail);
     await prev;
-    return release;
+    let released = false;
+    // Only clear the slot if no later caller has queued behind us — deleting
+    // unconditionally dropped their tail, so a third caller ran concurrently.
+    return () => {
+      if (released) return;
+      released = true;
+      if (locks.get(sid) === tail) locks.delete(sid);
+      resolveNext();
+    };
   }
 
   function liveContextLimit(ctx: ExtensionContext): number {
@@ -768,7 +780,24 @@ export function createRuntime(adapter: AdapterConfig): AcpRuntime {
     if (!projection) { projection = new EntryProjectionCache(); projectionCaches.set(sessionId, projection); }
     const coreMessages = projection.project(entries);
     if (live === undefined) pruneOrphanRefs(state, coreMessages);
+    if (piHost) guardBranch(sm, sessionId, state, coreMessages);
     return { state, coreMessages, entries };
+  }
+
+  // Lean: mark blocks whose covered messages are partly on another branch of
+  // the session tree; the wrapped core keeps them inactive this turn.
+  const offBranchLogged = new Map<string, string>();
+  function guardBranch(sm: ExtensionContext["sessionManager"], sessionId: string, state: CompressionState, coreMessages: ReturnType<typeof entriesToCoreMessages>): void {
+    const all = (sm as unknown as { getEntries?: () => SessionEntry[] }).getEntries?.();
+    const off = all && state.blocks.length > 0
+      ? findOffBranchBlocks(state, coreMessages, new Set(all.map((e) => e.id)))
+      : [];
+    markOffBranchBlocks(state, off);
+    const signature = off.join(",");
+    if ((offBranchLogged.get(sessionId) ?? "") !== signature) {
+      offBranchLogged.set(sessionId, signature);
+      logInfo("state", { sid: sessionId, event: "off-branch-blocks", blocks: off });
+    }
   }
 
   async function save(state: CompressionState, ctx: ExtensionContext) {

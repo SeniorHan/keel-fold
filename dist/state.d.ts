@@ -14,6 +14,8 @@ export interface DerivedFrom {
 export declare function readParentSessionPath(sessionFile: string): Promise<string | undefined>;
 export declare class SessionStateStore {
     private cache;
+    private writes;
+    private tmpSeq;
     load(sessionFile: string | undefined, sessionId: string): Promise<CompressionState>;
     /** Stamp the effective prompt pack for the live session (audit trail:
      *  persisted into the sidecar on the next save). */

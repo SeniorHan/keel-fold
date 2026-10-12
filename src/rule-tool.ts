@@ -23,7 +23,13 @@ export function makeRuleTool(runtime: AcpRuntime): ToolDefinition<typeof RulePar
     async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<AgentToolResult<unknown>> {
       if (runtime.refused) return { details: undefined, content: [{ type: "text", text: runtime.refusalMessage ?? UNSUPPORTED_HOST_MESSAGE }] };
       try {
-        const text = await handleRule(params.rule, runtime, ctx);
+        const release = await runtime.acquireLock(ctx.sessionManager.getSessionId());
+        let text: string;
+        try {
+          text = await handleRule(params.rule, runtime, ctx);
+        } finally {
+          release();
+        }
         return { details: undefined, content: [{ type: "text", text }] };
       } catch (e) {
         logThrow("rule", e, { sid: ctx.sessionManager.getSessionId() });

@@ -41,9 +41,9 @@ Requires Pi >= 1.x for the dedicated summary model. Do not enable it together wi
 /acp compact reset              # main model writes summaries again
 ```
 
-The choice is saved as `compressionModelId` in `~/.pi/acp.json` (a project's `.pi/acp.json` wins). Use `provider/id`: a bare id shared by several providers is ambiguous. Models come from Pi's live registry, so providers registered by extensions work too. A model being listed does not mean the provider can serve it: when the call fails, the block keeps the main model's fallback summary and `~/.pi/acp.log` records `compression-model-failed`.
+The choice is saved as `compressionModelId` in `~/.pi/acp.json` (a project's `.pi/acp.json` wins). Use `provider/id`: a bare id shared by several providers is ambiguous. Models come from Pi's live registry, so providers registered by extensions work too. A model being listed does not mean the provider can serve it: when the call fails for a range, that range is not compressed (retry later), and `~/.pi/acp.log` records `compression-model-failed`. If the model cannot be resolved at all, or the host lacks nested completion, blocks fall back to the main model's short summary with a warning.
 
-Summaries are written by the summary model with rules that keep paths, numbers, decisions and open objectives verbatim. Its output is rejected (fallback kept) when it hits the output limit.
+Summaries are written by the summary model with rules that keep paths, numbers, decisions and open objectives verbatim. Its output is rejected when it hits the output limit, and that range is not compressed.
 
 ## Configuration
 

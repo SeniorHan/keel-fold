@@ -6,6 +6,11 @@
 - The caller's fallback summary is passed to the summary model as a `<caller_note>` — purpose and axis only, never a source of facts.
 - Summary-model prompt gains READING THE TRANSCRIPT / SOURCE ATTRIBUTION / CALLER NOTE rules: tool output (files, logs, other sessions, recalled history) is examined material and its quoted requests or Open objectives never become this conversation's; precision rules are unchanged; examined material is summarized as "Looked for X → found Y"; text outside `<content>` is control metadata, not a user request. CARRY FORWARD now names earlier Open objectives explicitly.
 - Caller (main model) rules: the fallback states what was done or examined, why, and the outcome with its decisive values.
+- Stability: sidecar writes to one session file are serialized and each uses its own temp file (overlapping saves could rename the same `.acp-tmp-*` twice → `ENOENT`); `acquireLock` no longer drops a later waiter's queue on release; compress / decompress / `acp_rule` hold the session lock across their read-modify-save.
+- Stability: when the dedicated summary model fails for a range (API error, length stop, input too large), that range is **not folded** — the caller's short fallback would replace the detailed summary (or, on a refold, the earlier blocks' summaries). Successful ranges in the same call still fold; if every range fails the call errors (counts toward the retry cap). Setup problems (unresolvable model, host without `complete()`) still fold with the fallback and warn.
+- Stability: the compress toolResult records what was folded (`details.acpFolded`, never sent to the model); state rebuild from the session log prefers it, so a lost sidecar no longer rebuilds blocks from the short fallbacks or folds ranges that failed. The Lean facade passes `details` through unrewritten.
+- Stability: a block whose covered messages are partly on another branch of the session tree (after `/tree` into its range) stays inactive for that turn, so its summary cannot show decisions from messages that branch has not reached; returning to the full branch reactivates it. Pi host only.
+- Stability: decompressing a message to an auto file uses a filesystem-safe name (raw entry refs can contain `|`, which Windows rejects).
 
 ## v0.1.83-lean.7 (2026-10-12)
 

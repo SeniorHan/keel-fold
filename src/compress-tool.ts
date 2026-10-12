@@ -84,13 +84,19 @@ export function makeCompressTool(runtime: AcpRuntime, overrides?: ToolPromptOver
     async execute(toolCallId, params, signal, _onUpdate, ctx): Promise<AgentToolResult<unknown>> {
       if (runtime.refused) return { details: undefined, content: [{ type: "text", text: runtime.refusalMessage ?? UNSUPPORTED_HOST_MESSAGE }] };
       let result: string;
+      const details: CompressResultDetails = {};
       try {
-        result = await handleCompress(params as CompressArgs, runtime, ctx, toolCallId, signal, collectActiveTools(pi));
+        const release = await runtime.acquireLock(ctx.sessionManager.getSessionId());
+        try {
+          result = await handleCompress(params as CompressArgs, runtime, ctx, toolCallId, signal, collectActiveTools(pi), details);
+        } finally {
+          release();
+        }
       } catch (e) {
         logThrow("compress", e, { sid: ctx.sessionManager.getSessionId(), ranges: typeof (params as CompressArgs).content === "string" ? "string" : ((params as CompressArgs).content?.length ?? 0) });
         throw e;
       }
-      return { details: undefined, content: [{ type: "text", text: result }] };
+      return { details: details.acpFolded ? details : undefined, content: [{ type: "text", text: result }] };
     },
   }, overrides);
   // Dynamic description: `/acp compact` can switch the summary model mid-
@@ -124,6 +130,18 @@ function collectActiveTools(pi?: ExtensionAPI): Tool[] {
 }
 
 type RangeEntry = Static<typeof RangeSpec>;
+
+/** Persisted in the compress toolResult's `details` (never sent to the model).
+ *  When a dedicated model writes summaries, the call's arguments hold only the
+ *  caller's short fallback, and failed ranges are not folded at all — so the
+ *  log alone cannot rebuild the blocks. `acpFolded` records exactly what was
+ *  folded; state-rebuild prefers it over the arguments. */
+export interface CompressResultDetails {
+  acpFolded?: {
+    version: 1;
+    ranges: Array<{ startId: string; endId: string; summary: string; topic?: string }>;
+  };
+}
 
 // Normalize the compress args via the kernel's lenient parser (fenced /
 // trailing-comma / raw-newline / double-stringified / truncated-salvage).
@@ -502,7 +520,7 @@ export function tierReadyHint(state: CompressionState, config: ReturnType<AcpRun
   return "";
 }
 
-async function handleCompress(args: CompressArgs, runtime: AcpRuntime, ctx: ExtensionContext, toolCallId?: string, signal?: AbortSignal, tools: Tool[] = []): Promise<string> {
+async function handleCompress(args: CompressArgs, runtime: AcpRuntime, ctx: ExtensionContext, toolCallId?: string, signal?: AbortSignal, tools: Tool[] = [], detailsOut?: CompressResultDetails): Promise<string> {
   assertNotAborted(signal);
   const maybeRanges = normalizeRanges(args);
   // Argument errors throw (not return): pi-agent-core only sets isError:true
@@ -572,11 +590,21 @@ async function handleCompress(args: CompressArgs, runtime: AcpRuntime, ctx: Exte
   // Dedicated summary model (#241 port): replace the caller's summaries before
   // the kernel sees them. Skipped for all-dead calls (nothing will fold).
   // Failures keep the caller's fallback summary; re-sanitize model output.
-  const dedicated = allDead
-    ? { ranges: sanitizedRanges, note: null, warn: false }
+  const dedicated: DedicatedSummaryResult = allDead
+    ? { ranges: sanitizedRanges, note: null, warn: false, failed: [] }
     : await writeDedicatedSummaries({ ranges: sanitizedRanges, runtime, ctx, messages, state, config, tools, summaryMaxChars, topLevelTopic, signal });
   assertNotAborted(signal);
-  const finalRanges = dedicated.ranges.map((r) => {
+  const failedIdx = new Set(dedicated.failed.map((f) => f.index));
+  if (failedIdx.size > 0 && failedIdx.size === dedicated.ranges.length) {
+    // Thrown, not returned: counts toward the per-turn retry cap, so a
+    // persistently failing summary model cannot loop the main model.
+    throw new Error(
+      `Summary model ${dedicated.modelLabel ?? "?"} failed for every range (${dedicated.failed.map((f) => `${f.span}: ${f.error}`).join("; ")}). ` +
+        "Nothing was compressed — folding with your short fallback would replace the detailed summary. " +
+        "Retry later; if it keeps failing, the user can run /acp compact reset so the main model writes summaries.",
+    );
+  }
+  const finalRanges = dedicated.ranges.filter((_, i) => !failedIdx.has(i)).map((r) => {
     const s = sanitizeSummary(r.summary);
     return s.text === r.summary ? r : { ...r, summary: s.text };
   });
@@ -624,6 +652,17 @@ async function handleCompress(args: CompressArgs, runtime: AcpRuntime, ctx: Exte
   }
   await runtime.save(applied.state, ctx);
   const { blocksCreated, tokensCompressed, errors, warnings } = applied.result;
+  // Record only the ranges that produced a new block: the kernel may reject
+  // some ranges of a batch, and rebuild replays the record as one batch.
+  const foldedRanges = finalRanges.filter((r) =>
+    applied.state.blocks.some((b) => !beforeRunIds.has(b.blockId) && b.startRef === r.startId && b.endRef === r.endId),
+  );
+  if (detailsOut && foldedRanges.length > 0 && dedicated.modelLabel !== undefined) {
+    detailsOut.acpFolded = {
+      version: 1,
+      ranges: foldedRanges.map((r) => ({ startId: r.startId, endId: r.endId, summary: r.summary, ...((r.topic ?? topLevelTopic) ? { topic: r.topic ?? topLevelTopic } : {}) })),
+    };
+  }
   if (blocksCreated > 0) {
     runtime.clearDeadCompress(sid);
   } else if (allDead) {
@@ -744,6 +783,11 @@ interface DedicatedSummaryResult {
   ranges: RangeEntry[];
   note: string | null;
   warn: boolean;
+  /** Ranges whose summary call failed. They are NOT folded: a short caller
+   *  fallback would otherwise replace the detailed summary (or, on a refold,
+   *  the earlier blocks' summaries) the dedicated model was meant to write. */
+  failed: Array<{ index: number; span: string; error: string }>;
+  modelLabel?: string;
 }
 
 /** Write each range's summary with the configured dedicated model
@@ -754,7 +798,7 @@ interface DedicatedSummaryResult {
 async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<DedicatedSummaryResult> {
   const ref = input.runtime.getCompressionModelRef();
   const ranges = input.ranges.map((range) => ({ ...range }));
-  if (!ref) return { ranges, note: null, warn: false };
+  if (!ref) return { ranges, note: null, warn: false, failed: [] };
   const sid = input.ctx.sessionManager.getSessionId();
   const maxTokens = Math.max(256, Math.ceil((input.summaryMaxChars ?? 20000) / 3));
   const isSession = ref === SESSION_MODEL_REF;
@@ -762,7 +806,7 @@ async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<De
   let model: Model<Api> | undefined;
   if (isSession) {
     model = input.ctx.model as Model<Api> | undefined;
-    if (!model) return { ranges, note: "session summary model unavailable; kept caller-provided fallback summaries", warn: true };
+    if (!model) return { ranges, note: "session summary model unavailable; kept caller-provided fallback summaries", warn: true, failed: [] };
   } else {
     let resolved: ReturnType<typeof resolveModel> | undefined;
     try {
@@ -772,9 +816,15 @@ async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<De
     }
     if (!resolved?.model) {
       if (resolved) logWarn("compress", { sid, event: "compression-model-unresolved", ref, ambiguous: resolved.ambiguous.length });
-      return { ranges, note: `summary model ${ref} is not resolvable; kept caller-provided fallback summaries`, warn: true };
+      return { ranges, note: `summary model ${ref} is not resolvable; kept caller-provided fallback summaries`, warn: true, failed: [] };
     }
     model = resolved.model;
+  }
+  // Setup failures (above, and a host without nested completion) are
+  // configuration problems, not per-call ones: keep folding with the caller's
+  // fallback and warn, rather than stop compressing altogether.
+  if (typeof (input.ctx.modelRegistry as unknown as { complete?: unknown }).complete !== "function") {
+    return { ranges, note: "host model registry has no complete() (needs pi >= 1.x); kept caller-provided fallback summaries", warn: true, failed: [] };
   }
 
   let prefix: Message[] | null = null;
@@ -794,6 +844,7 @@ async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<De
   // what it is, while the kernel still folds that call.
   const planned = prefix ? new Map<number, CompressionBlock>() : plannedFolds(input, ranges);
   let used = 0;
+  const failed: DedicatedSummaryResult["failed"] = [];
   for (const [index, range] of ranges.entries()) {
     if (input.signal?.aborted) break;
     const topic = range.topic ?? input.topLevelTopic;
@@ -814,19 +865,27 @@ async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<De
       range.summary = await summarizeWithModel(input.ctx, model, context, maxTokens, input.signal);
       used += 1;
     } catch (e) {
-      logWarn("compress", { sid, event: "compression-model-failed", ref, error: e instanceof Error ? e.message : String(e) });
+      const error = e instanceof Error ? e.message : String(e);
+      logWarn("compress", { sid, event: "compression-model-failed", ref, span: `${range.startId}..${range.endId}`, error });
+      failed.push({ index, span: `${range.startId}..${range.endId}`, error });
     }
   }
 
   const label = `${model.provider}/${model.id}`;
-  const partial = used < ranges.length;
+  const fallbackKept = ranges.length - used - failed.length;
   const mode = isSession ? (prefix ? ", shared prefix" : ", extracted content") : "";
+  const parts: string[] = [];
+  if (used > 0) parts.push(`summaries written by ${isSession ? "session model " : ""}${label} (${used}/${ranges.length}${mode})`);
+  if (failed.length > 0) {
+    parts.push(`NOT compressed — summary model ${label} failed for ${failed.map((f) => `${f.span} (${f.error})`).join(", ")}; retry ${failed.length === 1 ? "that range" : "those ranges"} later`);
+  }
+  if (fallbackKept > 0) parts.push(`caller fallbacks kept for ${fallbackKept} range(s) with no extractable content`);
   return {
     ranges,
-    note: used > 0
-      ? `summaries written by ${isSession ? "session model " : ""}${label} (${used}/${ranges.length}${mode})${partial ? "; caller fallbacks kept for failed ranges" : ""}`
-      : `summary model ${label} produced no summaries; kept caller-provided fallback summaries`,
-    warn: partial,
+    note: parts.length > 0 ? parts.join("; ") : null,
+    warn: failed.length > 0 || fallbackKept > 0,
+    failed,
+    modelLabel: label,
   };
 }
 

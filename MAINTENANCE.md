@@ -17,13 +17,14 @@
 
 - 模型解析与调用走 `ctx.modelRegistry`（`find`/`getAll`/`complete`）。PR 原本用 `ModelRuntime.create(models.json)`，看不到由扩展注册的 provider。
 - `complete()` 只有 Pi >= 1.x 才有；宿主没有时抛错，回退到调用方提供的摘要。
-- 主模型提供 1–2 句有意义的回退摘要，不用裸占位符 `"compressed"`；专用模型调用失败或部分失败时保留这份回退摘要。
+- 主模型提供 1–2 句有意义的回退摘要，不用裸占位符 `"compressed"`；它作为 `<caller_note>` 传给专用模型。专用模型对某个范围调用失败时，这个范围不折叠（否则短回退摘要会顶替详细摘要，refold 时还会顶替旧块摘要），同一次调用里成功的范围照常折叠；全部失败时工具报错，计入重试上限。只有模型解析不到、或宿主没有 `complete()` 这类配置问题，才用回退摘要折叠并警告。
+- 折叠结果记在 compress toolResult 的 `details.acpFolded`（不发给模型）；sidecar 丢失后从会话日志重建时优先用它（`src/state-rebuild.ts`）。外壳 `wrapCompress` 只改写 `content`，`details` 原样透传。
 - 专用模型输出再走一遍 `sanitizeSummary`；`signal` 透传，abort 时停止剩余 range。
 - 注册表模型模式：Nudge 里的 `howToCompressRules` 换成只讲选范围和回退摘要的短版本（`src/index.ts` 的 `nudgePrompts`）；`session` 模式保留完整规则，因为它的摘要调用复用主会话前缀。
 - `extractRangeContent` 把范围内活动块渲染为 `[earlier summary bN]` 摘要，不再重发原始消息。原先重新压缩一个覆盖旧块的大范围时，送去的原文可达百万字符，再被 120K 字符的首尾截断丢掉大部分；早期决策因此在一次次重写中丢失。截断改为按专用模型的 `contextWindow` 计算（`fitToModel`）。
 - 专用模型的系统提示末尾加了 CARRY FORWARD 规则，要求原样继承旧摘要里的决策、数值和未完成目标。
-- 旧块摘要保护：`extractRangeContent` 读的是内核 prune 后的 `turn.messages`，旧块以 `acp_summary_<blockId>` 合成消息出现，现在映射回块，渲染为 pinned 的 `[earlier summary bN]`。`fitToModel` 从不截断摘要：给原文留的空间不足 1000 字符时丢掉原文；摘要本身超过输入预算时抛错，这个范围不调专用模型（记 `compression-model-failed`），保留回退摘要。未知窗口的模型预算是 120K 字符，单块摘要上限 20K，所以一个范围覆盖 6 个以上大块时可能走到这条路。
-- `summarizeWithModel` 拒收 `stopReason: "length"`（输出到 `maxTokens` 被截断），保留回退摘要。上限是 `summaryMaxChars`（默认 20000）/3 tokens。
+- 旧块摘要保护：`extractRangeContent` 读的是内核 prune 后的 `turn.messages`，旧块以 `acp_summary_<blockId>` 合成消息出现，现在映射回块，渲染为 pinned 的 `[earlier summary bN]`。`fitToModel` 从不截断摘要：给原文留的空间不足 1000 字符时丢掉原文；摘要本身超过输入预算时抛错，这个范围不调专用模型（记 `compression-model-failed`），也不折叠。未知窗口的模型预算是 120K 字符，单块摘要上限 20K，所以一个范围覆盖 6 个以上大块时可能走到这条路。
+- `summarizeWithModel` 拒收 `stopReason: "length"`（输出到 `maxTokens` 被截断），这个范围不折叠。上限是 `summaryMaxChars`（默认 20000）/3 tokens。
 - 测试：`tests/compress-model.test.ts`（假 registry）、`tests/dedicated-nudge.test.ts`。
 
 ### 摘要对主模型可见
@@ -46,6 +47,11 @@
 ### 测试隔离
 
 `npm test` 预加载 `tests/support/isolate-env.ts`，把 `HOME`、`USERPROFILE`、`ACP_LOG_FILE` 指向临时目录，跑完删除。上游原本没有隔离，大部分测试会写进真实的 `~/.pi/acp.log`。`tests/e2e-compress-config.test.ts` 的 `withConfigDir` 同时改 `HOME` 和 `USERPROFILE`（Windows 上 `os.homedir()` 读后者）。symlink 逃逸用例的目标改为临时目录所在盘的根目录，不再依赖 `HOME`。
+
+### 状态持久化与分支
+- sidecar 写入按文件串行，每次写用独立临时文件名（`src/state.ts`），写入内容在调用时就快照，文件反映调用顺序。`acquireLock` 释放时只在队尾仍是自己时才清槽位（`src/runtime.ts`）。compress、decompress、`acp_rule` 在读-改-存期间持有会话锁。
+- 分支守卫（`src/branch-guard.ts`）：内核 `syncBlocks` 只要块覆盖的消息有一条在视图里就激活该块。`/tree` 回到块范围中间时，摘要会顶替仍在视图里的消息，泄漏该分支还没发生的内容。`runtime.stateFor`（仅 Pi 宿主）用 `sessionManager.getEntries()` 找出“部分消息在视图、部分消息是持久化但不在当前分支”的块，`withBranchGuard` 包装的 `processTurn` 本轮把它们当作 expanded 处理（原文显示），并在结果里恢复原 `expanded`，不写入 sidecar。不在会话文件里的缺失 id 维持内核原行为。
+- 按消息 ref 自动解压到文件时，文件名用 `messageFileStem`：安全 ref 原样，含 `|` 等字符的原始 entry ref 改成净化前缀加短哈希。
 
 ### 移除子代理（Delegation）
 

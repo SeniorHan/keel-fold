@@ -10960,6 +10960,8 @@ function cacheKey(sessionFile, sessionId) {
 }
 var SessionStateStore = class {
   cache = /* @__PURE__ */ new Map();
+  writes = /* @__PURE__ */ new Map();
+  tmpSeq = 0;
   async load(sessionFile, sessionId) {
     const file = stateFileFor(sessionFile);
     const key = cacheKey(sessionFile, sessionId);
@@ -11016,23 +11018,34 @@ var SessionStateStore = class {
     this.cache.set(key, { state, liveRefOrigins, derivedFrom, activePack });
     if (!file) return;
     const dir = path7.dirname(file);
-    await fs4.mkdir(dir, { recursive: true }).catch((e) => {
-      logError("state", { event: "save-mkdir-failed", dir, error: e instanceof Error ? e.message : String(e) });
+    const payload = {
+      ...state,
+      liveRefOrigins,
+      schemaVersion: SIDECAR_SCHEMA_VERSION,
+      producer: sidecarProducer()
+    };
+    if (derivedFrom) payload.derivedFrom = derivedFrom;
+    if (activePack) payload.activePack = activePack;
+    const body = JSON.stringify(payload);
+    const prevWrite = this.writes.get(file) ?? Promise.resolve();
+    const write = prevWrite.then(async () => {
+      await fs4.mkdir(dir, { recursive: true }).catch((e) => {
+        logError("state", { event: "save-mkdir-failed", dir, error: e instanceof Error ? e.message : String(e) });
+      });
+      const tmp = path7.join(dir, `.acp-tmp-${path7.basename(file)}.${process.pid}.${++this.tmpSeq}`);
+      try {
+        await fs4.writeFile(tmp, body, "utf8");
+        await fs4.rename(tmp, file);
+      } catch (e) {
+        logError("state", { event: "save-failed", file, error: e instanceof Error ? e.message : String(e) });
+        await fs4.rm(tmp, { force: true }).catch(() => void 0);
+      }
     });
-    const tmp = path7.join(dir, `.acp-tmp-${path7.basename(file)}`);
+    this.writes.set(file, write);
     try {
-      const payload = {
-        ...state,
-        liveRefOrigins,
-        schemaVersion: SIDECAR_SCHEMA_VERSION,
-        producer: sidecarProducer()
-      };
-      if (derivedFrom) payload.derivedFrom = derivedFrom;
-      if (activePack) payload.activePack = activePack;
-      await fs4.writeFile(tmp, JSON.stringify(payload), "utf8");
-      await fs4.rename(tmp, file);
-    } catch (e) {
-      logError("state", { event: "save-failed", file, error: e instanceof Error ? e.message : String(e) });
+      await write;
+    } finally {
+      if (this.writes.get(file) === write) this.writes.delete(file);
     }
   }
   getLiveRefOrigins(sessionFile, sessionId) {
@@ -11215,13 +11228,18 @@ function hasCompressHistory(entries) {
   }
   return false;
 }
-function parseCompressCall(toolCallId, arguments_, entryIndex) {
-  const args = arguments_;
-  if (!args || !Array.isArray(args.content) || args.content.length === 0) return null;
+function foldedFromDetails(details) {
+  const folded = details?.acpFolded;
+  if (!folded || folded.version !== 1 || !Array.isArray(folded.ranges) || folded.ranges.length === 0) return null;
+  return folded.ranges;
+}
+function parseCompressCall(toolCallId, arguments_, entryIndex, folded = null) {
+  const args = arguments_ ?? {};
+  if (!folded && (!Array.isArray(args.content) || args.content.length === 0)) return null;
   const topLevelTopic = typeof args.topic === "string" ? args.topic : void 0;
   const summaryMaxChars = typeof args.summaryMaxChars === "number" ? args.summaryMaxChars : void 0;
   const ranges = [];
-  for (const r of args.content) {
+  for (const r of folded ?? args.content) {
     const item = r;
     if (typeof item.startId !== "string" || typeof item.endId !== "string" || typeof item.summary !== "string") return null;
     ranges.push({
@@ -11238,11 +11256,16 @@ function rebuildStateFromLog(input) {
   const { entries, core } = input;
   const errored = /* @__PURE__ */ new Set();
   const succeeded = /* @__PURE__ */ new Set();
+  const folded = /* @__PURE__ */ new Map();
   for (const entry of entries) {
     const m2 = entryMessage(entry);
     if (!m2 || m2.role !== "toolResult" || m2.toolName !== "compress" || !m2.toolCallId) continue;
     if (m2.isError === true) errored.add(m2.toolCallId);
-    else succeeded.add(m2.toolCallId);
+    else {
+      succeeded.add(m2.toolCallId);
+      const recorded = foldedFromDetails(m2.details);
+      if (recorded) folded.set(m2.toolCallId, recorded);
+    }
   }
   const calls = [];
   entries.forEach((entry, entryIndex) => {
@@ -11250,7 +11273,7 @@ function rebuildStateFromLog(input) {
     if (!m2 || m2.role !== "assistant") return;
     for (const call of toolCallsOf(m2)) {
       if (call.name !== "compress" || !call.id || !succeeded.has(call.id)) continue;
-      const parsed = parseCompressCall(call.id, call.arguments, entryIndex);
+      const parsed = parseCompressCall(call.id, call.arguments, entryIndex, folded.get(call.id) ?? null);
       if (parsed) calls.push(parsed);
       else logWarn("state-rebuild", { event: "unparseable-compress-call", toolCallId: call.id });
     }
@@ -11794,6 +11817,71 @@ function lastTurnBoundaryIndex(entries, policy) {
   return -1;
 }
 
+// src/branch-guard.ts
+var marks = /* @__PURE__ */ new WeakMap();
+function baseIdOf2(id) {
+  const hash = id.indexOf("#");
+  return hash > 0 ? id.substring(0, hash) : id;
+}
+function findOffBranchBlocks(state, messages, persistedIds) {
+  const present = /* @__PURE__ */ new Set();
+  for (const m2 of messages) if (typeof m2.id === "string") present.add(baseIdOf2(m2.id));
+  const off = [];
+  for (const block of state.blocks) {
+    if (block.expanded) continue;
+    let inView = false;
+    let elsewhere = false;
+    for (const id of block.effectiveMessageIds) {
+      const base = baseIdOf2(id);
+      if (present.has(base)) inView = true;
+      else if (persistedIds.has(base)) elsewhere = true;
+      if (inView && elsewhere) break;
+    }
+    if (inView && elsewhere) off.push(block.blockId);
+  }
+  return off;
+}
+function markOffBranchBlocks(state, blockIds) {
+  if (blockIds.length > 0) marks.set(state, new Set(blockIds));
+  else marks.delete(state);
+}
+function withBranchGuard(core) {
+  return {
+    ...core,
+    processTurn(input) {
+      const off = marks.get(input.state);
+      if (!off || off.size === 0) return core.processTurn(input);
+      const originalExpanded = /* @__PURE__ */ new Map();
+      const masked = {
+        ...input.state,
+        blocks: input.state.blocks.map((b2) => {
+          if (!off.has(b2.blockId)) return b2;
+          originalExpanded.set(b2.blockId, b2.expanded);
+          return { ...b2, expanded: true };
+        })
+      };
+      const out = core.processTurn({ ...input, state: masked });
+      const restored = {
+        ...out.state,
+        blocks: out.state.blocks.map((b2) => {
+          if (!originalExpanded.has(b2.blockId)) return b2;
+          const { expanded: _masked, ...rest } = b2;
+          const orig = originalExpanded.get(b2.blockId);
+          return orig === void 0 ? rest : { ...rest, expanded: orig };
+        })
+      };
+      marks.set(restored, off);
+      return { ...out, state: restored };
+    },
+    applyCompression(input) {
+      const out = core.applyCompression(input);
+      const off = marks.get(input.state);
+      if (off) marks.set(out.state, off);
+      return out;
+    }
+  };
+}
+
 // src/runtime.ts
 function readContextEntries(sm) {
   const source = sm;
@@ -11921,11 +12009,11 @@ function pruneOrphanRefs(state, messages) {
 }
 var MAX_COMPRESS_ATTEMPTS = 3;
 function createRuntime(adapter) {
-  const core = createCore({
+  const core = withBranchGuard(createCore({
     // CJK-aware base counter (kernel default); the meter's real-scale floor
     // (src/index.ts) covers provider-anchored calibration.
     countTokens: defaultCountTokens
-  });
+  }));
   const store = new SessionStateStore();
   const locks = /* @__PURE__ */ new Map();
   const factoryAdapter = adapter;
@@ -12155,16 +12243,20 @@ function createRuntime(adapter) {
   }
   async function acquireLock(sid) {
     const prev = locks.get(sid) ?? Promise.resolve();
-    let release;
+    let resolveNext;
     const next = new Promise((resolve4) => {
-      release = () => {
-        locks.delete(sid);
-        resolve4();
-      };
+      resolveNext = resolve4;
     });
-    locks.set(sid, prev.then(() => next));
+    const tail = prev.then(() => next);
+    locks.set(sid, tail);
     await prev;
-    return release;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      if (locks.get(sid) === tail) locks.delete(sid);
+      resolveNext();
+    };
   }
   function liveContextLimit(ctx) {
     const usage = ctx.getContextUsage?.();
@@ -12258,7 +12350,19 @@ function createRuntime(adapter) {
     }
     const coreMessages = projection.project(entries);
     if (live === void 0) pruneOrphanRefs(state, coreMessages);
+    if (piHost) guardBranch(sm, sessionId, state, coreMessages);
     return { state, coreMessages, entries };
+  }
+  const offBranchLogged = /* @__PURE__ */ new Map();
+  function guardBranch(sm, sessionId, state, coreMessages) {
+    const all = sm.getEntries?.();
+    const off = all && state.blocks.length > 0 ? findOffBranchBlocks(state, coreMessages, new Set(all.map((e) => e.id))) : [];
+    markOffBranchBlocks(state, off);
+    const signature = off.join(",");
+    if ((offBranchLogged.get(sessionId) ?? "") !== signature) {
+      offBranchLogged.set(sessionId, signature);
+      logInfo("state", { sid: sessionId, event: "off-branch-blocks", blocks: off });
+    }
   }
   async function save(state, ctx) {
     const sm = ctx.sessionManager;
@@ -16972,13 +17076,19 @@ function makeCompressTool(runtime, overrides, pi) {
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       if (runtime.refused) return { details: void 0, content: [{ type: "text", text: runtime.refusalMessage ?? UNSUPPORTED_HOST_MESSAGE }] };
       let result;
+      const details = {};
       try {
-        result = await handleCompress(params, runtime, ctx, toolCallId, signal, collectActiveTools(pi));
+        const release = await runtime.acquireLock(ctx.sessionManager.getSessionId());
+        try {
+          result = await handleCompress(params, runtime, ctx, toolCallId, signal, collectActiveTools(pi), details);
+        } finally {
+          release();
+        }
       } catch (e) {
         logThrow("compress", e, { sid: ctx.sessionManager.getSessionId(), ranges: typeof params.content === "string" ? "string" : params.content?.length ?? 0 });
         throw e;
       }
-      return { details: void 0, content: [{ type: "text", text: result }] };
+      return { details: details.acpFolded ? details : void 0, content: [{ type: "text", text: result }] };
     }
   }, overrides);
   const configuredDescription = overrides?.description;
@@ -17265,7 +17375,7 @@ function tierReadyHint(state, config) {
   }
   return "";
 }
-async function handleCompress(args, runtime, ctx, toolCallId, signal, tools = []) {
+async function handleCompress(args, runtime, ctx, toolCallId, signal, tools = [], detailsOut) {
   assertNotAborted(signal);
   const maybeRanges = normalizeRanges(args);
   if (typeof maybeRanges === "string") throw new Error(maybeRanges);
@@ -17313,9 +17423,15 @@ async function handleCompress(args, runtime, ctx, toolCallId, signal, tools = []
   const beforeTokens = estimateTokens(messages, collectCoveredMessageIds(state), imageTokens);
   const summaryMaxChars = args.summaryMaxChars;
   const topLevelTopic = args.topic;
-  const dedicated = allDead ? { ranges: sanitizedRanges, note: null, warn: false } : await writeDedicatedSummaries({ ranges: sanitizedRanges, runtime, ctx, messages, state, config, tools, summaryMaxChars, topLevelTopic, signal });
+  const dedicated = allDead ? { ranges: sanitizedRanges, note: null, warn: false, failed: [] } : await writeDedicatedSummaries({ ranges: sanitizedRanges, runtime, ctx, messages, state, config, tools, summaryMaxChars, topLevelTopic, signal });
   assertNotAborted(signal);
-  const finalRanges = dedicated.ranges.map((r) => {
+  const failedIdx = new Set(dedicated.failed.map((f) => f.index));
+  if (failedIdx.size > 0 && failedIdx.size === dedicated.ranges.length) {
+    throw new Error(
+      `Summary model ${dedicated.modelLabel ?? "?"} failed for every range (${dedicated.failed.map((f) => `${f.span}: ${f.error}`).join("; ")}). Nothing was compressed \u2014 folding with your short fallback would replace the detailed summary. Retry later; if it keeps failing, the user can run /acp compact reset so the main model writes summaries.`
+    );
+  }
+  const finalRanges = dedicated.ranges.filter((_2, i) => !failedIdx.has(i)).map((r) => {
     const s = sanitizeSummary(r.summary);
     return s.text === r.summary ? r : { ...r, summary: s.text };
   });
@@ -17353,6 +17469,15 @@ async function handleCompress(args, runtime, ctx, toolCallId, signal, tools = []
   }
   await runtime.save(applied.state, ctx);
   const { blocksCreated, tokensCompressed, errors, warnings } = applied.result;
+  const foldedRanges = finalRanges.filter(
+    (r) => applied.state.blocks.some((b2) => !beforeRunIds.has(b2.blockId) && b2.startRef === r.startId && b2.endRef === r.endId)
+  );
+  if (detailsOut && foldedRanges.length > 0 && dedicated.modelLabel !== void 0) {
+    detailsOut.acpFolded = {
+      version: 1,
+      ranges: foldedRanges.map((r) => ({ startId: r.startId, endId: r.endId, summary: r.summary, ...r.topic ?? topLevelTopic ? { topic: r.topic ?? topLevelTopic } : {} }))
+    };
+  }
   if (blocksCreated > 0) {
     runtime.clearDeadCompress(sid);
   } else if (allDead) {
@@ -17433,14 +17558,14 @@ async function handleCompress(args, runtime, ctx, toolCallId, signal, tools = []
 async function writeDedicatedSummaries(input) {
   const ref = input.runtime.getCompressionModelRef();
   const ranges = input.ranges.map((range) => ({ ...range }));
-  if (!ref) return { ranges, note: null, warn: false };
+  if (!ref) return { ranges, note: null, warn: false, failed: [] };
   const sid = input.ctx.sessionManager.getSessionId();
   const maxTokens = Math.max(256, Math.ceil((input.summaryMaxChars ?? 2e4) / 3));
   const isSession = ref === SESSION_MODEL_REF;
   let model;
   if (isSession) {
     model = input.ctx.model;
-    if (!model) return { ranges, note: "session summary model unavailable; kept caller-provided fallback summaries", warn: true };
+    if (!model) return { ranges, note: "session summary model unavailable; kept caller-provided fallback summaries", warn: true, failed: [] };
   } else {
     let resolved;
     try {
@@ -17450,9 +17575,12 @@ async function writeDedicatedSummaries(input) {
     }
     if (!resolved?.model) {
       if (resolved) logWarn("compress", { sid, event: "compression-model-unresolved", ref, ambiguous: resolved.ambiguous.length });
-      return { ranges, note: `summary model ${ref} is not resolvable; kept caller-provided fallback summaries`, warn: true };
+      return { ranges, note: `summary model ${ref} is not resolvable; kept caller-provided fallback summaries`, warn: true, failed: [] };
     }
     model = resolved.model;
+  }
+  if (typeof input.ctx.modelRegistry.complete !== "function") {
+    return { ranges, note: "host model registry has no complete() (needs pi >= 1.x); kept caller-provided fallback summaries", warn: true, failed: [] };
   }
   let prefix = null;
   if (isSession) {
@@ -17468,6 +17596,7 @@ async function writeDedicatedSummaries(input) {
   const sessionSystemPrompt = isSession ? getSystemPromptText(input.ctx) : "";
   const planned = prefix ? /* @__PURE__ */ new Map() : plannedFolds(input, ranges);
   let used = 0;
+  const failed = [];
   for (const [index, range] of ranges.entries()) {
     if (input.signal?.aborted) break;
     const topic = range.topic ?? input.topLevelTopic;
@@ -17492,16 +17621,26 @@ ${fitToModel(extracted, model, maxTokens)}
       range.summary = await summarizeWithModel(input.ctx, model, context, maxTokens, input.signal);
       used += 1;
     } catch (e) {
-      logWarn("compress", { sid, event: "compression-model-failed", ref, error: e instanceof Error ? e.message : String(e) });
+      const error = e instanceof Error ? e.message : String(e);
+      logWarn("compress", { sid, event: "compression-model-failed", ref, span: `${range.startId}..${range.endId}`, error });
+      failed.push({ index, span: `${range.startId}..${range.endId}`, error });
     }
   }
   const label = `${model.provider}/${model.id}`;
-  const partial = used < ranges.length;
+  const fallbackKept = ranges.length - used - failed.length;
   const mode = isSession ? prefix ? ", shared prefix" : ", extracted content" : "";
+  const parts = [];
+  if (used > 0) parts.push(`summaries written by ${isSession ? "session model " : ""}${label} (${used}/${ranges.length}${mode})`);
+  if (failed.length > 0) {
+    parts.push(`NOT compressed \u2014 summary model ${label} failed for ${failed.map((f) => `${f.span} (${f.error})`).join(", ")}; retry ${failed.length === 1 ? "that range" : "those ranges"} later`);
+  }
+  if (fallbackKept > 0) parts.push(`caller fallbacks kept for ${fallbackKept} range(s) with no extractable content`);
   return {
     ranges,
-    note: used > 0 ? `summaries written by ${isSession ? "session model " : ""}${label} (${used}/${ranges.length}${mode})${partial ? "; caller fallbacks kept for failed ranges" : ""}` : `summary model ${label} produced no summaries; kept caller-provided fallback summaries`,
-    warn: partial
+    note: parts.length > 0 ? parts.join("; ") : null,
+    warn: failed.length > 0 || fallbackKept > 0,
+    failed,
+    modelLabel: label
   };
 }
 function buildRangeInstruction(range, topic, callerNote) {
@@ -17743,6 +17882,7 @@ import { writeFile, mkdir } from "fs/promises";
 import { existsSync as existsSync3, lstatSync, readlinkSync, realpathSync } from "fs";
 import { resolve as resolve2, relative, isAbsolute as isAbsolute2, join as join8, basename as basename3, dirname as dirname8 } from "path";
 import { tmpdir, homedir as homedir6 } from "os";
+import { createHash as createHash3 } from "crypto";
 var AUTO_DIR = join8(homedir6() || tmpdir(), ".cache", "pi", "acp-decompress");
 var PREVIEW_CHARS = 600;
 var MESSAGE_INLINE_THRESHOLD = 2e3;
@@ -17769,7 +17909,12 @@ function makeDecompressTool(runtime, overrides) {
       if (runtime.refused) return { details: void 0, content: [{ type: "text", text: runtime.refusalMessage ?? UNSUPPORTED_HOST_MESSAGE }] };
       let result;
       try {
-        result = await handleDecompress(params, runtime, ctx, signal);
+        const release = await runtime.acquireLock(ctx.sessionManager.getSessionId());
+        try {
+          result = await handleDecompress(params, runtime, ctx, signal);
+        } finally {
+          release();
+        }
       } catch (e) {
         logThrow("decompress", e, { sid: ctx.sessionManager.getSessionId(), blockId: params.blockId });
         throw e;
@@ -17825,6 +17970,11 @@ function resolveToFilePath(targetPath) {
     return { error: `Error: toFile path must be under ${tmpdir()}, ~/.cache/opencode, or ~/.cache/pi. Got: ${targetPath}` };
   }
   return checked;
+}
+function messageFileStem(ref) {
+  if (/^[A-Za-z0-9._-]{1,80}$/.test(ref)) return `msg-${ref}`;
+  const readable = ref.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 40);
+  return `msg-${readable}-${createHash3("sha256").update(ref).digest("hex").slice(0, 10)}`;
 }
 function autoFilePath(blockId) {
   return join8(AUTO_DIR, `${blockId}-${Date.now()}.txt`);
@@ -17919,7 +18069,7 @@ async function handleMessageRef(ref, ownerBlockId, args, ctx) {
 
 ${text}`;
   }
-  const targetPath = args.toFile ? resolveToFilePath(args.toFile) : autoFilePath(`msg-${ref}`);
+  const targetPath = args.toFile ? resolveToFilePath(args.toFile) : autoFilePath(messageFileStem(ref));
   if (typeof targetPath === "object" && "error" in targetPath) {
     logError("decompress", { sid: ctx.sessionManager.getSessionId(), event: "message-path-rejected", ref, toFile: args.toFile });
     return targetPath.error;
@@ -18462,7 +18612,13 @@ function makeRuleTool(runtime) {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (runtime.refused) return { details: void 0, content: [{ type: "text", text: runtime.refusalMessage ?? UNSUPPORTED_HOST_MESSAGE }] };
       try {
-        const text = await handleRule(params.rule, runtime, ctx);
+        const release = await runtime.acquireLock(ctx.sessionManager.getSessionId());
+        let text;
+        try {
+          text = await handleRule(params.rule, runtime, ctx);
+        } finally {
+          release();
+        }
         return { details: void 0, content: [{ type: "text", text }] };
       } catch (e) {
         logThrow("rule", e, { sid: ctx.sessionManager.getSessionId() });
@@ -19418,9 +19574,9 @@ function degenerationNotice(runs) {
 }
 
 // node_modules/acp-kernel/dist/wire/index.js
-import { createHash as createHash3 } from "crypto";
+import { createHash as createHash4 } from "crypto";
 function hashId(s) {
-  return createHash3("sha256").update(s, "utf8").digest("hex").slice(0, 16);
+  return createHash4("sha256").update(s, "utf8").digest("hex").slice(0, 16);
 }
 function createSubagentNamespaces() {
   const anchors = /* @__PURE__ */ new Map();
@@ -19600,7 +19756,7 @@ function applyStripImages(body, api, settings2) {
 }
 
 // src/tool-guardrails.ts
-import { createHash as createHash4 } from "crypto";
+import { createHash as createHash5 } from "crypto";
 function isBashToolResult(e) {
   return e.toolName === "bash";
 }
@@ -19701,7 +19857,7 @@ function canonicalStringify(value) {
 function repetitionFingerprint(toolName, input) {
   const payload = `${toolName}\0${canonicalStringify(input ?? {})}`;
   try {
-    return createHash4("sha1").update(payload).digest("hex");
+    return createHash5("sha1").update(payload).digest("hex");
   } catch {
     return `unhashable:${toolName}`;
   }
@@ -19814,13 +19970,13 @@ import { join as join10, dirname as dirname11 } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
 import { execFile } from "child_process";
 import { homedir as homedir8 } from "os";
-import { createHash as createHash5 } from "crypto";
+import { createHash as createHash6 } from "crypto";
 var PACKAGE_NAME = "billion-context-pi";
 var registryUrl = (tag) => `https://registry.npmjs.org/${PACKAGE_NAME}/${encodeURIComponent(tag)}`;
 var SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z-.]+)?$/;
 var CHECK_INTERVAL_MS = 3 * 60 * 1e3;
 function locationKey(location) {
-  return createHash5("sha256").update(location).digest("hex").slice(0, 12);
+  return createHash6("sha256").update(location).digest("hex").slice(0, 12);
 }
 var throttleFileFor = (extDir) => {
   if (process.env.ACP_UPDATE_THROTTLE_FILE) return process.env.ACP_UPDATE_THROTTLE_FILE;

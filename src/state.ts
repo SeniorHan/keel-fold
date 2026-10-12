@@ -60,6 +60,8 @@ function cacheKey(sessionFile: string | undefined, sessionId: string): string {
 
 export class SessionStateStore {
   private cache = new Map<string, StateCacheSlot>();
+  private writes = new Map<string, Promise<void>>();
+  private tmpSeq = 0;
 
   async load(sessionFile: string | undefined, sessionId: string): Promise<CompressionState> {
     const file = stateFileFor(sessionFile);
@@ -131,24 +133,40 @@ export class SessionStateStore {
     this.cache.set(key, { state, liveRefOrigins, derivedFrom, activePack });
     if (!file) return;
     const dir = path.dirname(file);
-    await fs.mkdir(dir, { recursive: true }).catch((e: unknown) => {
-      logError("state", { event: "save-mkdir-failed", dir, error: e instanceof Error ? e.message : String(e) });
+    // #368 contract headers last: state fields can never clobber them.
+    const payload: Record<string, unknown> = {
+      ...state,
+      liveRefOrigins,
+      schemaVersion: SIDECAR_SCHEMA_VERSION,
+      producer: sidecarProducer(),
+    };
+    if (derivedFrom) payload.derivedFrom = derivedFrom;
+    if (activePack) payload.activePack = activePack;
+    // Snapshot and enqueue before any await, so the file reflects call order
+    // rather than the order in which earlier awaits happened to resolve.
+    const body = JSON.stringify(payload);
+    // Lean: writes to one sidecar are serialized and each uses its own temp
+    // file. A shared `.acp-tmp-<name>` let two overlapping saves rename the
+    // same temp twice (ENOENT) or publish a half-written file.
+    const prevWrite = this.writes.get(file) ?? Promise.resolve();
+    const write = prevWrite.then(async () => {
+      await fs.mkdir(dir, { recursive: true }).catch((e: unknown) => {
+        logError("state", { event: "save-mkdir-failed", dir, error: e instanceof Error ? e.message : String(e) });
+      });
+      const tmp = path.join(dir, `.acp-tmp-${path.basename(file)}.${process.pid}.${++this.tmpSeq}`);
+      try {
+        await fs.writeFile(tmp, body, "utf8");
+        await fs.rename(tmp, file);
+      } catch (e) {
+        logError("state", { event: "save-failed", file, error: e instanceof Error ? e.message : String(e) });
+        await fs.rm(tmp, { force: true }).catch(() => undefined);
+      }
     });
-    const tmp = path.join(dir, `.acp-tmp-${path.basename(file)}`);
+    this.writes.set(file, write);
     try {
-      // #368 contract headers last: state fields can never clobber them.
-      const payload: Record<string, unknown> = {
-        ...state,
-        liveRefOrigins,
-        schemaVersion: SIDECAR_SCHEMA_VERSION,
-        producer: sidecarProducer(),
-      };
-      if (derivedFrom) payload.derivedFrom = derivedFrom;
-      if (activePack) payload.activePack = activePack;
-      await fs.writeFile(tmp, JSON.stringify(payload), "utf8");
-      await fs.rename(tmp, file);
-    } catch (e) {
-      logError("state", { event: "save-failed", file, error: e instanceof Error ? e.message : String(e) });
+      await write;
+    } finally {
+      if (this.writes.get(file) === write) this.writes.delete(file);
     }
   }
 

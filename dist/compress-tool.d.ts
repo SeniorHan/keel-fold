@@ -23,6 +23,22 @@ declare const CompressParams: Type.TObject<{
 type CompressArgs = Static<typeof CompressParams>;
 export declare function makeCompressTool(runtime: AcpRuntime, overrides?: ToolPromptOverrides, pi?: ExtensionAPI): ToolDefinition<typeof CompressParams>;
 type RangeEntry = Static<typeof RangeSpec>;
+/** Persisted in the compress toolResult's `details` (never sent to the model).
+ *  When a dedicated model writes summaries, the call's arguments hold only the
+ *  caller's short fallback, and failed ranges are not folded at all — so the
+ *  log alone cannot rebuild the blocks. `acpFolded` records exactly what was
+ *  folded; state-rebuild prefers it over the arguments. */
+export interface CompressResultDetails {
+    acpFolded?: {
+        version: 1;
+        ranges: Array<{
+            startId: string;
+            endId: string;
+            summary: string;
+            topic?: string;
+        }>;
+    };
+}
 export declare function normalizeRanges(args: CompressArgs): RangeEntry[] | string;
 export declare function tailRepair(s: string): string | undefined;
 export declare function arrayWrapRepair(s: string): string | undefined;

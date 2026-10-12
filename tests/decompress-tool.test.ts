@@ -368,3 +368,19 @@ test("decompress file modes add no re-fold hint and do not set restoredInline (#
 // (acp-kernel, follow-up to #398); re-add this e2e when the kernel fix lands:
 // compress(m00001..m00001) after an inline restore must succeed, keep blockId
 // b1, store the fresh summary and clear restoredInline.
+
+test("Lean: message auto-file stems are filesystem-safe and collision-free", async () => {
+  const { messageFileStem } = await import("../src/decompress-tool.js");
+  const { writeFile, rm, mkdtemp } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  assert.equal(messageFileStem("m00042"), "msg-m00042", "safe refs stay readable");
+  const a = messageFileStem("4d9e965e#toolu_01GX|fc_toolu_01GX");
+  const b = messageFileStem("4d9e965e#toolu_01GX|fc_toolu_01GY");
+  assert.match(a, /^msg-[A-Za-z0-9._-]+$/);
+  assert.notEqual(a, b);
+  // The name must actually be creatable here (Windows rejects `|`).
+  const dir = await mkdtemp(join(tmpdir(), "acp-stem-"));
+  await writeFile(join(dir, `${a}-1.txt`), "x");
+  await rm(dir, { recursive: true, force: true });
+});

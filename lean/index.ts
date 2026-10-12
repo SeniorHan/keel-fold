@@ -250,7 +250,10 @@ function wrapCompress(tool: CapturedTool): CapturedTool & { exposure: "model-onl
         ? (update: unknown) => onUpdate(rewriteModelFacingText(update) as any)
         : undefined;
       const result = await tool.execute(callId, params, signal, forwardUpdate, ctx);
-      return rewriteModelFacingText(result) as any;
+      // Rewrite only what the model reads; details (the recorded fold used to
+      // rebuild state) must stay verbatim.
+      const { details, ...modelFacing } = (result ?? {}) as unknown as { details?: unknown } & Record<string, unknown>;
+      return { ...(rewriteModelFacingText(modelFacing) as Record<string, unknown>), details } as any;
     },
   };
 }

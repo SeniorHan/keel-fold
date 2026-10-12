@@ -69,16 +69,28 @@ export function hasCompressHistory(entries: SessionEntry[]): boolean {
   return false;
 }
 
-function parseCompressCall(toolCallId: string, arguments_: unknown, entryIndex: number): CompressCall | null {
+/** Lean: the folded ranges a compress toolResult recorded in its details
+ *  (dedicated-model summaries, failed ranges already dropped), or null. */
+function foldedFromDetails(details: unknown): unknown[] | null {
+  const folded = (details as { acpFolded?: { version?: unknown; ranges?: unknown } } | null | undefined)?.acpFolded;
+  if (!folded || folded.version !== 1 || !Array.isArray(folded.ranges) || folded.ranges.length === 0) return null;
+  return folded.ranges;
+}
+
+function parseCompressCall(toolCallId: string, arguments_: unknown, entryIndex: number, folded: unknown[] | null = null): CompressCall | null {
   // Mirror handleCompress's arg surface: { content: [{startId, endId, summary,
   // topic?}], topic?, summaryMaxChars? }. Anything else is treated as
   // unparseable and skipped rather than replayed with guessed ranges.
-  const args = arguments_ as { content?: unknown; topic?: unknown; summaryMaxChars?: unknown } | null | undefined;
-  if (!args || !Array.isArray(args.content) || args.content.length === 0) return null;
+  const args = (arguments_ ?? {}) as { content?: unknown; topic?: unknown; summaryMaxChars?: unknown };
+  // Lean: a recorded fold does not depend on the argument shape (the tool
+  // also accepts `content` as a JSON string).
+  if (!folded && (!Array.isArray(args.content) || args.content.length === 0)) return null;
   const topLevelTopic = typeof args.topic === "string" ? args.topic : undefined;
   const summaryMaxChars = typeof args.summaryMaxChars === "number" ? args.summaryMaxChars : undefined;
   const ranges: CompressCall["ranges"] = [];
-  for (const r of args.content) {
+  // Lean: the recorded fold (what was actually applied) beats the arguments,
+  // which carry only the caller's fallback when a dedicated model wrote.
+  for (const r of folded ?? (args.content as unknown[])) {
     const item = r as { startId?: unknown; endId?: unknown; summary?: unknown; topic?: unknown };
     if (typeof item.startId !== "string" || typeof item.endId !== "string" || typeof item.summary !== "string") return null;
     ranges.push({
@@ -109,11 +121,16 @@ export function rebuildStateFromLog(input: {
   const { entries, core } = input;
   const errored = new Set<string>();
   const succeeded = new Set<string>();
+  const folded = new Map<string, unknown[]>();
   for (const entry of entries) {
     const m = entryMessage(entry);
     if (!m || m.role !== "toolResult" || m.toolName !== "compress" || !m.toolCallId) continue;
     if (m.isError === true) errored.add(m.toolCallId);
-    else succeeded.add(m.toolCallId);
+    else {
+      succeeded.add(m.toolCallId);
+      const recorded = foldedFromDetails((m as { details?: unknown }).details);
+      if (recorded) folded.set(m.toolCallId, recorded);
+    }
   }
 
   const calls: CompressCall[] = [];
@@ -122,7 +139,7 @@ export function rebuildStateFromLog(input: {
     if (!m || m.role !== "assistant") return;
     for (const call of toolCallsOf(m as unknown as { content?: unknown })) {
       if (call.name !== "compress" || !call.id || !succeeded.has(call.id)) continue;
-      const parsed = parseCompressCall(call.id, call.arguments, entryIndex);
+      const parsed = parseCompressCall(call.id, call.arguments, entryIndex, folded.get(call.id) ?? null);
       if (parsed) calls.push(parsed);
       else logWarn("state-rebuild", { event: "unparseable-compress-call", toolCallId: call.id });
     }
