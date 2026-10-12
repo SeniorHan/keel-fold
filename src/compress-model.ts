@@ -65,6 +65,10 @@ export async function summarizeWithModel(
   if (msg.stopReason === "error" || msg.stopReason === "aborted") {
     throw new Error(msg.errorMessage ?? `compression model stopped: ${msg.stopReason}`);
   }
+  // Hit maxTokens: the summary is cut off mid-text; keep the fallback instead.
+  if (msg.stopReason === "length") {
+    throw new Error(`compression model hit its output limit (${maxTokens} tokens); summary incomplete`);
+  }
   const text = msg.content
     .filter((c): c is { type: "text"; text: string } => c.type === "text")
     .map((c) => c.text)
@@ -136,7 +140,14 @@ export function fitToModel(parts: ContentPart[], model: { contextWindow?: number
   if (all.length <= maxChars) return all;
   const pinned = parts.filter((p) => p.pinned).map((p) => p.text).join(sep);
   const raw = parts.filter((p) => !p.pinned).map((p) => p.text).join(sep);
+  if (!pinned || !raw) return truncateContent(all, maxChars);
+  // Earlier summaries outrank raw messages: with too little room left for raw
+  // text, drop it rather than cut into the summaries.
+  if (pinned.length > maxChars) return truncateContent(pinned, maxChars);
   const rawBudget = maxChars - pinned.length - sep.length;
-  if (!pinned || !raw || rawBudget < 1000) return truncateContent(all, maxChars);
+  if (rawBudget < 1000) {
+    const omitted = `${sep}[... ${raw.length} chars of unsummarized messages omitted ...]`;
+    return pinned.length + omitted.length <= maxChars ? pinned + omitted : pinned;
+  }
   return `${pinned}${sep}${truncateContent(raw, rawBudget)}`;
 }

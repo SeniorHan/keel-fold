@@ -162,6 +162,7 @@ export function applyUserConfig(adapter: AdapterConfig, user: UserAcpConfig): Ad
     ...user,
     coreOverrides: adapter.coreOverrides,
     preserveRecentMessages: adapter.preserveRecentMessages,
+    externalSystemPrompt: adapter.externalSystemPrompt,
   };
   for (const key of ["protectedTools", "protectedLatestTools"] as const) {
     if (!(key in user)) continue;

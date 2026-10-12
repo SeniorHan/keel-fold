@@ -934,6 +934,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
 }
 
 let lastPackPromptGateKeys: string | null = null;
+let lastIgnoredPromptKeys = "";
 
 function wireSystemPrompt(pi: ExtensionAPI, runtime: AcpRuntime): void {
   pi.on("before_agent_start", (event, ctx) => {
@@ -964,6 +965,21 @@ function wireSystemPrompt(pi: ExtensionAPI, runtime: AcpRuntime): void {
         logWarn("config", { event: "pack-prompts-gated", keys, error: e instanceof Error ? e.message : String(e) });
       }
       runtime.setPrompts(defaultPrompts);
+    }
+    if (runtime.adapter.externalSystemPrompt) {
+      const ignored = [
+        // Only keys the user wrote: built-in packs (lean) ship promptSections
+        // of their own, and warning about those would fire on every start.
+        ...Object.keys(runtime.adapter.promptSections ?? {}).map((k) => `promptSections.${k}`),
+        ...(runtime.adapter.delegatePrompt !== undefined ? ["delegatePrompt"] : []),
+      ].sort();
+      const key = ignored.join(",");
+      if (ignored.length > 0 && key !== lastIgnoredPromptKeys) {
+        const message = `ACP: ${ignored.join(", ")} ignored — this build replaces the ACP system prompt. Use prompts (with acknowledgePromptsRisk) to change compression rules.`;
+        logWarn("config", { event: "prompt-config-ignored", keys: key });
+        if (ctx?.hasUI) ctx.ui.notify(message, "warning");
+      }
+      lastIgnoredPromptKeys = key;
     }
     const delegate = resolveDelegate(runtime.adapter).enabled && !runtime.delegateStoodDown;
     const acp = buildAcpSystemPrompt(runtime.prompts, merged.promptSections);

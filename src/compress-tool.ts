@@ -837,10 +837,12 @@ function formatCoreMessage(message: CoreMessage): string {
 }
 
 /** Transcript of [startId, endId] as the main model sees it; null when the
- *  range cannot resolve. Messages already folded into an active block are
- *  rendered as that block's summary once — `messages` is the raw log, and
- *  re-folding a range over existing blocks (m00195..m01254 over b19+b20)
- *  would otherwise ship 1M+ raw chars that only survive head/tail truncation. */
+ *  range cannot resolve. Messages already folded into an active block (and
+ *  the kernel's `acp_summary_<blockId>` message standing in for them) are
+ *  rendered as that block's summary once, as a pinned part — re-folding a
+ *  range over existing blocks (m00195..m01254 over b19+b20) would otherwise
+ *  ship 1M+ raw chars, or leave earlier summaries exposed to head/tail
+ *  truncation. */
 function extractRangeContent(messages: CoreMessage[], state: CompressionState, startId: string, endId: string): ContentPart[] | null {
   try {
     const range = resolveBoundaries({ startRef: startId, endRef: endId, messages, state });
@@ -849,6 +851,9 @@ function extractRangeContent(messages: CoreMessage[], state: CompressionState, s
     for (const block of state.blocks) {
       if (!block.active) continue;
       for (const id of block.effectiveMessageIds) owner.set(id, block);
+      // `messages` is the kernel's pruned output: a folded block appears as
+      // its synthetic summary message, not as the messages it covers.
+      owner.set(`acp_summary_${block.blockId}`, block);
     }
     const emitted = new Set<string>();
     const parts: ContentPart[] = [];

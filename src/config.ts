@@ -377,6 +377,12 @@ export interface AdapterConfig {
    *  by `/acp compact`. */
   compressionModelId?: string;
   coreOverrides?: Partial<Config>;
+  /** Host-only (never read from acp.json): the embedding extension replaces
+   *  the ACP system prompt with its own text. The before_agent_start handler
+   *  still runs its side effects (pack stamp, summary rules), and config keys
+   *  that only shape the replaced prompt (promptSections, delegatePrompt) are
+   *  reported once as ignored instead of silently dropped. */
+  externalSystemPrompt?: boolean;
 }
 
 export const DEFAULT_TOOL_BASH_TIMEOUT = 60;

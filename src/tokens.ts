@@ -115,12 +115,14 @@ export interface SentViewMeterRecord {
   usable: boolean;
 }
 
-/** Block count plus each active block's id and coverage size: a decompress +
- *  compress pair or an absorb that keeps the active count still changes it. */
+/** Block count plus each active block's id, coverage size, run, tier and
+ *  summary length: a decompress + compress pair, an absorb that keeps the
+ *  active count, or an in-place refold (same id and coverage, rewritten
+ *  summary) still changes it. Length suffices — only the size is metered. */
 export function blockSignature(state: CompressionState): string {
   const active = state.blocks
     .filter((b) => b.active)
-    .map((b) => `${b.blockId}/${b.effectiveMessageIds.length}`)
+    .map((b) => `${b.blockId}/${b.effectiveMessageIds.length}/${b.runId}/${b.tier}/${b.summary.length}`)
     .join(",");
   return `${state.blocks.length}|${active}`;
 }

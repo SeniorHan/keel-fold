@@ -4,12 +4,12 @@ import { adoptedViewTokens, blockSignature, historyCanary, sentViewMeterMatches,
 import type { CompressionState, CoreMessage } from "acp-kernel";
 import { defaultConfig } from "acp-kernel";
 
-type B = { blockId: string; active: boolean; covered?: number };
+type B = { blockId: string; active: boolean; covered?: number; summary?: string; runId?: string };
 
 function stateOf(blocks: B[]): CompressionState {
-  // Minimal structural stand-in: the meter only reads blocks[].{active,blockId,effectiveMessageIds}.
+  // Minimal structural stand-in: the meter only reads blocks[].{active,blockId,effectiveMessageIds,runId,tier,summary}.
   return {
-    blocks: blocks.map((b) => ({ ...b, effectiveMessageIds: Array.from({ length: b.covered ?? 3 }, (_, i) => `m${i}`) })),
+    blocks: blocks.map((b) => ({ runId: "r1", tier: "T1", summary: "S", ...b, effectiveMessageIds: Array.from({ length: b.covered ?? 3 }, (_, i) => `m${i}`) })),
   } as unknown as CompressionState;
 }
 
@@ -65,4 +65,11 @@ test("appended history matches; rewound or switched history forces a resync", ()
   assert.equal(sentViewMeterMatches(meter({}), stateOf(base), config, 160_000, history.slice(0, 2)), false);
   // Branch switch: same length and more raw tokens, but a different tail.
   assert.equal(sentViewMeterMatches(meter({}), stateOf(base), config, 160_000, [msg("e1"), msg("e2"), msg("x3"), msg("x4")]), false);
+});
+
+test("an in-place refold (same id and coverage, rewritten summary) forces a resync", () => {
+  const refolded: B[] = [{ blockId: "b1", active: true, summary: "S".repeat(4000) }, { blockId: "b2", active: false }];
+  assert.equal(sentViewMeterMatches(meter({}), stateOf(refolded), config, 160_000, history), false);
+  const rerun: B[] = [{ blockId: "b1", active: true, runId: "r2" }, { blockId: "b2", active: false }];
+  assert.equal(sentViewMeterMatches(meter({}), stateOf(rerun), config, 160_000, history), false);
 });

@@ -112,7 +112,7 @@ after(async () => {
   await fs.rm(tmp, { recursive: true, force: true });
 });
 
-async function setup(name: string, registry: any, opts: { acpJson?: object; sessionModel?: any; notify?: (s: string) => void } = {}) {
+async function setup(name: string, registry: any, opts: { acpJson?: object; sessionModel?: any; notify?: (s: string) => void; entries?: any[] } = {}) {
   await fs.rm(acpJsonPath, { force: true });
   if (opts.acpJson) {
     await fs.mkdir(path.dirname(acpJsonPath), { recursive: true });
@@ -122,7 +122,7 @@ async function setup(name: string, registry: any, opts: { acpJson?: object; sess
   createAcpExtension({ autoUpdate: false })(api as any);
   const stateFile = path.join(tmp, `${name}.session.json`);
   await fs.rm(`${stateFile}.acp.json`, { force: true });
-  const ctx = fakeCtx(compressibleEntries(), stateFile, tmp, registry, opts.notify, opts.sessionModel);
+  const ctx = fakeCtx(opts.entries ?? compressibleEntries(), stateFile, tmp, registry, opts.notify, opts.sessionModel);
   for (const h of handlers.get("session_start") ?? []) await h({ type: "session_start" }, ctx);
   await handlers.get("context")![0]!({ type: "context", messages: [] }, ctx);
   const compress = api.tools.find((t: any) => t.name === "compress")!;
@@ -178,6 +178,24 @@ test("compress: refolding over an active block sends its summary, not the raw me
   assert.match(calls[1]!.context.systemPrompt, /CARRY FORWARD/);
 });
 
+test("compress: an earlier block in the middle of the range is sent as a pinned summary", async () => {
+  const calls: Call[] = [];
+  const registry = fakeRegistry([model("cheap", "summarizer")], textReply(DEDICATED), calls);
+  const { ctx, compress } = await setup("refold-mid", registry, {
+    acpJson: { compressionModelId: "cheap/summarizer" },
+    entries: [userMsg("e1", LONG), ...Array.from({ length: 10 }, (_, i) => userMsg(`e${i + 2}`, FILLER))],
+  });
+  const first = (await compress.execute("tc1", { content: [{ startId: "m00002", endId: "m00003", summary: FALLBACK }] }, undefined, undefined, ctx)).content?.[0]?.text;
+  assert.match(String(first), /blocks: b1=/, String(first));
+  const text = (await compress.execute("tc2", { content: [{ startId: "m00001", endId: "m00004", summary: FALLBACK }] }, undefined, undefined, ctx)).content?.[0]?.text;
+  assert.match(String(text), /summaries written by cheap\/summarizer \(1\/1\)/);
+  assert.equal(calls.length, 2);
+  const prompt = String(calls[1]!.context.messages[0]!.content);
+  assert.ok(prompt.includes("[earlier summary b1"), prompt.replace(/(lorem ipsum dolor sit amet )+/g, "<LOREM>").replace(/(filler text for padding purposes )+/g, "<FILLER>"));
+  assert.ok(!prompt.includes("[Compressed conversation section]"), "the kernel's summary message is not sent as raw text");
+  assert.equal(prompt.split("DEDICATED-SUMMARY").length - 1, 1, "the block summary is sent once");
+});
+
 test("fitToModel: fits the summary model window, falls back to 120K chars when unknown", () => {
   const text = "x".repeat(400_000); // ~100K tokens
   assert.equal(fitToModel([{ text }], { contextWindow: 400_000 }, 8000), text);
@@ -193,6 +211,13 @@ test("fitToModel: earlier block summaries survive truncation even mid-range", ()
   assert.ok(out.length <= 120_000, String(out.length));
   assert.ok(out.startsWith("[earlier summary b3]\nKEEP-SiUD412ED-0.5V"), "pinned summary is kept whole and first");
   assert.ok(out.includes("[... truncated ...]"));
+  // Pinned summaries that leave no room for raw text stay whole; raw is dropped.
+  const big = "[earlier summary b4]\n" + "S".repeat(119_500);
+  const tight = fitToModel([{ text: big, pinned: true }, { text: raw }], {}, 8000);
+  assert.ok(tight.startsWith(big) && tight.length <= 120_000, String(tight.length));
+  // Summaries alone over budget: cut, raw dropped.
+  const huge = fitToModel([{ text: "Z".repeat(130_000), pinned: true }, { text: raw }], {}, 8000);
+  assert.ok(huge.length <= 120_000 && !huge.includes("y"), String(huge.length));
 });
 
 test("compress: dedicated failure keeps the caller fallback summary", async () => {
@@ -211,6 +236,13 @@ test("compress: error stopReason and hosts without complete() fall back too", as
   const a = await setup("stop-error", errReg, { acpJson: { compressionModelId: "cheap/summarizer" } });
   await a.run(FALLBACK);
   assert.ok((await readBlockSummaries(a.stateFile)).includes(FALLBACK));
+
+  // Output cut at the token limit: a half-written summary must not replace the fallback.
+  const lenReg = fakeRegistry([model("cheap", "summarizer")], async () => ({ role: "assistant", content: [{ type: "text", text: "DEDICATED-SUMMARY: cut mid-sen" }], stopReason: "length" }), []);
+  const l = await setup("stop-length", lenReg, { acpJson: { compressionModelId: "cheap/summarizer" } });
+  await l.run(FALLBACK);
+  const lenSummaries = await readBlockSummaries(l.stateFile);
+  assert.ok(lenSummaries.includes(FALLBACK), JSON.stringify(lenSummaries));
 
   const oldHost = { getAll: () => [model("cheap", "summarizer")], find: () => model("cheap", "summarizer") };
   const b = await setup("no-complete", oldHost, { acpJson: { compressionModelId: "cheap/summarizer" } });

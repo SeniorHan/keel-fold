@@ -384,6 +384,32 @@ test("before_agent_start risk-gates pack prompts without acknowledgePromptsRisk"
   }
 });
 
+test("externalSystemPrompt: rules still applied, user prompt-only keys warned once, pack sections not", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "acp-external-prompt-"));
+  try {
+    const notes: string[] = [];
+    const ctx = { model: { provider: "openai", id: "gpt-x" }, cwd: dir, hasUI: true, ui: { notify: (m: string) => notes.push(m) } };
+    const lean = wireBeforeAgentStart({ externalSystemPrompt: true, compress: { promptPack: "lean" } } satisfies AdapterConfig);
+    lean({ systemPrompt: "" }, ctx);
+    assert.deepEqual(notes, [], "the built-in lean pack's own promptSections are not user config");
+
+    const adapter = {
+      externalSystemPrompt: true,
+      acknowledgePromptsRisk: true,
+      prompts: { compressPhilosophy: "USER PHILO RULE" },
+      promptSections: { howToCompress: "USER HOW" },
+    } satisfies AdapterConfig;
+    const beforeAgentStart = wireBeforeAgentStart(adapter);
+    const result = beforeAgentStart({ systemPrompt: "" }, ctx);
+    assert.ok(result.systemPrompt.includes("USER PHILO RULE"), "prompts still reach the rules the summary model uses");
+    beforeAgentStart({ systemPrompt: "" }, ctx);
+    assert.equal(notes.length, 1, notes.join("\n"));
+    assert.match(notes[0]!, /promptSections\.howToCompress ignored/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("dir source list() survives missing directory; builtin source lists default+lean", async () => {
   const missing = createDirPackSource("missing", path.join(tmpdir(), "acp-no-such-dir-xyz"));
   assert.deepEqual(missing.list(), []);
