@@ -28,6 +28,14 @@ test("estimateTokens skips compress tool calls", () => {
   assert.equal(estimateTokens(msgs), 8);
 });
 
+test("estimateTokens counts compress tool results (sent as plain text)", () => {
+  const msgs = [
+    { id: "m2", role: "assistant", contentType: "tool-call", toolName: "compress", text: "ignored payload here" },
+    { id: "m3", role: "tool", contentType: "tool-result", toolName: "compress", text: "alpha beta gamma" },
+  ];
+  assert.equal(estimateTokens(msgs as any), 4);
+});
+
 test("estimateTokens skips covered (already-compressed) message ids", () => {
   const msgs = [
     { id: "m1", role: "user", contentType: "text", text: "alpha beta gamma" },

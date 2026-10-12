@@ -1,5 +1,6 @@
 import type { SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import { logWarn } from "./log.js";
+import { thinkingTokenCount } from "./messages.js";
 
 type AgentMessage = SessionMessageEntry["message"];
 
@@ -159,4 +160,20 @@ export function dropCompressReasoning(messages: AgentMessage[], cfg?: CompressRe
   } catch {
     return messages;
   }
+}
+
+/** Lean2: thinking that stays on the wire for compress-call messages.
+ *  estimateTokens skips compress cores whole, and the projection hangs a
+ *  message's thinking on its FIRST tool-call core, so count thinking only for
+ *  messages whose first call is compress, after the same drop pass the
+ *  request applies (closed, oversized rounds lose it). */
+export function keptCompressThinkingTokens(messages: AgentMessage[], cfg?: CompressReasoningConfig): number {
+  let tokens = 0;
+  for (const msg of dropCompressReasoning(messages, cfg)) {
+    const m = msg as { role?: string; content?: unknown };
+    if (m.role !== "assistant" || !Array.isArray(m.content)) continue;
+    const first = m.content.find((p) => (p as { type?: string })?.type === "toolCall") as { name?: string } | undefined;
+    if (first?.name === "compress") tokens += thinkingTokenCount(m.content);
+  }
+  return tokens;
 }

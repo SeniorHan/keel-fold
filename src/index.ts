@@ -23,11 +23,11 @@ import { makeDelegateTool, makeDelegateWaitTool, makeDelegateCancelTool, running
 import { makeCommands } from "./commands.js";
 import { mergeSurface, readToolSurfaceWithPacks, resolveActivePack, resolvePackName, surfaceMetaOf } from "./prompt-pack.js";
 import type { NudgeSectionsConfig } from "./surface.js";
-import { coreOutToAgentMessages, extractText, ACP_NUDGE_CUSTOM_TYPE, type AcpNudgeRecord } from "./messages.js";
+import { coreOutToAgentMessages, extractText, protectLatestUserMessage, ACP_NUDGE_CUSTOM_TYPE, type AcpNudgeRecord } from "./messages.js";
 import { liveOnlyTailCached, dropLiveOnlyTailCache } from "./live-only-tail.js";
 import { carryHostSystemMessages } from "./system-passthrough.js";
 import { sanitizeToolPairing } from "./tool-pair-sanitizer.js";
-import { countThinkingChars, dropCompressReasoning } from "./reasoning-drop.js";
+import { countThinkingChars, dropCompressReasoning, keptCompressThinkingTokens } from "./reasoning-drop.js";
 import { collapseAssistantDegeneration, degenerationNotice, lastAssistantRuns, resolveDegenerationGuard } from "./degeneration.js";
 import { buildAcpSystemPrompt, ACP_DELEGATE_PROMPT } from "./system-prompt.js";
 import { delegateStatusWidget } from "./fleet-widget.js";
@@ -35,7 +35,7 @@ import { openFleetInspector } from "./fleet-inspector.js";
 import { applyStripImages } from "./strip-images.js";
 import { wireToolGuardrails } from "./tool-guardrails.js";
 import { debug, logError, logInfo, logWarn, logThrow, closeLogStream } from "./log.js";
-import { collectCoveredMessageIds, estimateTokens, collectImageTokens, modelSupportsImages, sentViewTokenCount, sentViewMeterMatches } from "./tokens.js";
+import { collectCoveredMessageIds, estimateTokens, collectImageTokens, modelSupportsImages, sentViewTokenCount, sentViewMeterMatches, adoptedViewTokens, blockSignature, historyCanary } from "./tokens.js";
 import { lastTurnBoundaryId, lastTurnBoundaryIndex } from "./turn-boundary.js";
 import { compressionAnchorStaleness } from "./floor-stale.js";
 import { checkForUpdate } from "./update.js";
@@ -67,6 +67,9 @@ export { deriveChildState } from "./state.js";
 type AgentMessage = SessionMessageEntry["message"];
 
 declare const CURRENT_VERSION: string;
+
+// Lean2: sessions already warned that their latest user message overflows.
+const latestUserOverLimit = new Set<string>();
 
 export function createAcpExtension(adapter: AdapterConfig = {}): ExtensionFactory {
   return (pi: ExtensionAPI) => {
@@ -460,7 +463,15 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
       const systemPromptText = getSystemPromptText(ctx);
       const systemPromptTokens = systemPromptText ? defaultCountTokens(systemPromptText) : 0;
       const imageTokens = collectImageTokens(entries, modelSupportsImages(ctx.model));
-      const sentTokens = estimateTokens(coreMessages, coveredIds, imageTokens) + systemPromptTokens;
+      // Lean2: compress cores are skipped by estimateTokens, but their thinking
+      // that survives the request-time drop is still sent — meter it as fixed
+      // overhead alongside the system prompt.
+      const compressThinkingTokens = keptCompressThinkingTokens(
+        entries.flatMap((e) => (e.type === "message" ? [e.message] : [])),
+        runtime.reasoningDropFor(ctx),
+      );
+      const fixedTokens = systemPromptTokens + compressThinkingTokens;
+      const sentTokens = estimateTokens(coreMessages, coveredIds, imageTokens) + fixedTokens;
       // Self-heal (armed): after an overflow, force this turn's usage to >=95%
       // so the kernel's emergency nudge + tool-result truncate fire immediately,
       // even if the estimate under-reports the sent view. Consumed exactly once.
@@ -516,14 +527,15 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
       // truncation-band turn whose output under-reports.
       if (state.blocks.some((b) => b.active && b.effectiveMessageIds.length > 0)) {
         const meter = runtime.peekSentViewCount(sid);
-        if (meter && sentViewMeterMatches(meter, state, config)) {
-          if (Math.abs(meter.viewTokens - sentTokens) > Math.max(1000, 0.1 * sentTokens)) {
-            tokenCount = applyFloors(meter.viewTokens);
-            guardTokens = guardBasis(meter.viewTokens);
-            logInfo("turn", { sid, event: "view-recount", source: "prev-turn", prelim: sentTokens, viewTokens: meter.viewTokens, tokenCount });
+        if (meter && sentViewMeterMatches(meter, state, config, sentTokens, coreMessages)) {
+          const viewTokens = adoptedViewTokens(meter, sentTokens);
+          if (Math.abs(viewTokens - sentTokens) > Math.max(1000, 0.1 * sentTokens)) {
+            tokenCount = applyFloors(viewTokens);
+            guardTokens = guardBasis(viewTokens);
+            logInfo("turn", { sid, event: "view-recount", source: "prev-turn", prelim: sentTokens, viewTokens, tokenCount });
           }
         } else {
-          const view = sentViewTokenCount(runtime.core, coreMessages, state, config, tokenCount, imageTokens, systemPromptTokens);
+          const view = sentViewTokenCount(runtime.core, coreMessages, state, config, tokenCount, imageTokens, fixedTokens);
           if (view.drifted) {
             tokenCount = applyFloors(view.viewTokens);
             guardTokens = guardBasis(view.viewTokens);
@@ -582,6 +594,20 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
 
       const turn = runtime.core.processTurn({ messages: coreMessages, state, config, tokenCount });
       await runtime.save(turn.state, ctx);
+      // Lean2: emergency truncation must not cut the latest user message,
+      // which compression already treats as protected.
+      const userGuard = protectLatestUserMessage(coreMessages, turn.messages, config, tokenCount);
+      if (userGuard.restoredId) {
+        turn.messages = userGuard.messages;
+        const overLimit = config.modelContextLimit > 0 && userGuard.remainingTokens > config.modelContextLimit;
+        logWarn("overflow", { sid, event: "latest-user-kept", id: userGuard.restoredId, remaining: userGuard.remainingTokens, limit: config.modelContextLimit });
+        if (overLimit && ctx.hasUI && !latestUserOverLimit.has(sid)) {
+          ctx.ui.notify("[ACP] ⚠️ 最近一条用户消息太大，不截断它就放不进上下文。请用原生压缩或新会话，或拆小这条消息。", "warning");
+        }
+        if (overLimit) latestUserOverLimit.add(sid); else latestUserOverLimit.delete(sid);
+      } else {
+        latestUserOverLimit.delete(sid);
+      }
 
       // Issue #561: measure the EXACT view that just went out (turn.messages is
       // the pruned, summary-injected projection the provider receives) and
@@ -590,9 +616,10 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
       // ran in the truncate band (output may be post-truncation → under-reports).
       const truncateBand = config.modelContextLimit > 0 ? Math.floor(config.truncate.threshold * config.modelContextLimit) : Number.MAX_SAFE_INTEGER;
       runtime.noteSentViewCount(sid, {
-        viewTokens: estimateTokens(turn.messages, collectCoveredMessageIds(turn.state), imageTokens) + systemPromptTokens,
-        blocksLen: turn.state.blocks.length,
-        activeBlocks: turn.state.blocks.filter((b) => b.active).length,
+        viewTokens: estimateTokens(turn.messages, collectCoveredMessageIds(turn.state), imageTokens) + fixedTokens,
+        rawTokens: estimateTokens(coreMessages, collectCoveredMessageIds(turn.state), imageTokens) + fixedTokens,
+        blockSig: blockSignature(turn.state),
+        history: historyCanary(coreMessages),
         limit: config.modelContextLimit,
         usable: tokenCount < truncateBand,
       });

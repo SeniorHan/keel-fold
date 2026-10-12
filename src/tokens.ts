@@ -37,7 +37,10 @@ export function collectImageTokens(entries: { id: string; type?: string; message
 export function estimateTokens(messages: CoreMessage[], coveredIds?: Set<string>, imageTokensById?: Map<string, number>): number {
   let tokens = 0;
   for (const m of messages) {
-    if (m.toolName === "compress") continue;
+    // Compress calls carry block summaries, which the view meters once via the
+    // kernel's summary messages, and their thinking is metered by the context
+    // hook (keptCompressThinkingTokens). Their results are plain sent text.
+    if (m.toolName === "compress" && m.contentType !== "tool-result") continue;
     if (coveredIds?.has(m.id)) continue;
     tokens += defaultCountTokens(m.text ?? "");
     tokens += m.thinkingTokens ?? 0;
@@ -99,30 +102,71 @@ export function adjustedTokenCount(
  *  turn. */
 export interface SentViewMeterRecord {
   viewTokens: number;
-  blocksLen: number;
-  activeBlocks: number;
+  /** The raw (pre-prune) estimate of the same turn, on the sentTokens scale.
+   *  Lean2: the next turn adds its raw growth since then to viewTokens. */
+  rawTokens: number;
+  /** blockSignature() of the state the view was measured on. */
+  blockSig: string;
+  /** historyCanary() of the projected messages the view was measured on. */
+  history: HistoryCanary;
   limit: number;
   /** False when the measured view may be dishonest (post-truncation output,
    *  or the record is absent) — callers must then run the full probe. */
   usable: boolean;
 }
 
+/** Block count plus each active block's id and coverage size: a decompress +
+ *  compress pair or an absorb that keeps the active count still changes it. */
+export function blockSignature(state: CompressionState): string {
+  const active = state.blocks
+    .filter((b) => b.active)
+    .map((b) => `${b.blockId}/${b.effectiveMessageIds.length}`)
+    .join(",");
+  return `${state.blocks.length}|${active}`;
+}
+
+export interface HistoryCanary {
+  count: number;
+  firstId: string | null;
+  lastId: string | null;
+}
+
+export function historyCanary(messages: CoreMessage[]): HistoryCanary {
+  return { count: messages.length, firstId: messages[0]?.id ?? null, lastId: messages[messages.length - 1]?.id ?? null };
+}
+
+/** True when `messages` extends the recorded history by appending only: the
+ *  recorded first and last ids sit at the same positions. A branch switch,
+ *  rewind or rewrite fails this even when the raw estimate does not shrink. */
+function extendsHistory(canary: HistoryCanary, messages: CoreMessage[]): boolean {
+  if (messages.length < canary.count) return false;
+  if (canary.count === 0) return true;
+  return messages[0]?.id === canary.firstId && messages[canary.count - 1]?.id === canary.lastId;
+}
+
 /** Signature check for adopting the previous turn's measured view (issue #561):
- *  the meter describes LAST turn's (state, config); it is only transferable
- *  when nothing structural moved — same window, same block count, same active
- *  count. Any compress/decompress/sync between turns changes one of these and
- *  forces the full probe path for a turn. Pure function, unit-testable. */
+ *  the meter describes LAST turn's (state, config, history); it is only
+ *  transferable when nothing structural moved — same window, same block
+ *  signature, history only appended to — and the raw estimate did not shrink.
+ *  Pure function, unit-testable. */
 export function sentViewMeterMatches(
   meter: SentViewMeterRecord | undefined,
   state: CompressionState,
   config: Config,
+  rawTokens: number,
+  messages: CoreMessage[],
 ): boolean {
   if (!meter || !meter.usable) return false;
   if (meter.limit !== config.modelContextLimit) return false;
-  if (meter.blocksLen !== state.blocks.length) return false;
-  let active = 0;
-  for (const b of state.blocks) if (b.active) active++;
-  return meter.activeBlocks === active;
+  if (rawTokens < meter.rawTokens) return false;
+  if (!extendsHistory(meter.history, messages)) return false;
+  return meter.blockSig === blockSignature(state);
+}
+
+/** Lean2: the previous view plus everything appended since. Adopting the bare
+ *  previous viewTokens dropped the new messages' growth from the meter. */
+export function adoptedViewTokens(meter: SentViewMeterRecord, rawTokens: number): number {
+  return meter.viewTokens + (rawTokens - meter.rawTokens);
 }
 
 

@@ -7,7 +7,7 @@ import { performance } from "node:perf_hooks";
 import { parseSessionEntries } from "@earendil-works/pi-coding-agent";
 import { createCore, defaultCountTokens, defaultConfig } from "acp-kernel";
 import { entriesToCoreMessages, EntryProjectionCache } from "../src/messages.js";
-import { estimateTokens, collectCoveredMessageIds, sentViewTokenCount, sentViewMeterMatches } from "../src/tokens.js";
+import { estimateTokens, collectCoveredMessageIds, sentViewTokenCount, sentViewMeterMatches, adoptedViewTokens, blockSignature, historyCanary } from "../src/tokens.js";
 
 const jsonl = process.argv[2];
 const sidecar = process.argv[3];
@@ -55,10 +55,11 @@ for (let i = 0; i < turns; i++) {
   let usedProbe = false;
   if (state.blocks.some((b) => b.active && b.effectiveMessageIds.length > 0)) {
     const meter = meterRecord;
-    if (meter && sentViewMeterMatches(meter, state, config)) {
-      if (Math.abs(meter.viewTokens - prelim) > Math.max(1000, 0.1 * prelim)) {
-        tokenCount = meter.viewTokens;
-        guardTokens = meter.viewTokens;
+    if (meter && sentViewMeterMatches(meter, state, config, prelim, cm)) {
+      const viewTokens = adoptedViewTokens(meter, prelim);
+      if (Math.abs(viewTokens - prelim) > Math.max(1000, 0.1 * prelim)) {
+        tokenCount = viewTokens;
+        guardTokens = viewTokens;
       }
     } else {
       const view = sentViewTokenCount(core, cm, state, config, tokenCount);
@@ -70,8 +71,9 @@ for (let i = 0; i < turns; i++) {
   const truncateBand = config.modelContextLimit > 0 ? Math.floor(config.truncate.threshold * config.modelContextLimit) : Number.MAX_SAFE_INTEGER;
   meterRecord = {
     viewTokens: estimateTokens(turn.messages, collectCoveredMessageIds(turn.state)) ,
-    blocksLen: turn.state.blocks.length,
-    activeBlocks: turn.state.blocks.filter((b) => b.active).length,
+    rawTokens: estimateTokens(cm, collectCoveredMessageIds(turn.state)),
+    blockSig: blockSignature(turn.state),
+    history: historyCanary(cm),
     limit: config.modelContextLimit,
     usable: tokenCount < truncateBand,
   };

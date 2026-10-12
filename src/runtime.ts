@@ -12,6 +12,7 @@ import {
 } from "acp-kernel";
 import { resolveCompress, resolveConfig, type AdapterConfig } from "./config.js";
 import { applyStrictReasoningGate, resolveReasoningDrop, type CompressReasoningConfig } from "./reasoning-drop.js";
+import type { SentViewMeterRecord } from "./tokens.js";
 import { entriesToCoreMessages, EntryProjectionCache, extractText, matchesStoredText, messageIdentity, messageRef } from "./messages.js";
 import { SessionStateStore, deriveChildState, type LiveRefOrigin } from "./state.js";
 import { hasCompressHistory, rebuildStateFromLog } from "./state-rebuild.js";
@@ -146,10 +147,10 @@ export interface AcpRuntime {
    *  marks whether that count is an honest view — a turn that ran with
    *  tokenCount at/above the truncate band may have truncated its output, so
    *  its post-truncation size under-reports and must not be trusted next turn. */
-  noteSentViewCount(sid: string, record: { viewTokens: number; blocksLen: number; activeBlocks: number; limit: number; usable: boolean }): void;
+  noteSentViewCount(sid: string, record: SentViewMeterRecord): void;
   /** Last turn's measured sent view, or undefined on the first turn / after a
    *  signature change (blocks added or dropped, window re-centered). */
-  peekSentViewCount(sid: string): { viewTokens: number; blocksLen: number; activeBlocks: number; limit: number; usable: boolean } | undefined;
+  peekSentViewCount(sid: string): SentViewMeterRecord | undefined;
   /** Drop a session's sent-view meter (session_shutdown). */
   dropSentViewCount(sid: string): void;
   /** Drop a session's incremental projection cache (session_shutdown): it
@@ -432,11 +433,11 @@ export function createRuntime(adapter: AdapterConfig): AcpRuntime {
   // Issue #561: the sent-view meter replaces the per-turn probe processTurn
   // (clone + full second pass). Steady-state turns read the previous turn's
   // measured view instead of re-measuring; see noteSentViewCount for fields.
-  const sentViewMeters = new Map<string, { viewTokens: number; blocksLen: number; activeBlocks: number; limit: number; usable: boolean }>();
-  function noteSentViewCount(sid: string, record: { viewTokens: number; blocksLen: number; activeBlocks: number; limit: number; usable: boolean }): void {
+  const sentViewMeters = new Map<string, SentViewMeterRecord>();
+  function noteSentViewCount(sid: string, record: SentViewMeterRecord): void {
     sentViewMeters.set(sid, record);
   }
-  function peekSentViewCount(sid: string): { viewTokens: number; blocksLen: number; activeBlocks: number; limit: number; usable: boolean } | undefined {
+  function peekSentViewCount(sid: string): SentViewMeterRecord | undefined {
     return sentViewMeters.get(sid);
   }
   function dropSentViewCount(sid: string): void {

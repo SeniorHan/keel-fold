@@ -1,5 +1,5 @@
 import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
-import { defaultCountTokens, type CoreMessage } from "acp-kernel";
+import { defaultCountTokens, truncateLargeToolOutputs, type Config, type CoreMessage } from "acp-kernel";
 import { rewriteTagTokens } from "./tag-tokens.js";
 import type { TurnBoundaryEntry } from "./turn-boundary.js";
 
@@ -81,6 +81,38 @@ export function entriesToCoreMessages(entries: SessionEntry[]): CoreMessage[] {
     const cores = projectMessage(entry.message, entry.id);
     out.push(...cores);
   }
+  return withFacadeResultNames(out);
+}
+
+/** Lean2 facade tool wrapping decompress/search_context/acp_status/acp_cache. */
+const FACADE_TOOL = "acp_context";
+
+/** The kernel keys recency policies (neverPreserveRecentTools, protected tool
+ *  lists) on tool names; project acp_context calls under the operation they
+ *  wrap so those policies keep working behind the Lean2 facade. Only the
+ *  projection changes — outgoing messages keep the real tool name. */
+function policyToolName(name: string, args: unknown): string {
+  if (name !== FACADE_TOOL) return name;
+  const op = (args as { op?: unknown } | null | undefined)?.op;
+  return typeof op === "string" && op.length > 0 && op !== "help" ? op : name;
+}
+
+/** Give facade tool results the operation name of their call (see
+ *  policyToolName). Returns `cores` itself when nothing changes. */
+function withFacadeResultNames(cores: CoreMessage[]): CoreMessage[] {
+  let callNames: Map<string, string> | undefined;
+  let out = cores;
+  for (let i = 0; i < cores.length; i++) {
+    const c = cores[i]!;
+    if (c.contentType !== "tool-result" || c.toolName !== FACADE_TOOL || !c.toolCallId) continue;
+    callNames ??= new Map(
+      cores.flatMap((m) => (m.contentType === "tool-call" && m.toolCallId && m.toolName ? [[m.toolCallId, m.toolName] as const] : [])),
+    );
+    const name = callNames.get(c.toolCallId);
+    if (!name || name === FACADE_TOOL) continue;
+    if (out === cores) out = cores.slice();
+    out[i] = { ...c, toolName: name };
+  }
   return out;
 }
 
@@ -134,7 +166,7 @@ export class EntryProjectionCache {
       }
       this.count = entries.length;
       this.lastId = entries[entries.length - 1]!.id;
-      return this.cores.slice();
+      return withFacadeResultNames(this.cores.slice());
     }
     this.cores = entriesToCoreMessages(entries);
     this.count = entries.length;
@@ -181,7 +213,7 @@ function projectMessage(message: AgentMessage, id: string): CoreMessage[] {
         const call = calls[0]!;
         const argStr = stringifyArgs(call.arguments);
         const text = argStr && textParts ? `${textParts}\n${argStr}` : argStr || textParts;
-        return [{ id, role: "assistant", contentType: "tool-call", toolName: call.name, toolCallId: call.id, text, ...thinkingField }];
+        return [{ id, role: "assistant", contentType: "tool-call", toolName: policyToolName(call.name, call.arguments), toolCallId: call.id, text, ...thinkingField }];
       }
       return calls.map((call, i) => {
         const argStr = stringifyArgs(call.arguments);
@@ -189,7 +221,7 @@ function projectMessage(message: AgentMessage, id: string): CoreMessage[] {
           id: `${id}#${call.id}`,
           role: "assistant" as const,
           contentType: "tool-call" as const,
-          toolName: call.name,
+          toolName: policyToolName(call.name, call.arguments),
           toolCallId: call.id,
           text: argStr || textParts,
           ...(i === 0 ? thinkingField : {}),
@@ -311,7 +343,7 @@ function normalizeIdentityValue(value: unknown, message = false): unknown {
   return out;
 }
 
-const TRUNCATION_MARKER = "[truncated for context space]";
+export const TRUNCATION_MARKER = "[truncated for context space]";
 
 export function matchesStoredText(stored: string, visible: string): boolean {
   const marker = `...${TRUNCATION_MARKER} — original ~`;
@@ -495,11 +527,19 @@ function patchRefTag(original: AgentMessage, core: CoreMessage): AgentMessage {
         return { ...(original as object), content: synced } as AgentMessage;
       }
     }
-    return original;
+    // Lean2: emergency truncation also rewrites assistant text; the tag skip
+    // above must not throw that rewrite away (the safety valve would report
+    // savings the request never got).
+    const truncatedBody = truncatedCoreBody(core, extractText(base.content));
+    return truncatedBody === null ? original : rebuildBodyFromCore(original, truncatedBody);
   }
   const match = core.text ? core.text.match(REF_TAG) : null;
   const tag = match ? match[0] : null;
-  if (!tag) return original;
+  if (!tag) {
+    // Untagged (e.g. protected) messages still carry kernel truncation.
+    const truncatedBody = truncatedCoreBody(core, extractText(base.content));
+    return truncatedBody === null ? original : rebuildBodyFromCore(original, truncatedBody);
+  }
   // Honor kernel body mutations (emergency truncation of large tool-results,
   // future rewrites): if core.text's body differs from the original text,
   // rebuild from the kernel body — otherwise truncation never reaches the model.
@@ -538,13 +578,73 @@ function patchRefTag(original: AgentMessage, core: CoreMessage): AgentMessage {
   } as AgentMessage;
 }
 
+
+/** The kernel-truncated body of `core` (ref tag stripped), or null when the
+ *  kernel did not newly truncate it relative to `originalBody`. */
+function truncatedCoreBody(core: CoreMessage, originalBody: string): string | null {
+  const body = stripRefTag(core.text ?? "");
+  if (!body.includes(TRUNCATION_MARKER) || originalBody.includes(TRUNCATION_MARKER)) return null;
+  return body;
+}
+
+export interface LatestUserGuardResult {
+  messages: CoreMessage[];
+  /** Id of the latest user message whose kernel truncation was undone. */
+  restoredId?: string;
+  /** Estimated request size after the guard (tokenCount scale). */
+  remainingTokens: number;
+}
+
+/** Lean2: the kernel protects the most recent user message from compression
+ *  but its emergency truncation only protects the last N messages, so a big
+ *  prompt followed by a few tool rounds lost its body without any summary.
+ *  Undo that truncation and give the reclaimed budget to the other candidates
+ *  (the kernel's own truncator, run with the user message hidden). */
+export function protectLatestUserMessage(
+  inMessages: CoreMessage[],
+  outMessages: CoreMessage[],
+  config: Config,
+  tokenCount: number,
+): LatestUserGuardResult {
+  let latest: CoreMessage | undefined;
+  for (let i = inMessages.length - 1; i >= 0; i--) {
+    if (inMessages[i]!.role === "user") { latest = inMessages[i]; break; }
+  }
+  const at = latest ? outMessages.findIndex((m) => m.id === latest!.id) : -1;
+  const out = at >= 0 ? outMessages[at]! : undefined;
+  if (!latest || !out || truncatedCoreBody(out, latest.text ?? "") === null) {
+    return { messages: outMessages, remainingTokens: tokenCount };
+  }
+  const originalById = new Map(inMessages.map((m) => [m.id, m.text ?? ""]));
+  let savedByOthers = 0;
+  for (const m of outMessages) {
+    if (m === out) continue;
+    const before = originalById.get(m.id);
+    if (before === undefined || truncatedCoreBody(m, before) === null) continue;
+    savedByOthers += defaultCountTokens(before) - defaultCountTokens(stripRefTag(m.text ?? ""));
+  }
+  const tag = (out.text ?? "").match(REF_TAG)?.[0] ?? "";
+  const restored: CoreMessage = { ...out, text: `${tag}${latest.text ?? ""}` };
+  const hidden = outMessages.slice();
+  hidden[at] = { ...out, text: "" };
+  const pending = tokenCount - savedByOthers;
+  const trunc = truncateLargeToolOutputs(hidden, pending, config, defaultCountTokens, {
+    protectRecentMessages: config.preserveRecentMessages,
+    includeTextMessages: true,
+  });
+  const messages = trunc.messages.slice();
+  messages[at] = restored;
+  return { messages, restoredId: latest.id, remainingTokens: pending - trunc.savedTokens };
+}
+
 function rebuildBodyFromCore(
   original: AgentMessage,
   coreBody: string,
-  tag: string,
+  tag?: string,
 ): AgentMessage {
   const base = original as AnyMessage;
-  const text = `${coreBody.replace(/\s+$/, "")}\n\n${tag}`;
+  const trimmed = coreBody.replace(/\s+$/, "");
+  const text = tag ? `${trimmed}\n\n${tag}` : trimmed;
   if (typeof base.content === "string") {
     return { ...(original as object), content: text } as AgentMessage;
   }
