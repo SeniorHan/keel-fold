@@ -23,7 +23,7 @@ import { makeDelegateTool, makeDelegateWaitTool, makeDelegateCancelTool, running
 import { makeCommands } from "./commands.js";
 import { mergeSurface, readToolSurfaceWithPacks, resolveActivePack, resolvePackName, surfaceMetaOf } from "./prompt-pack.js";
 import type { NudgeSectionsConfig } from "./surface.js";
-import { coreOutToAgentMessages, extractText, ACP_NUDGE_CUSTOM_TYPE, type AcpNudgeRecord } from "./messages.js";
+import { coreOutToAgentMessages, extractText, inlineBlockSummaries, ACP_NUDGE_CUSTOM_TYPE, type AcpNudgeRecord } from "./messages.js";
 import { liveOnlyTailCached, dropLiveOnlyTailCache } from "./live-only-tail.js";
 import { carryHostSystemMessages } from "./system-passthrough.js";
 import { sanitizeToolPairing } from "./tool-pair-sanitizer.js";
@@ -663,7 +663,10 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
     });
 
     const originalById = collectOriginals(entries);
-    let rebuilt = coreOutToAgentMessages(turn.messages, originalById);
+    // Lean2: the acp_summary_ messages are dropped above, so carry each active
+    // block's full summary in its compress-call arguments instead of the
+    // kernel's 200-char stub (see inlineBlockSummaries).
+    let rebuilt = inlineBlockSummaries(coreOutToAgentMessages(turn.messages, originalById), turn.state.blocks);
     // [#336] Request-time reasoning drop, aligned with opencode-acp #377:
     // compress calls are hard-exempt from compression, so their thinking
     // rides along every request as an unreclaimable floor. Round closure is

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { coreOutToAgentMessages } from "../src/messages.js";
-import type { CoreMessage } from "acp-kernel";
+import { coreOutToAgentMessages, inlineBlockSummaries } from "../src/messages.js";
+import type { CompressionBlock, CoreMessage } from "acp-kernel";
 import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 
 const LT = "\x3c";
@@ -197,4 +197,59 @@ test("tool-result cores must not overwrite call-args in multi-call reconstructio
   const grep = calls.find((c) => c.name === "grep")!;
   assert.deepEqual(bash.arguments, bashArgs, "bash args must not be replaced by its result output");
   assert.deepEqual(grep.arguments, grepArgs, "grep args must not be replaced by its result output");
+});
+
+// Lean2: pi drops the kernel's acp_summary_ messages, so the full summary of each
+// active block must ride in its compress-call arguments instead of the stub.
+function block(id: string, callId: string, startRef: string | undefined, endRef: string | undefined, summary: string, active = true): CompressionBlock {
+  return {
+    blockId: id, runId: "r", tier: 1, summary, directMessageIds: [], effectiveMessageIds: [], directBlockIds: [],
+    compressedTokens: 0, createdAt: 0, survivedCount: 0, generation: "young", active, compressCallId: callId, startRef, endRef,
+  } as CompressionBlock;
+}
+
+function stubbedOut(args: unknown, kernelText = kernelStubbedText()): ReturnType<typeof coreOutToAgentMessages> {
+  const original = msgEntry("a", {
+    role: "assistant",
+    content: [{ type: "toolCall", id: "tc1", name: "compress", arguments: args }],
+    ...assistantMeta(),
+  }).message;
+  const coreOut: CoreMessage[] = [
+    { id: "a", role: "assistant", contentType: "tool-call", toolName: "compress", toolCallId: "tc1", text: kernelText },
+  ];
+  return coreOutToAgentMessages(coreOut, new Map([["a", original]]));
+}
+
+test("inlineBlockSummaries: active block's full summary replaces the kernel stub", () => {
+  const full = "dedicated-model summary ".repeat(40);
+  const out = inlineBlockSummaries(stubbedOut(compressArgs()), [block("b1", "tc1", "m00001", "m00009", full)]);
+  const content = (callsOf(out[0])[0]!.arguments as { content: Array<{ summary: string }> }).content;
+  assert.equal(content.length, 1, "dead range stays dropped");
+  assert.equal(content[0]!.summary, full, "full block summary, not the 200-char stub");
+});
+
+test("inlineBlockSummaries: string-form content keeps its shape", () => {
+  const out = inlineBlockSummaries(
+    stubbedOut(
+      { content: JSON.stringify(compressArgs().content) },
+      JSON.stringify({ content: JSON.stringify([{ startId: "m00001", endId: "m00009", summary: STUB_SUMMARY }]) }),
+    ),
+    [block("b1", "tc1", "m00001", "m00009", "FULL")],
+  );
+  const args = callsOf(out[0])[0]!.arguments as { content: string };
+  assert.equal(typeof args.content, "string");
+  assert.equal((JSON.parse(args.content) as Array<{ summary: string }>)[0]!.summary, "FULL");
+});
+
+test("inlineBlockSummaries: inactive blocks and other calls are left untouched", () => {
+  const msgs = stubbedOut(compressArgs());
+  assert.equal(inlineBlockSummaries(msgs, [block("b1", "tc1", "m00001", "m00009", "FULL", false)]), msgs, "inactive block");
+  assert.equal(inlineBlockSummaries(msgs, [block("b1", "other", "m00001", "m00009", "FULL")]), msgs, "different call id");
+  assert.equal(inlineBlockSummaries(msgs, [block("b1", "tc1", "m00002", "m00009", "FULL"), block("b2", "tc1", "m00020", "m00022", "X")]), msgs, "no range match");
+});
+
+test("inlineBlockSummaries: legacy block without refs maps to a single-entry call", () => {
+  const out = inlineBlockSummaries(stubbedOut(compressArgs()), [block("b1", "tc1", undefined, undefined, "LEGACY FULL")]);
+  const content = (callsOf(out[0])[0]!.arguments as { content: Array<{ summary: string }> }).content;
+  assert.equal(content[0]!.summary, "LEGACY FULL");
 });

@@ -39,9 +39,18 @@ async function withConfigDir(json: unknown, fn: (cwd: string) => Promise<void>):
         await mkdir(join(cwd, CONFIG_DIR_NAME), { recursive: true });
         await writeFile(join(cwd, CONFIG_DIR_NAME, "acp.json"), JSON.stringify(json));
     }
+    // Isolate the user-level ~/.pi/acp.json: os.homedir() reads USERPROFILE on
+    // Windows and HOME elsewhere, so point both at the temp dir (cf. tests/user-config.test.ts).
+    const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+    process.env.HOME = cwd;
+    process.env.USERPROFILE = cwd;
     try {
         await fn(cwd);
     } finally {
+        for (const [key, value] of Object.entries(saved)) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
         await rm(cwd, { recursive: true, force: true });
     }
 }
@@ -85,9 +94,7 @@ test("e2e compress config: a single runtime resolves differently per model (prov
 });
 
 test("e2e compress config: without a config file the kernel defaults apply", async () => {
-    const savedHome = process.env.HOME;
     await withConfigDir(undefined, async (cwd) => {
-        process.env.HOME = cwd;
         const user = await loadUserConfig(cwd);
         assert.deepEqual(user, {}, "no acp.json anywhere (HOME + cwd) → empty user config");
         const runtime = createRuntime({});
@@ -97,7 +104,6 @@ test("e2e compress config: without a config file the kernel defaults apply", asy
         assert.equal(cfg.nudge.emergencyThresholdPct, 0.95, "kernel default emergencyThresholdPct");
         assert.equal(cfg.nudge.growthFloor, 50000, "kernel default growthFloor");
     });
-    process.env.HOME = savedHome;
 });
 
 // Behavioral: feed the real configFor() output into runtime.core.processTurn()
@@ -120,9 +126,7 @@ function compressibleMessages(): CoreMessage[] {
 }
 
 test("e2e compress config: a 2w limit fires the compress nudge at 2w tokens; a 100w limit does not", async () => {
-    const savedHome = process.env.HOME;
     await withConfigDir(ACP_JSON, async (cwd) => {
-        process.env.HOME = cwd;
         const runtime = createRuntime({});
         await runtime.reloadConfig(cwd);
         const tokenCount = 20_000;
@@ -147,5 +151,4 @@ test("e2e compress config: a 2w limit fires the compress nudge at 2w tokens; a 1
         });
         assert.ok(!largeTurn.nudge?.shouldInject, "2w tokens at a 100w limit stays under threshold → no compression");
     });
-    process.env.HOME = savedHome;
 });
