@@ -1116,7 +1116,7 @@ test("withAgentDir restores PI_CODING_AGENT_DIR/HOME/USERPROFILE without leaking
   assert.equal(process.env.USERPROFILE, prevUserProfile, "USERPROFILE restored verbatim");
 });
 
-test("Lean2: emergency truncation spares the latest user message and still reaches the wire", async () => {
+test("Lean: emergency truncation spares the latest user message and still reaches the wire", async () => {
   const { api, handlers } = captureApi();
   createAcpExtension({ modelContextLimit: 12_000, preserveRecentMessages: 2 } as any)(api as any);
   const words = (n: number, seed: string): string => Array.from({ length: n }, (_, i) => `${seed}${i}`).join(" ");
@@ -1124,7 +1124,7 @@ test("Lean2: emergency truncation spares the latest user message and still reach
   const assistantText = words(4000, "o");
   const assistant = (id: string, text: string) => ({ type: "message", id, parentId: null, timestamp: "", message: { role: "assistant", content: [{ type: "text", text }], timestamp: Date.now() } });
   const entries = [assistant("a0", assistantText), userMsg("u1", userText), assistant("a1", "ok"), assistant("a2", "ok"), assistant("a3", "ok")];
-  const ctx = fakeCtx(entries, tmpPath("lean2-latest-user.session.json"));
+  const ctx = fakeCtx(entries, tmpPath("lean-latest-user.session.json"));
 
   const result = await handlers.get("context")![0]!({ type: "context", messages: [] }, ctx);
   const textOf = (m: any): string => (typeof m.content === "string" ? m.content : m.content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n"));

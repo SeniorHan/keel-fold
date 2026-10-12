@@ -103,7 +103,7 @@ export function adjustedTokenCount(
 export interface SentViewMeterRecord {
   viewTokens: number;
   /** The raw (pre-prune) estimate of the same turn, on the sentTokens scale.
-   *  Lean2: the next turn adds its raw growth since then to viewTokens. */
+   *  Lean: the next turn adds its raw growth since then to viewTokens. */
   rawTokens: number;
   /** blockSignature() of the state the view was measured on. */
   blockSig: string;
@@ -165,7 +165,7 @@ export function sentViewMeterMatches(
   return meter.blockSig === blockSignature(state);
 }
 
-/** Lean2: the previous view plus everything appended since. Adopting the bare
+/** Lean: the previous view plus everything appended since. Adopting the bare
  *  previous viewTokens dropped the new messages' growth from the meter. */
 export function adoptedViewTokens(meter: SentViewMeterRecord, rawTokens: number): number {
   return meter.viewTokens + (rawTokens - meter.rawTokens);

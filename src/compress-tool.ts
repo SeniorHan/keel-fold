@@ -877,7 +877,7 @@ type AgentMessage = SessionMessageEntry["message"];
 const RANGE_KEYS = ["startId", "endId", "startRef", "endRef", "messageId", "summary"];
 
 /**
- * Lean2: put each active block's full current summary back into the outbound
+ * Lean: put each active block's full current summary back into the outbound
  * compress-call arguments. The kernel stubs those summaries to 200 chars
  * because it renders the full text as separate `acp_summary_` messages, but
  * coreOutToAgentMessages drops those (pi has no slot for them), so without this

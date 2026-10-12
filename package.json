@@ -1,7 +1,8 @@
 {
 	"name": "billion-context-pi",
-	"version": "0.1.83-pr241-lean2.5",
-	"description": "One billion, not one million. Model-driven context management for the Pi coding agent.",
+	"version": "0.1.83-lean.6",
+	"private": true,
+	"description": "Long-term fork of billion-context-pi 0.1.83 for Pi: cheap dedicated summary model, lean tool surface, request-rewrite fixes.",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
 	"exports": {
@@ -17,7 +18,7 @@
 	},
 	"pi": {
 		"extensions": [
-			"./dist/index.js"
+			"./lean/index.ts"
 		]
 	},
 	"files": [
@@ -27,13 +28,13 @@
 		"LICENSE"
 	],
 	"sideEffects": false,
-	"homepage": "https://github.com/ranxianglei/billion-context-pi",
+	"homepage": "https://github.com/kunkun9527/billion-context-pi-lean",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/ranxianglei/billion-context-pi.git"
+		"url": "git+https://github.com/kunkun9527/billion-context-pi-lean.git"
 	},
 	"bugs": {
-		"url": "https://github.com/ranxianglei/billion-context-pi/issues"
+		"url": "https://github.com/kunkun9527/billion-context-pi-lean/issues"
 	},
 	"publishConfig": {
 		"access": "public"
@@ -44,6 +45,9 @@
 	"scripts": {
 		"test": "node --import tsx --import ./tests/support/isolate-env.ts --test tests/*.test.ts",
 		"typecheck": "tsc --noEmit",
+		"typecheck:lean": "tsc -p lean/tsconfig.json",
+		"test:lean": "node --import tsx --import ./tests/support/isolate-env.ts --test lean/tests/*.test.mjs",
+		"check": "npm run typecheck && npm test && npm run build && npm run typecheck:lean && npm run test:lean",
 		"build": "tsup && tsc --emitDeclarationOnly",
 		"e2e": "node scripts/e2e/run-e2e.mjs"
 	},

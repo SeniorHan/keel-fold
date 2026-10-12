@@ -1,4 +1,4 @@
-// Lean2 request-rewrite guards: kernel truncation reaches the wire (①),
+// Lean request-rewrite guards: kernel truncation reaches the wire (①),
 // latest user message survives emergency truncation (③), compress thinking is
 // metered (④), and acp_context projects under its wrapped op (⑤).
 import { test } from "node:test";

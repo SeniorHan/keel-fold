@@ -84,12 +84,12 @@ export function entriesToCoreMessages(entries: SessionEntry[]): CoreMessage[] {
   return withFacadeResultNames(out);
 }
 
-/** Lean2 facade tool wrapping decompress/search_context/acp_status/acp_cache. */
+/** Lean facade tool wrapping decompress/search_context/acp_status/acp_cache. */
 const FACADE_TOOL = "acp_context";
 
 /** The kernel keys recency policies (neverPreserveRecentTools, protected tool
  *  lists) on tool names; project acp_context calls under the operation they
- *  wrap so those policies keep working behind the Lean2 facade. Only the
+ *  wrap so those policies keep working behind the Lean facade. Only the
  *  projection changes — outgoing messages keep the real tool name. */
 function policyToolName(name: string, args: unknown): string {
   if (name !== FACADE_TOOL) return name;
@@ -527,7 +527,7 @@ function patchRefTag(original: AgentMessage, core: CoreMessage): AgentMessage {
         return { ...(original as object), content: synced } as AgentMessage;
       }
     }
-    // Lean2: emergency truncation also rewrites assistant text; the tag skip
+    // Lean: emergency truncation also rewrites assistant text; the tag skip
     // above must not throw that rewrite away (the safety valve would report
     // savings the request never got).
     const truncatedBody = truncatedCoreBody(core, extractText(base.content));
@@ -595,7 +595,7 @@ export interface LatestUserGuardResult {
   remainingTokens: number;
 }
 
-/** Lean2: the kernel protects the most recent user message from compression
+/** Lean: the kernel protects the most recent user message from compression
  *  but its emergency truncation only protects the last N messages, so a big
  *  prompt followed by a few tool rounds lost its body without any summary.
  *  Undo that truncation and give the reclaimed budget to the other candidates

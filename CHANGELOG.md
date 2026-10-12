@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.1.83-lean.6 (2026-10-12)
+
+First release of this fork on GitHub. Based on upstream `billion-context-pi` v0.1.83; earlier local builds were called Lean2 (`0.1.83-pr241-lean2.2`–`lean2.5`).
+
+- Dedicated summary model (ported from upstream PR #241, resolved through Pi's live model registry): `/acp compact <provider/model>|session|reset`. The main model only picks ranges and writes a fallback; the full summary rules go to the summary model.
+- Re-compressing old blocks passes their summaries in whole with a carry-forward rule instead of re-sending truncated raw history; summary-model input is sized to its context window; length-truncated summaries are rejected.
+- The main model now sees full block summaries in its `compress` calls, so it stops decompressing blocks it just created.
+- Request-rewrite fixes: emergency truncation reaches the wire, the latest user message is never truncated, the token meter counts new messages and `compress` thinking, and `acp_context` calls follow the recency policies of the tools they wrap.
+- Lean facade: `compress` + `acp_context` only, ~700-token resident prompt, injected as its own system-prompt section so other extensions keep their additions; delegation and auto-update off.
+- Tests no longer write into the real `~/.pi`.
+
+Entries below are upstream's history up to v0.1.83.
+
 ## Unreleased (master, since v0.1.38)
 
 - **fix(config-dir): fork host 按宿主 `getAgentDir()` 推导配置目录，Prime 不再落进 Pi 的 `~/.pi`（closes #574）** — Prime 包入口不导出 `CONFIG_DIR_NAME`（其内部值 `.prime/agent` 是 agent dir 本身，语义与 Pi 的 `.pi` 不同），#364 的回退让它的 acp.log、acp.json、prompt packs、更新 / 只读标记全部用 Pi 的 `~/.pi` 与 `~/.pi/agent`。`src/config-dir.ts` 现按顺序解析：宿主 `CONFIG_DIR_NAME` 为单段目录名 → 用它（Pi）；否则宿主 `getAgentDir()` 恰为 `~/<name>/agent` → `<name>`（Prime → `.prime`）；否则 `.pi`。多段值从不原样使用（会拼出 `~/.prime/agent/agent`）。兼容：fork 上用户手写的 acp.json / acp/packs 在自身路径不存在时仍读 `.pi` 对应文件（#467 曾建议 Prime 用户放 `~/.pi/acp.json`）；四处 acp.json 读取（user-config / index / surface / prompt-pack）统一走 `acpJsonFiles()`。Pi 上行为不变。

@@ -54,7 +54,7 @@ test("a shrinking raw estimate (rewind/rewrite) forces a resync", () => {
 });
 
 test("adopted view carries the raw growth appended since the measurement", () => {
-  // Regression (Lean2): the bare previous viewTokens was adopted, so a 32K
+  // Regression (Lean): the bare previous viewTokens was adopted, so a 32K
   // message appended after the measurement never reached the meter.
   assert.equal(adoptedViewTokens(meter({}), 150_000, history), 100_000);
   assert.equal(adoptedViewTokens(meter({}), 182_000), 132_000);

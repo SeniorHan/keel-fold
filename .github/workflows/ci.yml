@@ -2,12 +2,12 @@ name: CI
 
 on:
   pull_request:
-    branches: [master]
+    branches: [main]
   push:
-    branches: [master]
+    branches: [main]
 
 jobs:
-  test:
+  check:
     strategy:
       fail-fast: false
       matrix:
@@ -19,18 +19,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          registry-url: https://registry.npmjs.org
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      # build before test: tests/host-api.test.ts resolves "billion-context-pi"
-      # via Node self-reference to dist/index.js (package-name-only import contract)
-      - run: npm run build
-      - run: npm test
-
-  pr-validation:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
-      - run: ./scripts/ci/check-pr.sh "${{ github.head_ref }}" "${{ github.event.pull_request.base.ref }}"
+      # typecheck + tests + build + facade typecheck/tests
+      - run: npm run check
+      # Pi installs git packages without building, so the committed dist/ must match the source.
+      - name: Committed dist/ is up to date
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 22
+        run: git diff --exit-code --stat -- dist

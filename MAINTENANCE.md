@@ -1,0 +1,78 @@
+# 维护说明
+
+本仓库是 [`ranxianglei/billion-context-pi`](https://github.com/ranxianglei/billion-context-pi) `v0.1.83` 的长期维护分支。用法和与上游的区别见 [README](README.zh-CN.md)；本文记录实现细节、改动原因和维护流程。
+
+## 结构
+
+- 分支：`main`（默认分支）。远程 `origin` 是本仓库，`upstream` 是上游，只用于 fetch 和挑修复。
+- 基线：上游 tag `v0.1.83`（commit `1cb6340`），之后的上游提交不自动合并。
+- 运行时源码：`src/`，`npm run build` 生成 `dist/`。`acp-kernel@0.0.98` 由 tsup 打进 `dist/`，运行时只依赖 Pi 自带的包。
+- Lean 外壳：`lean/index.ts`（测试 `lean/tests/facade.test.mjs`），通过 `../dist/index.js` 引用运行时；`package.json` 的 `pi.extensions` 指向它。
+- `dist/` 提交进仓库（`*.map` 除外）：Pi 用 git 安装时执行 `npm install --omit=dev`，不会 build，也装不到 tsup 和 kernel。jiti 只加载 `lean/index.ts`，不能直接加载 `src/`。CI 会检查提交的 `dist/` 与源码一致。
+- 移植来源：上游 PR #241（commits `631d51e`、`c5e7de8`，基于 0.1.52，无法直接 rebase）。
+
+## 改动记录（相对上游 0.1.83）
+
+### 专用摘要模型（移植 PR #241 并改进）
+
+- 模型解析与调用走 `ctx.modelRegistry`（`find`/`getAll`/`complete`）。PR 原本用 `ModelRuntime.create(models.json)`，看不到由扩展注册的 provider。
+- `complete()` 只有 Pi >= 1.x 才有；宿主没有时抛错，回退到调用方提供的摘要。
+- 主模型提供 1–2 句有意义的回退摘要，不用裸占位符 `"compressed"`；专用模型调用失败或部分失败时保留这份回退摘要。
+- 专用模型输出再走一遍 `sanitizeSummary`；`signal` 透传，abort 时停止剩余 range。
+- 注册表模型模式：Nudge 里的 `howToCompressRules` 换成只讲选范围和回退摘要的短版本（`src/index.ts` 的 `nudgePrompts`）；`session` 模式保留完整规则，因为它的摘要调用复用主会话前缀。
+- `extractRangeContent` 把范围内活动块渲染为 `[earlier summary bN]` 摘要，不再重发原始消息。原先重新压缩一个覆盖旧块的大范围时，送去的原文可达百万字符，再被 120K 字符的首尾截断丢掉大部分；早期决策因此在一次次重写中丢失。截断改为按专用模型的 `contextWindow` 计算（`fitToModel`）。
+- 专用模型的系统提示末尾加了 CARRY FORWARD 规则，要求原样继承旧摘要里的决策、数值和未完成目标。
+- 旧块摘要保护：`extractRangeContent` 读的是内核 prune 后的 `turn.messages`，旧块以 `acp_summary_<blockId>` 合成消息出现，现在映射回块，渲染为 pinned 的 `[earlier summary bN]`。`fitToModel` 从不截断摘要：给原文留的空间不足 1000 字符时丢掉原文；摘要本身超过输入预算时抛错，这个范围不调专用模型（记 `compression-model-failed`），保留回退摘要。未知窗口的模型预算是 120K 字符，单块摘要上限 20K，所以一个范围覆盖 6 个以上大块时可能走到这条路。
+- `summarizeWithModel` 拒收 `stopReason: "length"`（输出到 `maxTokens` 被截断），保留回退摘要。上限是 `summaryMaxChars`（默认 20000）/3 tokens。
+- 测试：`tests/compress-model.test.ts`（假 registry）、`tests/dedicated-nudge.test.ts`。
+
+### 摘要对主模型可见
+
+内核 `hideConsumedCompressCalls` 把保留下来的 compress 调用参数截成 200 字符存根（`SUMMARY_STUB_CHARS`），全文由 `acp_summary_` 消息承载，但 `coreOutToAgentMessages` 会跳过这些消息，主模型从来看不到块摘要，常在压缩后立刻解压刚建的块。`src/compress-tool.ts` 的 `inlineBlockSummaries` 在 `src/index.ts` 的 context 钩子里把活动块的完整当前摘要写回对应 compress 调用参数：参数用 `normalizeRanges` 解析，工具能接受的写法（裸对象字符串、`startRef/endRef`、顶层单范围、字符串形式的 content）都覆盖；按 startRef/endRef 匹配块，无 ref 的旧块在单范围调用里直接对应，没有活动块的范围被去掉。块摘要建好后不变，不会额外打断缓存；就地重折叠（refold）的块会在该位置改变一次。测试在 `tests/anchor-text-sync.test.ts`。
+
+### 请求改写链路
+
+- 紧急截断生效：`patchRefTag` 对 assistant 文本和无 ref 标签的消息也同步内核的截断正文（以 `[truncated for context space]` 标记为准）。以前内核截掉了、出站却还是原文。
+- 最近一条用户消息不被紧急截断：`protectLatestUserMessage`（`src/messages.ts`）在 `processTurn` 后恢复它的原文，再把这部分预算交给内核截断器去截其他候选。仍然放不下时记 `latest-user-kept` 日志并提示一次。内核（0.0.98，上游 0.0.119 仍未修）本身不动。
+- 计量复用：`sentViewMeterMatches` 用活动块签名（块 id、覆盖数、runId、tier、摘要长度）和历史金丝雀（记录时的消息数、首尾 id，要求这一轮只是在后面追加），记录上一轮的原始估算，采用时加上这一轮的新增（`adoptedViewTokens`）；原始估算变小、分支切换、回退或就地 refold 都会重新测量。
+- compress 调用里实际会发出去的 thinking 计入估算（`keptCompressThinkingTokens`，和请求时的删除规则一致），只在 context 钩子里用；`acp_status` 等显示的数字没有加这一项。compress 的工具结果计入 `estimateTokens`；调用参数仍跳过，因为块摘要已经由内核的摘要消息计过一次。
+- `acp_context` 的调用和结果在投影里用它包装的 op 名（decompress/search_context/…），内核按工具名的策略（`neverPreserveRecentTools`、受保护工具等）因此对外壳生效；出站消息仍是 `acp_context`。
+- 测试：`tests/lean-rewrite-guards.test.ts`、`tests/sent-view-meter.test.ts`、`tests/tokens.test.ts`、`tests/integration.test.ts` 末尾的紧急截断用例。
+
+### 系统提示
+
+- `externalSystemPrompt`（`AdapterConfig`，只由宿主设置，`applyUserConfig` 不读 acp.json 里的同名键）：外壳仍运行上游 `before_agent_start` handler（active pack 戳、`setPrompts` 等副作用），只替换它返回的提示词；上游返回 undefined（宿主被拒）时外壳也不注入。用户在 acp.json 里写了 `promptSections.*` 或 `delegatePrompt` 时，记 `prompt-config-ignored` 并提示一次；内置 lean pack 自带的 promptSections 不提示。测试在 `tests/prompt-pack.test.ts`。
+
+### 测试隔离
+
+`npm test` 预加载 `tests/support/isolate-env.ts`，把 `HOME`、`USERPROFILE`、`ACP_LOG_FILE` 指向临时目录，跑完删除。上游原本没有隔离，大部分测试会写进真实的 `~/.pi/acp.log`。`tests/e2e-compress-config.test.ts` 的 `withConfigDir` 同时改 `HOME` 和 `USERPROFILE`（Windows 上 `os.homedir()` 读后者）。symlink 逃逸用例的目标改为临时目录所在盘的根目录，不再依赖 `HOME`。
+
+### Lean 外壳
+
+- 工具面：直接暴露 `compress`（以 `model-only` exposure 注册，codemode 下也直接声明给模型；ACP 按工具名在会话里识别 compress 结果），把 `decompress`、`search_context`、`acp_status`、`acp_cache` 合并到 `acp_context`。关闭 Delegation 和自动更新。
+- Pi 1.x 上把 ACP 规则写进 `systemPromptOptions.sections.acp_context`，不返回 `systemPrompt`。返回 `systemPrompt` 会变成 `forceSystemPrompt`，导致其它扩展的 `appendSystemPrompt` 被丢弃（上游 #630/#631）。其它扩展已经 force 过时，退回拼接的旧行为。
+- 去掉 “Refs may be renumbered” 的错误说法（上游 #541）。
+- 改写规则：覆盖 `acp_cache(...)` 和 “call/run acp_status …”；调用改写用非贪婪匹配（避免同一行两个调用被合并）。召回结果不改写（`rewriteRecallResult`）：decompress 的输出原样返回；search_context 只改写每条结果末尾的提示行——必须完全符合上游格式 `  → decompress({ blockId: "bN" })`（可带 `  (block containing message <原始 entry id>)`，id 形如 `088aaedb` 或 `4d9e965e#toolu_…|fc_…`，不是 mNNNNN），且后面是空行或文末（`SEARCH_HINT_LINE`）。预览是召回原文，一律不动。上游改 `src/search-tool.ts` 的 `formatResult` 或给这两个工具新增提示文字时，要同步这里的正则。
+- 系统提示列出每个 op 的参数签名（`OPERATION_SIGNATURES`）。只写 “original args object” 时，模型常照搬 compress 的写法传 `startId/endId`、`ids/refs`，缺 `blockId`。参数校验失败时，报错里也给出正确签名。
+- 系统提示保留“不要把解压当成压缩后的例行步骤”：块摘要显示在 compress 调用参数里，只在需要摘要里没有的细节时才 search/decompress。
+- 测试：`lean/tests/facade.test.mjs`，含工具面和 1450 字符提示预算。
+
+## 修改流程
+
+1. 改 `src/` 或 `lean/`。
+2. 在仓库根目录运行 `npm run check`（typecheck + 全量测试 + build + 外壳 typecheck + 外壳测试）。单独用 `npx tsx --test` 跑某个文件时，加上 `--import ./tests/support/isolate-env.ts`，否则会写进真实的 `~/.pi/acp.log`。
+3. 把 `dist/` 的变化和源码一起提交。
+4. 端到端验证：在临时目录里用 `pi --no-session --mode json -p ...` 读几个文件，再让模型 compress，确认结果里出现 `summaries written by ...`，`~/.pi/acp.log` 里没有 `compression-model-failed`。
+5. 发版：`npm version 0.1.83-lean.<n> --no-git-tag-version --ignore-scripts`，`npm run build`，提交后打 tag `v0.1.83-lean.<n>` 并推送。
+
+## 挑上游修复
+
+`git fetch upstream`，看 `upstream/master` 和 [billion-context](https://github.com/ranxianglei/billion-context) 的 `fix` 提交，只挑和本仓库行为相关的，`git cherry-pick -x` 或手工移植，按上面的流程验证。冲突主要集中在 `src/compress-tool.ts` 的 `handleCompress` 和 `src/messages.ts`。上游新增工具时，在 `lean/index.ts` 把低频工具加入 `LOW_FREQUENCY_TOOLS`，并检查新的模型可见文本是否需要补改写规则。
+
+## 已知事项
+
+- `compressionModelId` 填 `provider/id`。裸 id 在多个 provider 下重名时判为歧义。
+- 注册表里有某个模型，不代表 provider 真能服务它。调用失败时只留下回退摘要；在 `~/.pi/acp.log` 中搜 `compression-model-failed`。
+- 专用模型偶尔会把自己的推理文字写进摘要开头（实测约 1/60 个块），尚未处理。
+- 不要和原版 `billion-context-pi` 同时启用（工具和钩子会注册两次）。
+- 命名：2026-10-12 之前叫 Lean2（子目录 `lean2/`、版本 `0.1.83-pr241-lean2.N`），之后改名为 Lean，版本从 `0.1.83-lean.6` 续。更早的 Lean v1（`0.1.69-lean.1`，基于 npm 包的外壳）保留在 `legacy-v1` 分支。

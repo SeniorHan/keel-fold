@@ -68,7 +68,7 @@ type AgentMessage = SessionMessageEntry["message"];
 
 declare const CURRENT_VERSION: string;
 
-// Lean2: sessions already warned that their latest user message overflows.
+// Lean: sessions already warned that their latest user message overflows.
 const latestUserOverLimit = new Set<string>();
 
 export function createAcpExtension(adapter: AdapterConfig = {}): ExtensionFactory {
@@ -463,7 +463,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
       const systemPromptText = getSystemPromptText(ctx);
       const systemPromptTokens = systemPromptText ? defaultCountTokens(systemPromptText) : 0;
       const imageTokens = collectImageTokens(entries, modelSupportsImages(ctx.model));
-      // Lean2: compress cores are skipped by estimateTokens, but their thinking
+      // Lean: compress cores are skipped by estimateTokens, but their thinking
       // that survives the request-time drop is still sent — meter it as fixed
       // overhead alongside the system prompt.
       const compressThinkingTokens = keptCompressThinkingTokens(
@@ -594,7 +594,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
 
       const turn = runtime.core.processTurn({ messages: coreMessages, state, config, tokenCount });
       await runtime.save(turn.state, ctx);
-      // Lean2: emergency truncation must not cut the latest user message,
+      // Lean: emergency truncation must not cut the latest user message,
       // which compression already treats as protected.
       const userGuard = protectLatestUserMessage(coreMessages, turn.messages, config, tokenCount);
       if (userGuard.restoredId) {
@@ -690,7 +690,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
     });
 
     const originalById = collectOriginals(entries);
-    // Lean2: the acp_summary_ messages are dropped above, so carry each active
+    // Lean: the acp_summary_ messages are dropped above, so carry each active
     // block's full summary in its compress-call arguments instead of the
     // kernel's 200-char stub (see inlineBlockSummaries).
     let rebuilt = inlineBlockSummaries(coreOutToAgentMessages(turn.messages, originalById), turn.state.blocks);

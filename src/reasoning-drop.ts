@@ -162,7 +162,7 @@ export function dropCompressReasoning(messages: AgentMessage[], cfg?: CompressRe
   }
 }
 
-/** Lean2: thinking that stays on the wire for compress-call messages.
+/** Lean: thinking that stays on the wire for compress-call messages.
  *  estimateTokens skips compress cores whole, and the projection hangs a
  *  message's thinking on its FIRST tool-call core, so count thinking only for
  *  messages whose first call is compress, after the same drop pass the

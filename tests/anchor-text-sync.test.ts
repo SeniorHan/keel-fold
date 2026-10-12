@@ -200,7 +200,7 @@ test("tool-result cores must not overwrite call-args in multi-call reconstructio
   assert.deepEqual(grep.arguments, grepArgs, "grep args must not be replaced by its result output");
 });
 
-// Lean2: pi drops the kernel's acp_summary_ messages, so the full summary of each
+// Lean: pi drops the kernel's acp_summary_ messages, so the full summary of each
 // active block must ride in its compress-call arguments instead of the stub.
 function block(id: string, callId: string, startRef: string | undefined, endRef: string | undefined, summary: string, active = true): CompressionBlock {
   return {

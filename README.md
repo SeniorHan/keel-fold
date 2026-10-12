@@ -1,303 +1,88 @@
-# billion-context-pi
+# billion-context-pi-lean
 
-[English](./README.md) | [中文](./README.zh-CN.md)
+[中文](README.zh-CN.md)
 
-<p align="center">
-<strong>Billion-Context</strong> for <a href="https://pi.dev">Pi</a>
-<br />
-The model decides <em>when</em> and <em>what</em> to compress — not a hard limit.
-</p>
+A long-term maintained fork of [`billion-context-pi`](https://github.com/ranxianglei/billion-context-pi) **v0.1.83** for the [Pi coding agent](https://github.com/earendil-works/pi-coding-agent). It keeps upstream's model-driven context compression (ACP) and focuses on two things: **staying stable for daily long sessions** and **spending as few tokens as possible**, including letting a cheap model write the summaries.
 
----
+Upstream now recommends its successor [`billion-context`](https://github.com/ranxianglei/billion-context). This fork stays on the 0.1.83 runtime and cherry-picks upstream fixes when they matter; it is not affiliated with upstream.
 
-## Community
+## Differences from upstream 0.1.83
 
-QQ Group:
-1056132097 (full)
-1108730198 (open)
+| | Upstream 0.1.83 | This fork |
+|---|---|---|
+| Who writes summaries | The main (usually expensive) model | Optional **dedicated summary model**, e.g. a cheap one; the main model only picks ranges and writes a 1–2 sentence fallback |
+| Summary rules in every nudge | Full rules sent to the main model | Only to the summary model when one is configured |
+| Re-compressing old blocks | Raw history re-sent, then cut to 120K chars head/tail | Earlier block summaries are passed in whole and carried forward; raw text is sized to the summary model's window |
+| Summary visible to the main model | No (Pi adapter drops the summary messages), so models often decompress right after compressing | Yes, the full summary sits in the `compress` call |
+| Model-facing tools | `compress`, `decompress`, `search_context`, `acp_status`, `acp_cache` | `compress` + one `acp_context` tool |
+| Resident prompt | ~5,800 tokens | ~700 tokens |
+| System prompt | Replaces Pi's prompt, so other extensions' prompt additions are dropped | Injected as its own section; other extensions keep theirs |
+| Delegation, auto-update | On | Off |
 
----
+Also fixed: emergency truncation that never reached the wire, emergency truncation cutting the latest user message, a token meter that ignored new messages, uncounted `compress` thinking, facade tools escaping recency policies, and tests writing into the real `~/.pi`. Details and reasons are in [MAINTENANCE.md](MAINTENANCE.md) (Chinese).
 
-## 📄 Paper / Preprint
-
-- **[Model-Driven Incremental Hierarchical Compression: Training-Free Multi-Generational Context Management for Long-Lived Coding Agents](./paper/model-driven-incremental-hierarchical-compression-training-free-multi-generational-context-management-for-long-lived-coding-agents.md)** (English, v0.2)
-
-> 📝 **The paper itself is open-sourced under the MIT License as part of the codebase (`paper/`). It is a living document — anyone may edit it; improvements are welcome via pull request.**
-
-A production-scale longitudinal study: 4.5 months, three hosts, 174,327 model calls, 18.76B cumulative input tokens (~24.7B across all hosts), zero window violations on 204,800-token models, marathon sessions of 8,584–12,049 calls.
-
----
-
-<p align="center">
-<a href="https://www.npmjs.com/package/billion-context-pi"><img src="https://img.shields.io/npm/v/billion-context-pi.svg?style=flat-square" alt="npm"></a>
-<a href="https://github.com/ranxianglei/billion-context-pi/blob/master/LICENSE"><img src="https://img.shields.io/npm/l/billion-context-pi.svg?style=flat-square" alt="license"></a>
-<a href="https://github.com/ranxianglei/billion-context-pi"><img src="https://img.shields.io/badge/GitHub-ranxianglei%2Fbillion--context--pi-181717?style=flat-square&logo=github" alt="GitHub"></a>
-</p>
-
-<p align="center">
-<code>pi install npm:billion-context-pi</code>
-</p>
-
----
-
-> **Host support:** this plugin is for **Pi**. It does **not** support **OMP (oh-my-pi)** — on an OMP host it refuses to run. OMP users: use [billion-context](https://github.com/ranxianglei/billion-context) instead (`bili omp`, built-in plugin). Full client → package table: see [Which do I need?](#which-do-i-need); OMP details: [docs/omp.md](./docs/omp.md).
-
-## Why?
-
-When conversations get long, the model runs out of context. Most tools hard-truncate — silently dropping earlier messages. **billion-context** gives the model a `compress` tool: the LLM decides **when** and **what** to compress into high-fidelity summaries, preserving critical details (file paths, decisions, error strings) while reclaiming context space.
-
-Unlike Pi's built-in auto-compaction (which replaces everything with a single summary), billion-context:
-- **Preserves structure** — compressed ranges become labeled blocks you can decompress later
-- **Multi-tier** — summaries can be further distilled (T1 → T2 → T3) as sessions grow
-- **Searchable** — `search_context` finds information inside compressed blocks without decompressing
-- **Selective** — protected tools, user messages, and the recent working set are never compressed
-
-This means:
-
-1. **A single session handles enormous workloads.** Per simulation tests of the three-tier architecture (see [opencode-acp](https://github.com/ranxianglei/opencode-acp)), one session can process on the order of 10–60 billion cumulative tokens — while retaining long-term memory of distant key information (paths, decisions, signatures). You can work in the **same session for months** without outgrowing the context.
-2. **Context stays lean over the long run.** In practice context typically holds under ~150K tokens (opencode-acp keeps it under ~200K), so compared to traditional compaction that lets context balloon toward 1M, **a single session costs roughly 5× less in tokens**.
-
-## Which do I need?
-
-Pick by your client:
-
-| Client | Use |
-|---|---|
-| **pi** | [`billion-context-pi`](https://github.com/ranxianglei/billion-context-pi) (in-process extension) |
-| **opencode** | [`opencode-acp`](https://github.com/ranxianglei/opencode-acp) (in-process extension) |
-| **omp** | [`billion-context`](https://github.com/ranxianglei/billion-context) via `bili omp` (built-in plugin) |
-| **everything else** | [`billion-context`](https://github.com/ranxianglei/billion-context) — `bili <client>` (launcher, preferred) or `/bili/` prefix |
-
-> Why OMP can't use this in-process extension, and what happens if you try anyway: see [Host support](#host-support) and [docs/omp.md](./docs/omp.md).
+Token figures above were measured on 0.1.69 with a `ceil(chars / 4)` proxy in a blank Pi 0.85 process (tools and injected prompt only); they have not been re-measured on 0.1.83.
 
 ## Install
 
 ```bash
-pi install npm:billion-context-pi
+pi install git:github.com/kunkun9527/billion-context-pi-lean@v0.1.83-lean.6
 ```
 
-That's it. The extension auto-loads on next Pi startup. No configuration needed — it reads your model's context window automatically.
+Requires Pi >= 1.x for the dedicated summary model. Do not enable it together with `billion-context-pi` or `billion-context`: tools and hooks would register twice. Pi's built-in compaction is cancelled while this extension is active.
 
-> **Using another sub-agent extension?** billion-context-pi ships its own `acp_delegate` sub-agent tool (see below) at a fraction of the context cost (~600 tok vs ~7K tok/turn). Two delegation tools in one session only make the model's choice noisier, so pick one:
-> - **Use ACP's delegate** — remove the other extension: `pi remove npm:pi-subagents`
-> - **Keep your own sub-agent** — turn ACP's delegate off in `acp.json`: `{ "delegate": false }` (see *Using your own sub-agent instead* below)
->
-> If you keep `pi-subagents` installed, billion-context-pi detects it at session start: a **project-level** install (`<cwd>/.pi/npm` or the project extensions dir) automatically stands `acp_delegate` down for that project — a reminder then tells you how to give pi-subagents' agents ACP compression via `/acp-subagents`. A **user-level-only** install (`~/.pi/npm`, user extensions dir) leaves `acp_delegate` active and logs a warning instead. Set `"delegate": { "forceEnable": true }` in `acp.json` to keep `acp_delegate` active regardless of detection.
+## Cheap summary model
 
-## How it works
-
-billion-context intercepts Pi's `context` event (fired before each LLM call) and runs an 8-stage pipeline:
-
-```
-assign refs → sync blocks → prune → filter → hide calls → recommend → nudge → emergency truncate
+```text
+/acp compact                    # show the current setting
+/acp compact <provider/model>   # any model in Pi's model registry, e.g. a cheap one
+/acp compact session            # same model as the session, separate call
+/acp compact reset              # main model writes summaries again
 ```
 
-Each message gets an invisible `<acp>` ref tag (`m00001`, `m00002`, ...) visible to the model but not the user. The model uses these refs to specify compression ranges.
+The choice is saved as `compressionModelId` in `~/.pi/acp.json` (a project's `.pi/acp.json` wins). Use `provider/id`: a bare id shared by several providers is ambiguous. Models come from Pi's live registry, so providers registered by extensions work too. A model being listed does not mean the provider can serve it: when the call fails, the block keeps the main model's fallback summary and `~/.pi/acp.log` records `compression-model-failed`.
 
-Pi's built-in auto-compaction is cancelled — billion-context is the sole context manager.
-
-## Plugin compatibility & ordering
-
-billion-context takes over context management by intercepting Pi's `context` event. **Pi has no plugin priority mechanism** — when multiple extensions register handlers for the same event, they run in a fixed sequence (load order), with no `priority`/`weight` field and no way for the user to control the order. The `context` event specifically is a *pipeline*: every handler receives the previous handler's output, there is no short-circuit, and the **last** handler has the final say over what reaches the model.
-
-This has two practical implications:
-
-1. **Keep exactly one context-compression plugin installed.** If you run two compression plugins together (e.g. billion-context-pi alongside another), both will rewrite the message list and clobber each other's work — compressed ranges can be re-expanded or corrupted. Pi's built-in auto-compaction is already cancelled automatically by billion-context-pi, but any *third-party* compression/compaction extension should be uninstalled.
-
-2. **Even with a single compression plugin, interference is still possible in rare cases.** Load order under Pi is determined by filesystem discovery order (`fs.readdirSync` over `.pi/extensions/` → global → packages), which is not fully deterministic. If another (non-compression) extension also hooks the `context` event and happens to load *after* billion-context-pi, it could modify the compressed output. billion-context-pi rebuilds its working set from the session log rather than the chained input, which makes it robust to handlers that run *before* it — but it cannot defend against a handler that runs *after* it. This is a limitation of Pi's extension model; if you observe unexpected context behavior, check whether other installed extensions intercept the `context` event.
-
-### Sidecar contract (downstream tools)
-
-Compression state lives next to the session log in `<sessionFile>.acp.json`. For tools that read it directly (cross-session retrieval, memory layers):
-
-- The file carries `schemaVersion` and `producer` at the top level. **A missing `schemaVersion` means v1.** An unknown *newer* version means fields may have changed — skip the file, log once, never rewrite it.
-- `blocks[]` entries match the exported `BcpBlockV1` type (kernel `CompressionBlock` verbatim); unknown extra fields are additive and must be ignored.
-- The file is always replaced **atomically** (temp file + rename), so a concurrent reader sees either the previous or the next complete file, never a torn write.
-
-Import the contract from TypeScript via `import type { BcpBlockV1 } from "billion-context-pi/contract"`; a JSON Schema for offline validation is published as the `billion-context-pi/contract/schema` subpath. No runtime dependency is required — the file remains the source of truth.
-
-## Host support
-
-billion-context-pi is built for the **Pi** coding agent (`@earendil-works/pi-coding-agent`) and detects the host at session start — the full client → package table lives in [Which do I need?](#which-do-i-need):
-
-- **Pi** — fully supported.
-- **OMP (`can1357/oh-my-pi`)** — **not supported.** OMP's in-process session API diverges from Pi's, so the compression refs the extension injects can drift out of sync with the session's real refs and `compress` calls fail with `does not exist in this session` (issue [#234](https://github.com/ranxianglei/billion-context-pi/issues/234)). On OMP the extension now **refuses service**: it prints a warning, disables the ACP tools, and leaves the host's own context handling untouched.
-
-  **Use [billion-context](https://github.com/ranxianglei/billion-context) instead** — it runs the same compression pipeline server-side in a proxy, so the refs never diverge:
-
-  ```bash
-  npm install -g billion-context
-  bili omp   # run OMP through the proxy
-  ```
-
-  Full details: [docs/omp.md](./docs/omp.md).
-
-- **Coexisting with the [billion-context](https://github.com/ranxianglei/billion-context) wire proxy** — running both on the same session double-compresses every request (wasted tokens, nested summaries, two ref coordinate systems). This is prevented automatically: launcher paths (`bili pi`, …) export `BILLION_CONTEXT_PROXY`, and models whose `baseUrl` routes through the proxy (`…/bili/https://upstream…`) are detected at session start — in both cases billion-context-pi stands down with a warning and leaves the proxy as the sole compressor. One exception: transparent mode, where traffic reaches the proxy via `HTTPS_PROXY` so the URL carries no `/bili/` prefix — that is undetectable from the URL, so export `BILLION_CONTEXT_PROXY=1` before starting pi in that case.
-
-- **Reverse collision — the `billion-context` thin plugin shadows `/acp`.** If the pi plugin shipped inside [`billion-context`](https://github.com/ranxianglei/billion-context) is also installed (an entry pointing at a `billion-context` install in `"packages"` of `~/.pi/agent/settings.json`, e.g. from `bili plugin install pi`), it registers its own `/acp` command, and Pi has no duplicate-command guard — which one answers depends on load order. Telling symptom: on a plain `pi` launch, typing `/acp` shows ``bili: no proxy detected (run via `bili <client>` or set a /bili/ baseURL)`` — that string is emitted by the thin plugin, **not** by billion-context-pi, and pi does not need `bili` running. Fix: the collision only bites when you launch plain `pi` — remove the thin plugin there (`bili plugin remove pi`, or drop the non-`npm:billion-context-pi` entry from that settings file) so billion-context-pi owns `/acp`. If you launch via `bili pi` instead, nothing needs removing: the launcher exports `BILLION_CONTEXT_PROXY` and billion-context-pi stands down entirely (bullet above), so both plugins may stay installed side by side. Note: `bili plugin install pi` removes an existing `npm:billion-context-pi` entry from that file without saying so ([billion-context#788](https://github.com/ranxianglei/billion-context/issues/788)).
-
-## Model-facing tools
-
-| Tool | What it does |
-|------|-------------|
-| `compress` | Replace a contiguous message range with a detailed summary |
-| `decompress` | Restore a previously compressed block's content |
-| `search_context` | Search compressed block summaries (and visible messages) by keyword |
-| `acp_status` | Show context usage, compressed blocks, compressible ranges |
-| `acp_cache` | Prompt-cache reconciliation: grand ledger (input/cached/hit rate), per-request miss attribution, per-fold economics |
-| `acp_rule` | Record a short, principle-level reminder that survives compression (opt-in: `"rules": true`) |
-| `acp_delegate` | Spawn a clean-context sub-agent for a task (review / research / implement / plan / advise) |
-| `acp_delegate_wait` | Block until a delegate run finishes (returns its result; times out otherwise) |
-| `acp_delegate_cancel` | Cancel a running delegate by runId |
-
-The four `acp_delegate*` tools are optional: if you bring your own sub-agent extension, disable them with one `acp.json` key — see *Using your own sub-agent instead* below. `acp_rule` is likewise opt-in — off by default, enable it with `"rules": true`.
-
-### acp_delegate — clean-context delegation
-
-Hand a self-contained task to a fresh pi process running in a clean context. Five built-in roles, each with a system prompt and a **soft tool guardrail**:
-
-| Role | Tools | Best for |
-|------|-------|----------|
-| `reviewer` | read, bash, grep, find, ls + ACP | Read-only code review (bugs, risks, file:line) |
-| `researcher` | read, bash, grep, find, ls + ACP | Read-only codebase investigation |
-| `worker` | read, edit, write, bash | Make code changes |
-| `planner` | read, bash, grep, find, ls + ACP | Analyze + propose a step-by-step plan |
-| `oracle` | read, bash, grep, find, ls + ACP | Answer questions / advise |
-
-Read-only roles (reviewer, researcher, planner, oracle) receive a restricted tool allowlist (`read, bash, grep, find, ls`) plus ACP context tools (`compress, decompress, search_context, acp_status`) so they can manage their own context. This prevents accidental file modifications, but `bash` can bypass it - **it is a guardrail, not a security boundary**.
-
-Worker runs on Pi's full default toolset - no `--tools` allowlist is applied, so any loaded extension or custom tools (e.g. ACP, LSP, MCP) remain available. This keeps primary-task delegation fully capable. The `read, edit, write, bash` listing above reflects core tools only.
-
-The full delegate result is saved to a file (`$TMPDIR/acp-delegate/<runId>.out`, defaulting to `/tmp/acp-delegate/<runId>.out`); the tool result and injected notification carry only the **task title + file path** (no preview) - use `read` for the details. This keeps the parent context lean.
-
-- **Interactive (TUI) & RPC modes**: `async:true` (default) runs the child in the background; a short completion notification is injected into the chat when it finishes — **unless the model already read the result file after the run finished** (detected via the `read` tool or a bash command referencing the file), in which case the notification is skipped: the model already has the result, so re-injecting it would only waste context. Set `delegate: { notifyIfRead: "always" }` in `acp.json` to restore the always-inject behavior.
-- **Print / JSON modes** (`pi -p`, SDK): `async:true` auto-downgrades to **synchronous** — the result returns as the tool result in the same turn (the parent exits after one turn, so background injection would be lost).
-- **Failures are loud, never silent.** A run that fails (nonzero exit, spawn error, watchdog timeout) injects a `FAILED ⚠️` notification carrying a short error excerpt, so a failed delegate cannot hide among sibling completions. If a notification cannot be delivered at all, a recovery notice is attached to the next delegate notification or the next `acp_delegate` / `acp_delegate_wait` / `acp_delegate_cancel` tool result — a dispatched run's failure always reaches the model before it wraps up.
-
-In the **interactive TUI**, async runs also show a live status widget below the editor (agent, elapsed seconds, task preview), so you always know what's running and for how long. Disabled automatically in RPC/print/JSON.
-
-#### Using your own sub-agent instead
-
-If you already run another sub-agent extension (pi-subagents, pi-lens, …), turn ACP's delegate off so the model is offered only one way to delegate. In `~/.pi/acp.json` (global) or `<project>/.pi/acp.json` (per project):
-
-```json
-{ "delegate": false }
-```
-
-- Equivalent object form: `{ "delegate": { "enabled": false } }`.
-- **What it removes:** the `acp_delegate`, `acp_delegate_wait` and `acp_delegate_cancel` tools, the `ACP_DELEGATE NOTIFICATIONS` system-prompt section, and the `ctrl+alt+f` fleet shortcut (`/acp-fleet` then reports that delegate is off). Compression is unaffected — `compress`, `decompress`, `search_context`, `acp_status` and `acp_cache` stay.
-- **When it applies:** the three tools are registered at session start, so a change needs a **new session** (or a Pi restart). The system-prompt section is resolved live on every turn, so it can disappear mid-session before the tools do.
-- Want to drop only the prompt section and keep the tools? Set `{ "delegatePrompt": null }`.
-- Pi's `--exclude-tools acp_delegate,acp_delegate_wait,acp_delegate_cancel` is **not** a substitute: it hides the tools but the model still receives the `ACP_DELEGATE NOTIFICATIONS` section describing tools it cannot call. Use `delegate: false`.
-
-## `/acp` command
-
-Rich status display for the user:
-
-```
-╭─────────────────────────────────────────────╮
-│           ACP Context Analysis              │
-╰─────────────────────────────────────────────╯
- billion-context-pi@0.1.14
-
-Context: 12% (120K / 1.0M)
-Growth: +15K since last nudge
-
-Token Breakdown:
-  System     ░░░░░░░░░░░░░░░░░░░░   2%  2.1K
-  Tool       ████████████░░░░░░░░  58%  69.6K
-  Summaries  ████░░░░░░░░░░░░░░░░  20%  24.0K
-  Code       ██░░░░░░░░░░░░░░░░░░  10%  12.0K
-  Text       █░░░░░░░░░░░░░░░░░░░   5%  6.0K
-
-Blocks: 3 active (3.7K summary, 15.2K original compressed)
-  b1 (T1)  3.7K→599  age=5m  "API exploration"
-  b2 (T1)  8.2K→2.1K  age=2m  "Debug session"
-  b3 (T2)  3.3K→1.0K  age=1m  "Architecture review"
-```
-
-## `/acp-subagents` command
-
-**Optional, one-time setup — only if you also use [pi-subagents](https://github.com/nicobailon/pi-subagents).**
-
-billion-context-pi's own `acp_delegate` tool works standalone. If you additionally keep pi-subagents installed and want its builtin sub-agents to have ACP context tools (`compress`/`decompress`/`search_context`/`acp_status`) for long-running tasks, run:
-
-```
-/acp-subagents
-```
-
-It discovers the agents and their tool baselines from the installed pi-subagents package and appends the four ACP tools to `subagents.agentOverrides` in `~/.pi/agent/settings.json` (safe write: backup + verify). Nothing is written automatically — this command is the only write path. Re-run it after upgrading pi-subagents. For git installs or forks, pass the package directory explicitly: `/acp-subagents <installDir>`.
+Summaries are written by the summary model with rules that keep paths, numbers, decisions and open objectives verbatim. Its output is rejected (fallback kept) when it hits the output limit.
 
 ## Configuration
 
-billion-context-pi works out of the box with no configuration — it reads your model's context window automatically and applies sensible defaults.
+`~/.pi/acp.json` and `<project>/.pi/acp.json`. All upstream options in [CONFIGURATION.md](CONFIGURATION.md) apply, except: `delegate.*`, `delegatePrompt` and `autoUpdate` are forced off, and `promptSections.*` is ignored because the fork injects its own prompt (a one-time warning tells you). Compression timing can be tuned per provider and model:
 
-Behavior is tuned via an optional `acp.json` config file (`~/.pi/acp.json` for global defaults, `<project>/.pi/acp.json` for per-project overrides) plus a few environment variables. For the complete reference — every key, type, default, and the precedence order — see **[CONFIGURATION.md](./CONFIGURATION.md)** ([中文](./CONFIGURATION.zh-CN.md)).
-
-### Logging
-
-billion-context-pi writes a structured, always-on log to `~/.pi/acp.log` (override with `ACP_LOG_FILE`). It covers the model's whole working session and is useful for diagnosing problems:
-
-- **Always written** (even with `debug: false`): `error`, `warn`, `info` levels — session start, every context turn (token usage / nudge decision), compress/decompress, delegate spawn/done, and **all errors and warnings** (config/state/tool failures, delegate errors, guardrail caps, update failures). Error lines include the message and stack trace.
-- **Written only when `debug: true`**: verbose `debug`-level diagnostics (full field dumps, per-turn internals).
-
-- **Nudge audit trail**: whenever a context-limit nudge is injected, a compact one-line record (e.g. `[ACP nudge] EMERGENCY 95% · T1 · top range m00120–m00168`) is appended as a *display-only* session entry — it survives process restarts, shows up in TUI scrollback and the session file, and is never sent to the model.
-
-Each line: `<ISO timestamp> [<level>] [<scope>] key=value key=value`. Multi-line values (e.g. the full nudge text in `nudge-injected`) are escaped (`\n` → literal `\\n`), so every entry occupies exactly **one physical line** and stays self-contained for `grep`. The file rotates to `~/.pi/acp.log.old` at 10 MB.
-
-```sh
-tail -f ~/.pi/acp.log                 # watch the session live
-grep '\[error\]' ~/.pi/acp.log        # surface every recorded failure
+```json
+{
+  "compressionModelId": "<provider>/<cheap-model>",
+  "compress": {
+    "promptPack": "lean",
+    "providers": {
+      "<provider>": {
+        "models": {
+          "<main-model>": { "maxContextLimit": 0.4, "nudgeGrowthTokens": 70000, "minPressureBenefitTokens": 30000 }
+        }
+      }
+    }
+  }
+}
 ```
 
-### Compression philosophy
+## Model-facing tools
 
-The model receives detailed guidance (in its system prompt) on **when** to compress, **what** to keep verbatim (paths, signatures, errors, decisions, user intent), and **what** to drop (verbose logs, duplicates, consumed exploration). This guidance is injected on every turn so it stays in the model's attention.
+- `compress`: fold consumed message ranges into summary blocks.
+- `acp_context`: `decompress`, `search_context`, `acp_status`, `acp_cache` and `help`, e.g. `{ "op": "search_context", "args": { "query": "authentication" } }`.
 
-### What gets protected
+## Known limitations
 
-billion-context protects four categories of content from compression:
+- The summary model occasionally prefixes a summary with its own reasoning text (about 1 in 60 blocks observed).
+- Kernel (`acp-kernel@0.0.98`) bugs are worked around in the adapter; the kernel source is not vendored yet.
 
-1. **Always-protected tools** — `compress` calls are hard-protected (they're load-bearing metadata; compressing them breaks decompress and the "summary is historical" contract).
-2. **Soft recent-zone** — the last N messages (default 5) and last ~5K tokens are soft-protected so the model keeps its working set. Tool results from `decompress`, `search_context`, `read`, and `bash` are **excluded** from this zone: they're large and meant to be compressible once consumed, so they don't eat the protected budget.
-3. **Last user message** — always protected (user intent must survive).
-4. **User-configured tool protection** — `protectedTools` / `protectedLatestTools` in `acp.json` hard-exclude matched tool calls+results (full history vs. latest-only; see [CONFIGURATION.md](./CONFIGURATION.md)).
-
-## Session storage & migration
-
-billion-context-pi persists each session's compression state in a **sidecar file** next to the session transcript. Every session lives as two files in Pi's sessions directory (`~/.pi/agent/sessions/`):
-
-| File | Contents |
-|------|----------|
-| `<id>.jsonl` | The conversation transcript (messages, tool calls) |
-| `<id>.jsonl.acp.json` | The ACP compression state (compressed blocks, message refs, nudge + stats) |
-
-The `.acp.json` sidecar is what holds your compressed blocks. Without it, the session runs on its full raw history until ACP compresses again.
-
-### Migrating a session (cross-machine copy / backup-restore)
-
-Pi's built-in export/import moves only the **transcript**, not the ACP state. Two things are affected:
-
-1. **The `.acp.json` sidecar is not carried.** As a fallback, ACP now **rebuilds the compression state by replaying the session log itself**: on the first context event after import, it re-applies every successful `compress` call recorded in the transcript (assistant tool-call arguments + tool results) through the kernel, restoring the block structure, summaries, message refs and cumulative stats, then persists the recreated sidecar (#299). Errored, no-op and unparseable calls are skipped; the replay runs only when no sidecar and no inheritable parent state exists. This removes the old behavior — resending the entire raw history until the nudge re-compresses, with a one-time full re-cache cost and context bloat back to original size. Caveat: the replay restores what the *log* records, so summaries come back exactly as stored in the transcript, and stats like per-message token snapshots are re-derived rather than bit-identical.
-2. **Export drops the `parentSession` header.** Clone/fork child sessions rely on that header field to inherit their parent's compression state; once exported, the link is gone even if the parent's files still exist on the target machine. (A host-side fix is proposed upstream in [pi#1](https://github.com/ranxianglei/pi/pull/1).)
-
-**To migrate a session with its compression state intact, copy both files together** (they share the same base name):
+## Development
 
 ```bash
-# copy the pair
-cp <id>.jsonl <id>.jsonl.acp.json  <dest>/
-# ... or back up / restore the whole directory
-cp -r ~/.pi/agent/sessions  <backup>/pi-sessions
+npm ci
+npm run check   # typecheck + tests + build + facade checks
 ```
 
-Restore them next to each other on the target machine. For clone/fork children, also bring the parent's pair so `parentSession` resolves.
-
-> If you import only the `.jsonl`, ACP's log-replay fallback rebuilds the state automatically on the next session (see above). Copying the pair is still preferred — it is exact, while the replay re-derives token snapshots and can only restore what the transcript records.
-
-## Built on acp-kernel
-
-The compression engine is [`acp-kernel`](https://github.com/ranxianglei/acp-kernel) — a platform-agnostic, MIT-licensed library with 208 tests. It's bundled inline into `dist/index.js`, so there are zero runtime dependencies.
+`dist/` is committed because Pi installs git packages without building; commit it together with source changes. See [MAINTENANCE.md](MAINTENANCE.md).
 
 ## License
 
-MIT.
+MIT. Based on [`billion-context-pi`](https://github.com/ranxianglei/billion-context-pi) by ranxianglei and contributors (MIT), including the dedicated summary model from upstream PR #241.
