@@ -82,7 +82,8 @@
 ## 已知事项
 
 - `compressionModelId` 填 `provider/id`。裸 id 在多个 provider 下重名时判为歧义。
-- 注册表里有某个模型，不代表 provider 真能服务它。调用失败时只留下回退摘要；在 `~/.pi/acp.log` 中搜 `compression-model-failed`。
+- 注册表里有某个模型，不代表 provider 真能服务它。调用失败时该范围不压缩；在 `~/.pi/acp.log` 中搜 `compression-model-failed`。
+- 旧块的 Open objectives 在 refold 时可能被专用模型漏掉（实测 b24 漏了 3 条，提示词约束不够）。计划：代码提取被并入块的 Open objectives 作为必继承清单，摘要写完后校验 ref，缺的补回。评测脚本在 `M:/Temp/luna-eval/tools/`（内存盘，重启即失）。
 - 专用模型偶尔会把自己的推理文字写进摘要开头（实测约 1/60 个块），尚未处理。
 - 不要和原版 `billion-context-pi` 同时启用（工具和钩子会注册两次）。
 - 命名：2026-10-12 之前叫 Lean2（子目录 `lean2/`、版本 `0.1.83-pr241-lean2.N`），之后改名为 Lean，版本从 `0.1.83-lean.6` 续。更早的 Lean v1（`0.1.69-lean.1`，基于 npm 包的外壳）保留在 `legacy-v1` 分支。
