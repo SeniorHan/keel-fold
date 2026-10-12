@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { coreOutToAgentMessages, inlineBlockSummaries } from "../src/messages.js";
+import { coreOutToAgentMessages } from "../src/messages.js";
+import { inlineBlockSummaries } from "../src/compress-tool.js";
 import type { CompressionBlock, CoreMessage } from "acp-kernel";
 import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 
@@ -252,4 +253,28 @@ test("inlineBlockSummaries: legacy block without refs maps to a single-entry cal
   const out = inlineBlockSummaries(stubbedOut(compressArgs()), [block("b1", "tc1", undefined, undefined, "LEGACY FULL")]);
   const content = (callsOf(out[0])[0]!.arguments as { content: Array<{ summary: string }> }).content;
   assert.equal(content[0]!.summary, "LEGACY FULL");
+});
+
+test("inlineBlockSummaries: lenient argument shapes the compress tool accepts are covered", () => {
+  const block1 = block("b1", "tc1", "m00001", "m00009", "FULL ONE");
+  const block2 = block("b2", "tc1", "m00020", "m00022", "FULL TWO");
+  const wrap = (args: unknown) => [{ role: "assistant", content: [{ type: "toolCall", id: "tc1", name: "compress", arguments: args }], ...assistantMeta() }] as unknown as ReturnType<typeof coreOutToAgentMessages>;
+  const summaries = (out: ReturnType<typeof coreOutToAgentMessages>) => {
+    const content = (callsOf(out[0])[0]!.arguments as { content: unknown }).content;
+    const list = (typeof content === "string" ? JSON.parse(content) : content) as Array<{ startId: string; summary: string }>;
+    return list.map((e) => `${e.startId}=${e.summary}`);
+  };
+
+  const bare = '{"startId":"m00001","endId":"m00009","summary":"a"},{"startId":"m00020","endId":"m00022","summary":"b"}';
+  assert.deepEqual(summaries(inlineBlockSummaries(wrap({ content: bare }), [block1, block2])), ["m00001=FULL ONE", "m00020=FULL TWO"], "bare objects string");
+
+  const refs = { content: [{ startRef: "m00001", endRef: "m00009", summary: "a" }, { startRef: "m00020", endRef: "m00022", summary: "b" }] };
+  assert.deepEqual(summaries(inlineBlockSummaries(wrap(refs), [block1, block2])), ["m00001=FULL ONE", "m00020=FULL TWO"], "startRef/endRef keys");
+
+  const single = { startId: "m00001", endId: "m00009", summary: "a", topic: "t" };
+  const out = inlineBlockSummaries(wrap(single), [block1]);
+  assert.deepEqual(summaries(out), ["m00001=FULL ONE"], "top-level single range");
+  const args = callsOf(out[0])[0]!.arguments as Record<string, unknown>;
+  assert.equal(args.topic, "t", "top-level topic kept");
+  assert.equal(args.summary, undefined, "top-level range keys moved into content");
 });

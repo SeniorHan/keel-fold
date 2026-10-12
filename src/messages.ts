@@ -1,5 +1,5 @@
 import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
-import { defaultCountTokens, type CompressionBlock, type CoreMessage } from "acp-kernel";
+import { defaultCountTokens, type CoreMessage } from "acp-kernel";
 import { rewriteTagTokens } from "./tag-tokens.js";
 import type { TurnBoundaryEntry } from "./turn-boundary.js";
 
@@ -384,83 +384,6 @@ export function coreOutToAgentMessages(
   }
 
   return out;
-}
-
-/**
- * Lean2: put each active block's full current summary back into the outbound
- * compress-call arguments. The kernel stubs those summaries to 200 chars
- * because it renders the full text as separate `acp_summary_` messages, but
- * coreOutToAgentMessages drops those (pi has no slot for them), so without this
- * the main model only ever sees its own stubbed fallback — never the summary
- * the dedicated model wrote — and decompresses blocks just to read them.
- * Ranges are matched by start/end ref; a single-entry call whose callId owns a
- * single active block (legacy blocks without refs) maps directly.
- */
-export function inlineBlockSummaries(
-  messages: AgentMessage[],
-  blocks: readonly CompressionBlock[],
-): AgentMessage[] {
-  const byCall = new Map<string, CompressionBlock[]>();
-  for (const block of blocks) {
-    if (!block.active || !block.compressCallId) continue;
-    const list = byCall.get(block.compressCallId) ?? [];
-    list.push(block);
-    byCall.set(block.compressCallId, list);
-  }
-  if (byCall.size === 0) return messages;
-
-  let changedAny = false;
-  const out = messages.map((message) => {
-    const m = message as AnyMessage;
-    if (m.role !== "assistant" || !Array.isArray(m.content)) return message;
-    let changed = false;
-    const content = m.content.map((part) => {
-      const call = part as { type?: string; id?: string; name?: string; arguments?: unknown };
-      if (call.type !== "toolCall" || call.name !== "compress" || !call.id) return part;
-      const owned = byCall.get(call.id);
-      if (!owned) return part;
-      const args = withBlockSummaries(call.arguments, owned);
-      if (args === null) return part;
-      changed = true;
-      return { ...call, arguments: args };
-    });
-    if (!changed) return message;
-    changedAny = true;
-    return { ...(message as object), content } as AgentMessage;
-  });
-  return changedAny ? out : messages;
-}
-
-function withBlockSummaries(args: unknown, owned: CompressionBlock[]): unknown | null {
-  if (!args || typeof args !== "object" || Array.isArray(args)) return null;
-  const obj = args as Record<string, unknown>;
-  let entries: unknown[] | null = null;
-  const wasString = typeof obj.content === "string";
-  if (Array.isArray(obj.content)) entries = obj.content;
-  else if (wasString) {
-    try {
-      const inner = JSON.parse(obj.content as string);
-      if (Array.isArray(inner)) entries = inner;
-    } catch {
-      entries = null;
-    }
-  }
-  if (!entries || entries.length === 0) return null;
-
-  const sole = entries.length === 1 && owned.length === 1 ? owned[0] : undefined;
-  let changed = false;
-  const next = entries.map((entry) => {
-    if (!entry || typeof entry !== "object") return entry;
-    const e = entry as Record<string, unknown>;
-    const start = typeof e.startId === "string" ? e.startId : e.messageId;
-    const end = typeof e.endId === "string" ? e.endId : e.messageId;
-    const block = owned.find((b) => b.startRef === start && b.endRef === end) ?? sole;
-    if (!block || e.summary === block.summary) return entry;
-    changed = true;
-    return { ...e, summary: block.summary };
-  });
-  if (!changed) return null;
-  return { ...obj, content: wasString ? JSON.stringify(next) : next };
 }
 
 function compactedArgsFrom(kernelText: string | undefined, originalArgs: unknown): unknown | null {

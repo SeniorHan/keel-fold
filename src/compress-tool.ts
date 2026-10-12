@@ -8,6 +8,7 @@ import {
   type ToolInfo,
 } from "@earendil-works/pi-coding-agent";
 import type { Api, Context, Message, Model, Tool } from "@earendil-works/pi-ai";
+import type { SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import type { AcpRuntime } from "./runtime.js";
 import { MAX_COMPRESS_ATTEMPTS, isPiHost, retryBreakerKey } from "./runtime.js";
 import { isDeclaredForkHost } from "./host.js";
@@ -864,5 +865,86 @@ function extractRangeContent(messages: CoreMessage[], state: CompressionState, s
     return parts.length ? parts : null;
   } catch {
     return null;
+  }
+}
+
+type AgentMessage = SessionMessageEntry["message"];
+const RANGE_KEYS = ["startId", "endId", "startRef", "endRef", "messageId", "summary"];
+
+/**
+ * Lean2: put each active block's full current summary back into the outbound
+ * compress-call arguments. The kernel stubs those summaries to 200 chars
+ * because it renders the full text as separate `acp_summary_` messages, but
+ * coreOutToAgentMessages drops those (pi has no slot for them), so without this
+ * the main model only ever sees its own stubbed fallback — never the summary
+ * the dedicated model wrote — and decompresses blocks just to read them.
+ * Arguments are parsed with normalizeRanges, so every shape the tool accepts
+ * (bare objects, startRef/endRef, single-range, string content) is covered.
+ * Ranges match blocks by start/end ref; a single-range call whose callId owns a
+ * single active block (legacy blocks without refs) maps directly. Ranges with
+ * no active block are dropped, as the kernel does for dead ranges.
+ */
+export function inlineBlockSummaries(
+  messages: AgentMessage[],
+  blocks: readonly CompressionBlock[],
+): AgentMessage[] {
+  const byCall = new Map<string, CompressionBlock[]>();
+  for (const block of blocks) {
+    if (!block.active || !block.compressCallId) continue;
+    const list = byCall.get(block.compressCallId) ?? [];
+    list.push(block);
+    byCall.set(block.compressCallId, list);
+  }
+  if (byCall.size === 0) return messages;
+
+  let changedAny = false;
+  const out = messages.map((message) => {
+    const m = message as { role?: string; content?: unknown };
+    if (m.role !== "assistant" || !Array.isArray(m.content)) return message;
+    let changed = false;
+    const content = m.content.map((part) => {
+      const call = part as { type?: string; id?: string; name?: string; arguments?: unknown };
+      if (call.type !== "toolCall" || call.name !== "compress" || !call.id) return part;
+      const owned = byCall.get(call.id);
+      if (!owned) return part;
+      const args = withBlockSummaries(call.arguments, owned);
+      if (args === null) return part;
+      changed = true;
+      return { ...call, arguments: args };
+    });
+    if (!changed) return message;
+    changedAny = true;
+    return { ...(message as object), content } as AgentMessage;
+  });
+  return changedAny ? out : messages;
+}
+
+function withBlockSummaries(args: unknown, owned: CompressionBlock[]): Record<string, unknown> | null {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return null;
+  const ranges = normalizeRanges(args as CompressArgs);
+  if (typeof ranges === "string" || ranges.length === 0) return null;
+
+  const sole = ranges.length === 1 && owned.length === 1 ? owned[0] : undefined;
+  const entries: RangeEntry[] = [];
+  for (const r of ranges) {
+    const block = owned.find((b) => b.startRef === r.startId && b.endRef === r.endId) ?? sole;
+    if (block) entries.push({ ...r, summary: block.summary });
+  }
+  if (entries.length === 0) return null;
+
+  const obj = args as Record<string, unknown>;
+  const next: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (key !== "content" && !RANGE_KEYS.includes(key)) next[key] = value;
+  }
+  next.content = typeof obj.content === "string" ? JSON.stringify(entries) : entries;
+  return safeJson(next) === safeJson(obj) ? null : next;
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
   }
 }
