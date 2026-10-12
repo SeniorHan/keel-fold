@@ -108,14 +108,35 @@ const PROMPT_RESERVE_TOKENS = 8000;
 const TOKEN_ESTIMATE_SLACK = 0.85;
 const UNKNOWN_WINDOW_MAX_CHARS = 120000;
 
-/** Fit extracted range content into the summary model's context window
- *  instead of a fixed 120K-char cap; truncate only what cannot fit. */
-export function fitToModel(content: string, model: { contextWindow?: number }, maxTokens: number): string {
+/** A chunk of range content; pinned chunks (earlier block summaries) are never truncated. */
+export interface ContentPart {
+  text: string;
+  pinned?: boolean;
+}
+
+function charBudget(content: string, model: { contextWindow?: number }, maxTokens: number): number {
   const window = model.contextWindow;
-  if (typeof window !== "number" || !Number.isFinite(window) || window <= 0) return truncateContent(content, UNKNOWN_WINDOW_MAX_CHARS);
+  if (typeof window !== "number" || !Number.isFinite(window) || window <= 0) return UNKNOWN_WINDOW_MAX_CHARS;
   const budget = Math.floor((window - maxTokens - PROMPT_RESERVE_TOKENS) * TOKEN_ESTIMATE_SLACK);
-  if (budget <= 0) return truncateContent(content, UNKNOWN_WINDOW_MAX_CHARS);
+  if (budget <= 0) return UNKNOWN_WINDOW_MAX_CHARS;
   const tokens = defaultCountTokens(content);
-  if (tokens <= budget) return content;
-  return truncateContent(content, Math.floor((content.length * budget) / tokens));
+  if (tokens <= budget) return Infinity;
+  return Math.floor((content.length * budget) / tokens);
+}
+
+/** Fit extracted range content into the summary model's context window
+ *  instead of a fixed 120K-char cap; truncate only what cannot fit.
+ *  When truncation is needed, pinned parts (earlier block summaries) are
+ *  kept whole and listed first, and only the raw messages are cut — the
+ *  summaries carry the decisions the new summary must inherit. */
+export function fitToModel(parts: ContentPart[], model: { contextWindow?: number }, maxTokens: number): string {
+  const sep = "\n\n";
+  const all = parts.map((p) => p.text).join(sep);
+  const maxChars = charBudget(all, model, maxTokens);
+  if (all.length <= maxChars) return all;
+  const pinned = parts.filter((p) => p.pinned).map((p) => p.text).join(sep);
+  const raw = parts.filter((p) => !p.pinned).map((p) => p.text).join(sep);
+  const rawBudget = maxChars - pinned.length - sep.length;
+  if (!pinned || !raw || rawBudget < 1000) return truncateContent(all, maxChars);
+  return `${pinned}${sep}${truncateContent(raw, rawBudget)}`;
 }

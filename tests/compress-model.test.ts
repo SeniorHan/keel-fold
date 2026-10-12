@@ -180,10 +180,19 @@ test("compress: refolding over an active block sends its summary, not the raw me
 
 test("fitToModel: fits the summary model window, falls back to 120K chars when unknown", () => {
   const text = "x".repeat(400_000); // ~100K tokens
-  assert.equal(fitToModel(text, { contextWindow: 400_000 }, 8000), text);
-  const small = fitToModel(text, { contextWindow: 50_000 }, 8000);
+  assert.equal(fitToModel([{ text }], { contextWindow: 400_000 }, 8000), text);
+  const small = fitToModel([{ text }], { contextWindow: 50_000 }, 8000);
   assert.ok(small.length < 150_000 && small.includes("[... truncated ...]"), String(small.length));
-  assert.equal(fitToModel(text, {}, 8000).length, 120_000);
+  assert.equal(fitToModel([{ text }], {}, 8000).length, 120_000);
+});
+
+test("fitToModel: earlier block summaries survive truncation even mid-range", () => {
+  const raw = "y".repeat(200_000);
+  const parts = [{ text: raw }, { text: "[earlier summary b3]\nKEEP-SiUD412ED-0.5V", pinned: true }, { text: raw }];
+  const out = fitToModel(parts, {}, 8000);
+  assert.ok(out.length <= 120_000, String(out.length));
+  assert.ok(out.startsWith("[earlier summary b3]\nKEEP-SiUD412ED-0.5V"), "pinned summary is kept whole and first");
+  assert.ok(out.includes("[... truncated ...]"));
 });
 
 test("compress: dedicated failure keeps the caller fallback summary", async () => {

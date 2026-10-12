@@ -20,7 +20,7 @@ import { countUnicodeEscapes, findUnverifiableUserQuote, sanitizeSummary } from 
 import { assertNotAborted } from "./abort.js";
 import { getSystemPromptText } from "./compat.js";
 import { UNSUPPORTED_HOST_MESSAGE } from "./omp.js";
-import { buildSummarizeSystemPrompt, fitToModel, resolveModel, summarizeWithModel, SESSION_MODEL_REF } from "./compress-model.js";
+import { buildSummarizeSystemPrompt, fitToModel, resolveModel, summarizeWithModel, SESSION_MODEL_REF, type ContentPart } from "./compress-model.js";
 
 function formatK(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
@@ -840,7 +840,7 @@ function formatCoreMessage(message: CoreMessage): string {
  *  rendered as that block's summary once — `messages` is the raw log, and
  *  re-folding a range over existing blocks (m00195..m01254 over b19+b20)
  *  would otherwise ship 1M+ raw chars that only survive head/tail truncation. */
-function extractRangeContent(messages: CoreMessage[], state: CompressionState, startId: string, endId: string): string | null {
+function extractRangeContent(messages: CoreMessage[], state: CompressionState, startId: string, endId: string): ContentPart[] | null {
   try {
     const range = resolveBoundaries({ startRef: startId, endRef: endId, messages, state });
     const slice = messages.slice(range.startIndex, range.endIndex + 1);
@@ -850,18 +850,18 @@ function extractRangeContent(messages: CoreMessage[], state: CompressionState, s
       for (const id of block.effectiveMessageIds) owner.set(id, block);
     }
     const emitted = new Set<string>();
-    const parts: string[] = [];
+    const parts: ContentPart[] = [];
     for (const message of slice) {
       const block = owner.get(message.id);
       if (!block) {
-        parts.push(formatCoreMessage(message));
+        parts.push({ text: formatCoreMessage(message) });
         continue;
       }
       if (emitted.has(block.blockId)) continue;
       emitted.add(block.blockId);
-      parts.push(`[earlier summary ${block.blockId}${block.topic ? ` \u2014 ${block.topic}` : ""}]\n${block.summary}`);
+      parts.push({ text: `[earlier summary ${block.blockId}${block.topic ? ` \u2014 ${block.topic}` : ""}]\n${block.summary}`, pinned: true });
     }
-    return parts.length ? parts.join("\n\n") : null;
+    return parts.length ? parts : null;
   } catch {
     return null;
   }
