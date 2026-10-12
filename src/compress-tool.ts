@@ -21,7 +21,7 @@ import { countUnicodeEscapes, findUnverifiableUserQuote, sanitizeSummary } from 
 import { assertNotAborted } from "./abort.js";
 import { getSystemPromptText } from "./compat.js";
 import { UNSUPPORTED_HOST_MESSAGE } from "./omp.js";
-import { buildSummarizeSystemPrompt, fitToModel, resolveModel, summarizeWithModel, SESSION_MODEL_REF, type ContentPart } from "./compress-model.js";
+import { buildSummarizeSystemPrompt, fitToModel, resolveModel, summarizeChecked, SESSION_MODEL_REF, type ContentPart } from "./compress-model.js";
 
 function formatK(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
@@ -862,7 +862,9 @@ async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<De
           messages: [{ role: "user", content: `${instruction}\n\n<content>\n${fitToModel(extracted, model, maxTokens)}\n</content>`, timestamp: Date.now() }],
         };
       }
-      range.summary = await summarizeWithModel(input.ctx, model, context, maxTokens, input.signal);
+      const span = `${range.startId}..${range.endId}`;
+      range.summary = await summarizeChecked(input.ctx, model, context, maxTokens, input.signal, (leak) =>
+        logWarn("compress", { sid, event: "summary-planning-leak", ref, span, leak, action: "retry" }));
       used += 1;
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);

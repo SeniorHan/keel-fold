@@ -28,6 +28,12 @@ export declare function resolveModel(registry: ModelRegistryLike, ref: string): 
  *  completion support, API error, abort, or empty output — the caller then
  *  keeps the main model's fallback summary. */
 export declare function summarizeWithModel(ctx: ExtensionContext, model: Model<Api>, context: Context, maxTokens: number, signal?: AbortSignal): Promise<string>;
+/** The leaked text (trimmed) when the opening of `summary` is planning, else null. */
+export declare function detectPlanningLeak(summary: string): string | null;
+/** summarizeWithModel, plus one retry when the output opens with planning
+ *  text. A second leaky output throws, so the range is not folded (the
+ *  caller retries later) — never stored, never silently stripped. */
+export declare function summarizeChecked(ctx: ExtensionContext, model: Model<Api>, context: Context, maxTokens: number, signal?: AbortSignal, onLeak?: (leak: string) => void): Promise<string>;
 /** System prompt for a dedicated model: reuse the kernel's tier-1 rules so
  *  its output matches what the main model would produce. */
 export declare function buildSummarizeSystemPrompt(prompts: {

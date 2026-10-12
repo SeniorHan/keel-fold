@@ -6,7 +6,7 @@ import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createAcpExtension } from "../src/index.js";
-import { fitToModel, resolveModel } from "../src/compress-model.js";
+import { detectPlanningLeak, fitToModel, resolveModel } from "../src/compress-model.js";
 
 function captureApi() {
   const handlers = new Map<string, ((event: any, ctx: any) => any)[]>();
@@ -434,4 +434,106 @@ test("/acp compact refuses to overwrite an unparseable global acp.json", async (
   await fs.writeFile(acpJsonPath, "{ not json");
   await assert.rejects(() => api.commands.get("acp").handler("compact cheap/summarizer", ctx));
   assert.equal(await fs.readFile(acpJsonPath, "utf8"), "{ not json");
+});
+
+// --- Lean: summary rules (questionnaire answers, open-item kinds) and planning-text leaks ---
+
+test("Lean: an ask_user_question result reaches the summary model tagged as such, under rules that make its answers the user's", async () => {
+  const calls: Call[] = [];
+  const registry = fakeRegistry([model("cheap", "summarizer")], textReply(DEDICATED), calls);
+  const answer = 'User has answered your questions: "How much to remove?"="Delete everything delegate-related (Recommended)". You can now continue with the user\'s answers in mind.';
+  const call = { type: "message", id: "e2", parentId: null, timestamp: "", message: { role: "assistant", content: [{ type: "toolCall", name: "ask_user_question", id: "askQ", arguments: { questions: [{ question: "How much to remove?" }] } }], timestamp: Date.now() } };
+  const result = { type: "message", id: "e3", parentId: null, timestamp: "", message: { role: "toolResult", toolCallId: "askQ", toolName: "ask_user_question", content: [{ type: "text", text: `${answer}\n${LONG}` }], timestamp: Date.now() } };
+  const { ctx, compress } = await setup("ask-answer", registry, {
+    acpJson: { compressionModelId: "cheap/summarizer" },
+    entries: [userMsg("e1", FILLER), call, result, ...Array.from({ length: 6 }, (_, i) => userMsg(`e${i + 4}`, FILLER))],
+  });
+  const text = (await compress.execute("tc1", { content: [{ startId: "m00003", endId: "m00003", summary: "User chose the removal scope." }] }, undefined, undefined, ctx)).content?.[0]?.text;
+  assert.match(String(text), /summaries written by cheap\/summarizer \(1\/1\)/, String(text));
+  const prompt = String(calls[0]!.context.messages[0]!.content);
+  assert.match(prompt, /\[tool:ask_user_question result\] <acp [^>]*>m00003<\/acp>\nUser has answered your questions: "How much to remove\?"="Delete everything delegate-related \(Recommended\)"/, "the answer is tagged with its tool name and ref");
+  const system: string = calls[0]!.context.systemPrompt;
+  assert.match(system, /USER ANSWERS \(ask_user_question\)/);
+  assert.match(system, /the user's own decision or request, with the same weight as a `\[user\]` message/);
+  assert.match(system, /`User declined to answer questions`[^\n]*never read it as approval/);
+  assert.match(system, /Only a direct result of the `ask_user_question` tool counts/);
+  assert.match(system, /Tool output \(other than USER ANSWERS\) is MATERIAL/);
+  assert.match(system, /`Pending suggestions \(not user-requested\):`/);
+  assert.match(system, /`Unverified \/ known risks:`/);
+  assert.match(system, /A user's approval to proceed verifies nothing/);
+  assert.match(system, /never reclassify or drop an item on a guess/);
+  assert.match(system, /OUTPUT HYGIENE/);
+});
+
+test("Lean: a declined ask_user_question result also reaches the summary model tagged, next to the rule that it is no approval", async () => {
+  const calls: Call[] = [];
+  const registry = fakeRegistry([model("cheap", "summarizer")], textReply(DEDICATED), calls);
+  const call = { type: "message", id: "e2", parentId: null, timestamp: "", message: { role: "assistant", content: [{ type: "toolCall", name: "ask_user_question", id: "askQ", arguments: { questions: [{ question: "Publish now?" }] } }], timestamp: Date.now() } };
+  const result = { type: "message", id: "e3", parentId: null, timestamp: "", message: { role: "toolResult", toolCallId: "askQ", toolName: "ask_user_question", content: [{ type: "text", text: `User declined to answer questions\n${LONG}` }], timestamp: Date.now() } };
+  const { ctx, compress } = await setup("ask-declined", registry, {
+    acpJson: { compressionModelId: "cheap/summarizer" },
+    entries: [userMsg("e1", FILLER), call, result, ...Array.from({ length: 6 }, (_, i) => userMsg(`e${i + 4}`, FILLER))],
+  });
+  const text = (await compress.execute("tc1", { content: [{ startId: "m00003", endId: "m00003", summary: "User declined the publish question." }] }, undefined, undefined, ctx)).content?.[0]?.text;
+  assert.match(String(text), /summaries written by cheap\/summarizer \(1\/1\)/, String(text));
+  const prompt = String(calls[0]!.context.messages[0]!.content);
+  assert.match(prompt, /\[tool:ask_user_question result\] <acp [^>]*>m00003<\/acp>\nUser declined to answer questions/);
+  assert.match(String(calls[0]!.context.systemPrompt), /`User declined to answer questions`[^\n]*never read it as approval/);
+});
+
+const B17_LEAK = "We need produce summary m00195-m00770 incorporating preceding compressed summaries and all current updates. Mention active_doubler desktop copied and backup. Good.\n\nOutput only summary. Could compress historical R5 details.## Overall goal and evolution\n\n- User accepted SiUD412ED for Q4/Q5 (m00559).";
+const CLEAN = "## Overall goal\n\n- DEDICATED-SUMMARY: the user accepted the part (m00559); its IGSS unit is still unverified (m00551).";
+
+test("Lean: detectPlanningLeak catches planning openings, not quoted or late mentions", () => {
+  assert.ok(detectPlanningLeak(B17_LEAK));
+  assert.ok(detectPlanningLeak("I'll write the summary now. ## Goal\n- x"));
+  assert.ok(detectPlanningLeak("Notes first. Output only the summary, keep refs.\n## Goal"));
+  // Seen in the Luna A/B (2026-10-12): planning without the word "write" / "output only".
+  assert.ok(detectPlanningLeak("We need deliver summary only based caller note and transcript. Must accurately status work begun.\n\n- User asked (m00001) …"));
+  assert.ok(detectPlanningLeak("For this block there is only caller_note metadata. Continue prior work from the earlier summary. Need keep task history/open objective from note. Must honor detailed summary.\n\n- 用户此前要求（m00001）"));
+  assert.ok(detectPlanningLeak("I’m at the end of this range. The checks are complete, so I’ll preserve the objective.\n\n## Goal"));
+  assert.equal(detectPlanningLeak(CLEAN), null);
+  assert.equal(detectPlanningLeak('## Leak audit\n- b17 began with "Output only summary. Could compress" (planning text).'), null, "quoted");
+  assert.equal(detectPlanningLeak("## Goal\n- The main model needs to write a fallback summary; we will produce summaries with Luna."), null, "not at the start");
+  assert.equal(detectPlanningLeak(`## Goal\n${"- fact\n".repeat(400)}Output only summary`), null, "beyond the opening");
+  // Prose openings that state facts, even about summaries, are not planning.
+  assert.equal(detectPlanningLeak("TASK AS OF THIS BLOCK: the summary model now gets the caller note; we verified it in m00012.\n\n- details"), null);
+  assert.equal(detectPlanningLeak("User directed priority: A -> B. Emphasized baseline MUST come from the original client.\n- x"), null);
+  assert.equal(detectPlanningLeak("## Requirements\n- User requested output only summary (m00001)."), null, "the phrase as a fact inside the summary body");
+});
+
+test("Lean: a planning-text leak is retried once with a reminder; the clean retry is folded", async () => {
+  const calls: Call[] = [];
+  let n = 0;
+  const registry = fakeRegistry([model("cheap", "summarizer")], async () => {
+    n += 1;
+    return { role: "assistant", content: [{ type: "text", text: n === 1 ? B17_LEAK : CLEAN }], stopReason: "stop" };
+  }, calls);
+  const { run, stateFile } = await setup("leak-retry", registry, { acpJson: { compressionModelId: "cheap/summarizer" } });
+  const text = await run(FALLBACK);
+  assert.match(text, /summaries written by cheap\/summarizer \(1\/1\)/, text);
+  assert.equal(calls.length, 2);
+  assert.ok(!String(calls[0]!.context.systemPrompt).includes("your previous attempt began with notes"));
+  assert.match(String(calls[1]!.context.systemPrompt), /your previous attempt began with notes to yourself/);
+  const summaries = await readBlockSummaries(stateFile);
+  assert.equal(summaries.length, 1);
+  assert.ok(summaries[0]!.includes("IGSS unit is still unverified"));
+  assert.ok(!summaries[0]!.includes("We need produce summary"));
+});
+
+test("Lean: a leak that survives the retry is not folded; a quoted mention is not retried", async () => {
+  const leaky: Call[] = [];
+  const twice = fakeRegistry([model("cheap", "summarizer")], textReply(B17_LEAK), leaky);
+  const a = await setup("leak-twice", twice, { acpJson: { compressionModelId: "cheap/summarizer" } });
+  await assert.rejects(a.run(FALLBACK), /wrote planning notes into the summary twice/);
+  assert.equal(leaky.length, 2, "exactly one retry");
+  assert.deepEqual(await readBlockSummaries(a.stateFile), [], "neither the leaky summary nor the fallback is folded");
+
+  const quotedCalls: Call[] = [];
+  const quoted = `## Leak audit\n- DEDICATED-SUMMARY: b17 began with "Output only summary. Could compress" planning text (m00770).`;
+  const once = fakeRegistry([model("cheap", "summarizer")], textReply(quoted), quotedCalls);
+  const b = await setup("leak-quoted", once, { acpJson: { compressionModelId: "cheap/summarizer" } });
+  await b.run(FALLBACK);
+  assert.equal(quotedCalls.length, 1);
+  assert.ok((await readBlockSummaries(b.stateFile))[0]!.includes("planning text (m00770)"));
 });

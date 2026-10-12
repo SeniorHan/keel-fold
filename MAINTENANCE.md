@@ -25,6 +25,8 @@
 - 专用模型的系统提示末尾加了 CARRY FORWARD 规则，要求原样继承旧摘要里的决策、数值和未完成目标。
 - 旧块摘要保护：`extractRangeContent` 读的是内核 prune 后的 `turn.messages`，旧块以 `acp_summary_<blockId>` 合成消息出现，现在映射回块，渲染为 pinned 的 `[earlier summary bN]`。`fitToModel` 从不截断摘要：给原文留的空间不足 1000 字符时丢掉原文；摘要本身超过输入预算时抛错，这个范围不调专用模型（记 `compression-model-failed`），也不折叠。未知窗口的模型预算是 120K 字符，单块摘要上限 20K，所以一个范围覆盖 6 个以上大块时可能走到这条路。
 - `summarizeWithModel` 拒收 `stopReason: "length"`（输出到 `maxTokens` 被截断），这个范围不折叠。上限是 `summaryMaxChars`（默认 20000）/3 tokens。
+- 摘要规则（`SOURCE_ATTRIBUTION_RULES`）：直接的 `ask_user_question` 结果算用户发言（选择、输入、备注；未选的推荐不算批准，取消不算批准）；待办分三类 `Open objectives:`（用户要求）、`Pending suggestions (not user-requested):`、`Unverified / known risks:`；“估算/假设/未核实”等限定在没有验证证据前一直保留，用户批准不等于验证；旧摘要的三类条目按原分类继承，不凭猜测改类或删除。
+- 规划文字泄漏：`detectPlanningLeak` 只看开头的散文段（以标题、列表、表格开头的摘要不检查），且需同时满足“谈论本摘要/范围/caller note”和“第一人称意图或连续的自我指令”，引号内文字忽略；另检测回显的 `Output only summary`。命中后附提醒重试一次，仍泄漏则抛错、该范围不折叠，不自动剥除。2026-10-12 扫描 2349 个历史块：命中 1 个（真泄漏 01a1166d b17），无误报；A/B 50 次输出中 4 次泄漏全部命中。
 - 测试：`tests/compress-model.test.ts`（假 registry）、`tests/dedicated-nudge.test.ts`。
 
 ### 摘要对主模型可见
@@ -83,7 +85,7 @@
 
 - `compressionModelId` 填 `provider/id`。裸 id 在多个 provider 下重名时判为歧义。
 - 注册表里有某个模型，不代表 provider 真能服务它。调用失败时该范围不压缩；在 `~/.pi/acp.log` 中搜 `compression-model-failed`。
-- 旧块的 Open objectives 在 refold 时可能被专用模型漏掉（实测 b24 漏了 3 条，提示词约束不够）。计划：代码提取被并入块的 Open objectives 作为必继承清单，摘要写完后校验 ref，缺的补回。评测脚本在 `M:/Temp/luna-eval/tools/`（内存盘，重启即失）。
-- 专用模型偶尔会把自己的推理文字写进摘要开头（实测约 1/60 个块），尚未处理。
+- 不做“强制继承旧块 Open objectives”：2026-10-12 核查全部 15 个 refold、40 条旧目标，确认丢失 0 条，另有 8 条本来就不是用户目标（助手建议、读到的资料），强制继承会把它们一直传下去；b24 “漏掉”的 3 条属于这类。改为摘要规则：问卷答案归用户、三类待办分开、未核实限定保留（见上）。注意：样本小，原文中段被截断或内核紧急截断时，新目标仍可能到不了专用模型。
+- 新规则下摘要变长：A/B 中 b17（并入 3 个旧块）平均从约 9.3K 字符增到 15K 字符，输出最多用到上限（≈6.7K tokens）的 75%。若频繁出现 `hit its output limit`，调大 `summaryMaxChars`。
 - 不要和原版 `billion-context-pi` 同时启用（工具和钩子会注册两次）。
 - 命名：2026-10-12 之前叫 Lean2（子目录 `lean2/`、版本 `0.1.83-pr241-lean2.N`），之后改名为 Lean，版本从 `0.1.83-lean.6` 续。更早的 Lean v1（`0.1.69-lean.1`，基于 npm 包的外壳）保留在 `legacy-v1` 分支。
