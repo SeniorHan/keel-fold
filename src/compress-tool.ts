@@ -790,18 +790,18 @@ async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<De
     if (input.signal?.aborted) break;
     const topic = range.topic ?? input.topLevelTopic;
     const instruction = buildRangeInstruction(range, topic);
-    let context: Context;
-    if (prefix) {
-      context = { systemPrompt: sessionSystemPrompt, messages: [...prefix, { role: "user", content: instruction, timestamp: Date.now() }], tools: input.tools };
-    } else {
-      const extracted = extractRangeContent(input.messages, input.state, range.startId, range.endId);
-      if (!extracted) continue;
-      context = {
-        systemPrompt: buildSummarizeSystemPrompt(input.runtime.prompts, topic),
-        messages: [{ role: "user", content: `${instruction}\n\n<content>\n${fitToModel(extracted, model, maxTokens)}\n</content>`, timestamp: Date.now() }],
-      };
-    }
     try {
+      let context: Context;
+      if (prefix) {
+        context = { systemPrompt: sessionSystemPrompt, messages: [...prefix, { role: "user", content: instruction, timestamp: Date.now() }], tools: input.tools };
+      } else {
+        const extracted = extractRangeContent(input.messages, input.state, range.startId, range.endId);
+        if (!extracted) continue;
+        context = {
+          systemPrompt: buildSummarizeSystemPrompt(input.runtime.prompts, topic),
+          messages: [{ role: "user", content: `${instruction}\n\n<content>\n${fitToModel(extracted, model, maxTokens)}\n</content>`, timestamp: Date.now() }],
+        };
+      }
       range.summary = await summarizeWithModel(input.ctx, model, context, maxTokens, input.signal);
       used += 1;
     } catch (e) {

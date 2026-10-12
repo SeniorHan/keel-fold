@@ -215,9 +215,10 @@ test("fitToModel: earlier block summaries survive truncation even mid-range", ()
   const big = "[earlier summary b4]\n" + "S".repeat(119_500);
   const tight = fitToModel([{ text: big, pinned: true }, { text: raw }], {}, 8000);
   assert.ok(tight.startsWith(big) && tight.length <= 120_000, String(tight.length));
-  // Summaries alone over budget: cut, raw dropped.
-  const huge = fitToModel([{ text: "Z".repeat(130_000), pinned: true }, { text: raw }], {}, 8000);
-  assert.ok(huge.length <= 120_000 && !huge.includes("y"), String(huge.length));
+  // Summaries that cannot fit whole are never cut: the dedicated call is
+  // refused so the caller's own summary is kept.
+  assert.throws(() => fitToModel([{ text: "Z".repeat(130_000), pinned: true }, { text: raw }], {}, 8000), /earlier block summaries/);
+  assert.throws(() => fitToModel([{ text: "Z".repeat(130_000), pinned: true }], {}, 8000), /earlier block summaries/);
 });
 
 test("compress: dedicated failure keeps the caller fallback summary", async () => {

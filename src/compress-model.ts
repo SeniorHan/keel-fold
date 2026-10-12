@@ -132,7 +132,9 @@ function charBudget(content: string, model: { contextWindow?: number }, maxToken
  *  instead of a fixed 120K-char cap; truncate only what cannot fit.
  *  When truncation is needed, pinned parts (earlier block summaries) are
  *  kept whole and listed first, and only the raw messages are cut — the
- *  summaries carry the decisions the new summary must inherit. */
+ *  summaries carry the decisions the new summary must inherit. Pinned parts
+ *  that cannot fit whole throw: the caller then keeps its own summary, written
+ *  by the main model that saw them in full, instead of one that lost facts. */
 export function fitToModel(parts: ContentPart[], model: { contextWindow?: number }, maxTokens: number): string {
   const sep = "\n\n";
   const all = parts.map((p) => p.text).join(sep);
@@ -140,10 +142,12 @@ export function fitToModel(parts: ContentPart[], model: { contextWindow?: number
   if (all.length <= maxChars) return all;
   const pinned = parts.filter((p) => p.pinned).map((p) => p.text).join(sep);
   const raw = parts.filter((p) => !p.pinned).map((p) => p.text).join(sep);
-  if (!pinned || !raw) return truncateContent(all, maxChars);
+  if (pinned.length > maxChars) {
+    throw new Error(`earlier block summaries (${pinned.length} chars) exceed the compression model input budget (${maxChars} chars)`);
+  }
+  if (!pinned) return truncateContent(raw, maxChars);
   // Earlier summaries outrank raw messages: with too little room left for raw
   // text, drop it rather than cut into the summaries.
-  if (pinned.length > maxChars) return truncateContent(pinned, maxChars);
   const rawBudget = maxChars - pinned.length - sep.length;
   if (rawBudget < 1000) {
     const omitted = `${sep}[... ${raw.length} chars of unsummarized messages omitted ...]`;
