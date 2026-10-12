@@ -17,7 +17,8 @@ Upstream now recommends its successor [`billion-context`](https://github.com/ran
 | Model-facing tools | `compress`, `decompress`, `search_context`, `acp_status`, `acp_cache` | `compress` + one `acp_context` tool |
 | Resident prompt | ~5,800 tokens | ~700 tokens |
 | System prompt | Replaces Pi's prompt, so other extensions' prompt additions are dropped | Injected as its own section; other extensions keep theirs |
-| Delegation, auto-update | On | Off |
+| Sub-agent delegation (`acp_delegate`, fleet panel) | Built in | Removed — this is a context manager; use a dedicated sub-agent extension |
+| Auto-update | On | Off |
 
 Also fixed: emergency truncation that never reached the wire, emergency truncation cutting the latest user message, a token meter that ignored new messages, uncounted `compress` thinking, facade tools escaping recency policies, and tests writing into the real `~/.pi`. Details and reasons are in [MAINTENANCE.md](MAINTENANCE.md) (Chinese).
 
@@ -26,7 +27,7 @@ Token figures above were measured on 0.1.69 with a `ceil(chars / 4)` proxy in a 
 ## Install
 
 ```bash
-pi install git:github.com/kunkun9527/billion-context-pi-lean@v0.1.83-lean.6
+pi install git:github.com/kunkun9527/billion-context-pi-lean@v0.1.83-lean.7
 ```
 
 Requires Pi >= 1.x for the dedicated summary model. Do not enable it together with `billion-context-pi` or `billion-context`: tools and hooks would register twice. Pi's built-in compaction is cancelled while this extension is active.
@@ -46,7 +47,7 @@ Summaries are written by the summary model with rules that keep paths, numbers, 
 
 ## Configuration
 
-`~/.pi/acp.json` and `<project>/.pi/acp.json`. All upstream options in [CONFIGURATION.md](CONFIGURATION.md) apply, except: `delegate.*`, `delegatePrompt` and `autoUpdate` are forced off, and `promptSections.*` is ignored because the fork injects its own prompt (a one-time warning tells you). Compression timing can be tuned per provider and model:
+`~/.pi/acp.json` and `<project>/.pi/acp.json`. All upstream options in [CONFIGURATION.md](CONFIGURATION.md) apply, except: `autoUpdate` is forced off, the removed delegate keys (`delegate.*`, `displayUsage`, `delegatePrompt`) are ignored, and `promptSections.*` is ignored because the fork injects its own prompt (a one-time warning tells you). Compression timing can be tuned per provider and model:
 
 ```json
 {

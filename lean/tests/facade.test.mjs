@@ -142,7 +142,6 @@ function fakeUpstream(calls = [], executions = { count: 0 }) {
         },
       });
     }
-    pi.registerTool({ name: "acp_delegate", async execute() {} });
     pi.on("before_agent_start", () => ({ systemPrompt: "upstream prompt must be suppressed" }));
   };
 }

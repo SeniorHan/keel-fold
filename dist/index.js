@@ -2,7 +2,7 @@ import {
   SIDECAR_SCHEMA_VERSION,
   __export,
   sidecarProducer
-} from "./chunk-ADKLH5CK.js";
+} from "./chunk-BTERPS5T.js";
 
 // src/config-dir.ts
 import * as piModule from "@earendil-works/pi-coding-agent";
@@ -212,9 +212,7 @@ var KNOWN = /* @__PURE__ */ new Set([
   "preserveRecentTools",
   "toolBashDefaultTimeout",
   "toolOutputMaxBytes",
-  "delegate",
   "compress",
-  "displayUsage",
   "throttleRetry",
   "outputHeadroomMaxPct",
   "repetitionGuard",
@@ -224,7 +222,6 @@ var KNOWN = /* @__PURE__ */ new Set([
   "promptSections",
   "nudgeSections",
   "toolPrompts",
-  "delegatePrompt",
   "hostSession",
   "rules",
   "compressionModelId"
@@ -419,88 +416,6 @@ function isPrintableAscii(str) {
     }
   }
   return true;
-}
-function truncateFragmentToWidth(text, maxWidth) {
-  if (maxWidth <= 0 || text.length === 0) {
-    return { text: "", width: 0 };
-  }
-  if (isPrintableAscii(text)) {
-    const clipped = text.slice(0, maxWidth);
-    return { text: clipped, width: clipped.length };
-  }
-  const hasAnsi = text.includes("\x1B");
-  const hasTabs = text.includes("	");
-  if (!hasAnsi && !hasTabs) {
-    let result2 = "";
-    let width2 = 0;
-    for (const { segment } of graphemeSegmenter.segment(text)) {
-      const w2 = graphemeWidth(segment);
-      if (width2 + w2 > maxWidth) {
-        break;
-      }
-      result2 += segment;
-      width2 += w2;
-    }
-    return { text: result2, width: width2 };
-  }
-  let result = "";
-  let width = 0;
-  let i = 0;
-  let pendingAnsi = "";
-  while (i < text.length) {
-    const ansi = extractAnsiCode(text, i);
-    if (ansi) {
-      pendingAnsi += ansi.code;
-      i += ansi.length;
-      continue;
-    }
-    if (text[i] === "	") {
-      if (width + 3 > maxWidth) {
-        break;
-      }
-      if (pendingAnsi) {
-        result += pendingAnsi;
-        pendingAnsi = "";
-      }
-      result += "	";
-      width += 3;
-      i++;
-      continue;
-    }
-    let end = i;
-    while (end < text.length && text[end] !== "	") {
-      const nextAnsi = extractAnsiCode(text, end);
-      if (nextAnsi) {
-        break;
-      }
-      end++;
-    }
-    for (const { segment } of graphemeSegmenter.segment(text.slice(i, end))) {
-      const w2 = graphemeWidth(segment);
-      if (width + w2 > maxWidth) {
-        return { text: result, width };
-      }
-      if (pendingAnsi) {
-        result += pendingAnsi;
-        pendingAnsi = "";
-      }
-      result += segment;
-      width += w2;
-    }
-    i = end;
-  }
-  return { text: result, width };
-}
-function finalizeTruncatedResult(prefix, prefixWidth, ellipsis, ellipsisWidth, maxWidth, pad) {
-  const reset = "\x1B[0m";
-  const visibleWidth2 = prefixWidth + ellipsisWidth;
-  let result;
-  if (ellipsis.length > 0) {
-    result = `${prefix}${reset}${ellipsis}${reset}`;
-  } else {
-    result = `${prefix}${reset}`;
-  }
-  return pad ? result + " ".repeat(Math.max(0, maxWidth - visibleWidth2)) : result;
 }
 function graphemeWidth(segment) {
   if (segment === "	") {
@@ -1039,126 +954,6 @@ function applyBackgroundToLine(line, width, bgFn) {
   const withPadding = line + padding;
   return bgFn(withPadding);
 }
-function truncateToWidth(text, maxWidth, ellipsis = "...", pad = false) {
-  if (maxWidth <= 0) {
-    return "";
-  }
-  if (text.length === 0) {
-    return pad ? " ".repeat(maxWidth) : "";
-  }
-  const ellipsisWidth = visibleWidth(ellipsis);
-  if (ellipsisWidth >= maxWidth) {
-    const textWidth = visibleWidth(text);
-    if (textWidth <= maxWidth) {
-      return pad ? text + " ".repeat(maxWidth - textWidth) : text;
-    }
-    const clippedEllipsis = truncateFragmentToWidth(ellipsis, maxWidth);
-    if (clippedEllipsis.width === 0) {
-      return pad ? " ".repeat(maxWidth) : "";
-    }
-    return finalizeTruncatedResult("", 0, clippedEllipsis.text, clippedEllipsis.width, maxWidth, pad);
-  }
-  if (isPrintableAscii(text)) {
-    if (text.length <= maxWidth) {
-      return pad ? text + " ".repeat(maxWidth - text.length) : text;
-    }
-    const targetWidth2 = maxWidth - ellipsisWidth;
-    return finalizeTruncatedResult(text.slice(0, targetWidth2), targetWidth2, ellipsis, ellipsisWidth, maxWidth, pad);
-  }
-  const targetWidth = maxWidth - ellipsisWidth;
-  let result = "";
-  let pendingAnsi = "";
-  let visibleSoFar = 0;
-  let keptWidth = 0;
-  let keepContiguousPrefix = true;
-  let overflowed = false;
-  let exhaustedInput = false;
-  const hasAnsi = text.includes("\x1B");
-  const hasTabs = text.includes("	");
-  if (!hasAnsi && !hasTabs) {
-    for (const { segment } of graphemeSegmenter.segment(text)) {
-      const width = graphemeWidth(segment);
-      if (keepContiguousPrefix && keptWidth + width <= targetWidth) {
-        result += segment;
-        keptWidth += width;
-      } else {
-        keepContiguousPrefix = false;
-      }
-      visibleSoFar += width;
-      if (visibleSoFar > maxWidth) {
-        overflowed = true;
-        break;
-      }
-    }
-    exhaustedInput = !overflowed;
-  } else {
-    let i = 0;
-    while (i < text.length) {
-      const ansi = extractAnsiCode(text, i);
-      if (ansi) {
-        pendingAnsi += ansi.code;
-        i += ansi.length;
-        continue;
-      }
-      if (text[i] === "	") {
-        if (keepContiguousPrefix && keptWidth + 3 <= targetWidth) {
-          if (pendingAnsi) {
-            result += pendingAnsi;
-            pendingAnsi = "";
-          }
-          result += "	";
-          keptWidth += 3;
-        } else {
-          keepContiguousPrefix = false;
-          pendingAnsi = "";
-        }
-        visibleSoFar += 3;
-        if (visibleSoFar > maxWidth) {
-          overflowed = true;
-          break;
-        }
-        i++;
-        continue;
-      }
-      let end = i;
-      while (end < text.length && text[end] !== "	") {
-        const nextAnsi = extractAnsiCode(text, end);
-        if (nextAnsi) {
-          break;
-        }
-        end++;
-      }
-      for (const { segment } of graphemeSegmenter.segment(text.slice(i, end))) {
-        const width = graphemeWidth(segment);
-        if (keepContiguousPrefix && keptWidth + width <= targetWidth) {
-          if (pendingAnsi) {
-            result += pendingAnsi;
-            pendingAnsi = "";
-          }
-          result += segment;
-          keptWidth += width;
-        } else {
-          keepContiguousPrefix = false;
-          pendingAnsi = "";
-        }
-        visibleSoFar += width;
-        if (visibleSoFar > maxWidth) {
-          overflowed = true;
-          break;
-        }
-      }
-      if (overflowed) {
-        break;
-      }
-      i = end;
-    }
-    exhaustedInput = i >= text.length;
-  }
-  if (!overflowed && exhaustedInput) {
-    return pad ? text + " ".repeat(Math.max(0, maxWidth - visibleSoFar)) : text;
-  }
-  return finalizeTruncatedResult(result, keptWidth, ellipsis, ellipsisWidth, maxWidth, pad);
-}
 var pooledStyleTracker = new AnsiCodeTracker();
 
 // node_modules/@earendil-works/pi-tui/dist/components/box.js
@@ -1250,126 +1045,6 @@ var Box = class {
 };
 
 // node_modules/@earendil-works/pi-tui/dist/keys.js
-var _kittyProtocolActive = false;
-var Key = {
-  // Special keys
-  escape: "escape",
-  esc: "esc",
-  enter: "enter",
-  return: "return",
-  tab: "tab",
-  space: "space",
-  backspace: "backspace",
-  delete: "delete",
-  insert: "insert",
-  clear: "clear",
-  home: "home",
-  end: "end",
-  pageUp: "pageUp",
-  pageDown: "pageDown",
-  up: "up",
-  down: "down",
-  left: "left",
-  right: "right",
-  f1: "f1",
-  f2: "f2",
-  f3: "f3",
-  f4: "f4",
-  f5: "f5",
-  f6: "f6",
-  f7: "f7",
-  f8: "f8",
-  f9: "f9",
-  f10: "f10",
-  f11: "f11",
-  f12: "f12",
-  // Symbol keys
-  backtick: "`",
-  hyphen: "-",
-  equals: "=",
-  leftbracket: "[",
-  rightbracket: "]",
-  backslash: "\\",
-  semicolon: ";",
-  quote: "'",
-  comma: ",",
-  period: ".",
-  slash: "/",
-  exclamation: "!",
-  at: "@",
-  hash: "#",
-  dollar: "$",
-  percent: "%",
-  caret: "^",
-  ampersand: "&",
-  asterisk: "*",
-  leftparen: "(",
-  rightparen: ")",
-  underscore: "_",
-  plus: "+",
-  pipe: "|",
-  tilde: "~",
-  leftbrace: "{",
-  rightbrace: "}",
-  colon: ":",
-  lessthan: "<",
-  greaterthan: ">",
-  question: "?",
-  // Single modifiers
-  ctrl: (key) => `ctrl+${key}`,
-  shift: (key) => `shift+${key}`,
-  alt: (key) => `alt+${key}`,
-  super: (key) => `super+${key}`,
-  // Combined modifiers
-  ctrlShift: (key) => `ctrl+shift+${key}`,
-  shiftCtrl: (key) => `shift+ctrl+${key}`,
-  ctrlAlt: (key) => `ctrl+alt+${key}`,
-  altCtrl: (key) => `alt+ctrl+${key}`,
-  shiftAlt: (key) => `shift+alt+${key}`,
-  altShift: (key) => `alt+shift+${key}`,
-  ctrlSuper: (key) => `ctrl+super+${key}`,
-  superCtrl: (key) => `super+ctrl+${key}`,
-  shiftSuper: (key) => `shift+super+${key}`,
-  superShift: (key) => `super+shift+${key}`,
-  altSuper: (key) => `alt+super+${key}`,
-  superAlt: (key) => `super+alt+${key}`,
-  // Triple modifiers
-  ctrlShiftAlt: (key) => `ctrl+shift+alt+${key}`,
-  ctrlShiftSuper: (key) => `ctrl+shift+super+${key}`
-};
-var SYMBOL_KEYS = /* @__PURE__ */ new Set([
-  "`",
-  "-",
-  "=",
-  "[",
-  "]",
-  "\\",
-  ";",
-  "'",
-  ",",
-  ".",
-  "/",
-  "!",
-  "@",
-  "#",
-  "$",
-  "%",
-  "^",
-  "&",
-  "*",
-  "(",
-  ")",
-  "_",
-  "+",
-  "|",
-  "~",
-  "{",
-  "}",
-  ":",
-  "<",
-  ">",
-  "?"
-]);
 var MODIFIERS = {
   shift: 1,
   alt: 2,
@@ -1377,15 +1052,6 @@ var MODIFIERS = {
   super: 8
 };
 var LOCK_MASK = 64 + 128;
-var CODEPOINTS = {
-  escape: 27,
-  tab: 9,
-  enter: 13,
-  space: 32,
-  backspace: 127,
-  kpEnter: 57414
-  // Numpad Enter (Kitty protocol)
-};
 var ARROW_CODEPOINTS = {
   up: -1,
   down: -2,
@@ -1446,459 +1112,6 @@ var KITTY_FUNCTIONAL_KEY_EQUIVALENTS = /* @__PURE__ */ new Map([
   [57425, FUNCTIONAL_CODEPOINTS.insert],
   [57426, FUNCTIONAL_CODEPOINTS.delete]
 ]);
-function normalizeKittyFunctionalCodepoint(codepoint) {
-  return KITTY_FUNCTIONAL_KEY_EQUIVALENTS.get(codepoint) ?? codepoint;
-}
-function normalizeShiftedLetterIdentityCodepoint(codepoint, modifier) {
-  const effectiveModifier = modifier & ~LOCK_MASK;
-  if ((effectiveModifier & MODIFIERS.shift) !== 0 && codepoint >= 65 && codepoint <= 90) {
-    return codepoint + 32;
-  }
-  return codepoint;
-}
-var LEGACY_KEY_SEQUENCES = {
-  up: ["\x1B[A", "\x1BOA"],
-  down: ["\x1B[B", "\x1BOB"],
-  right: ["\x1B[C", "\x1BOC"],
-  left: ["\x1B[D", "\x1BOD"],
-  home: ["\x1B[H", "\x1BOH", "\x1B[1~", "\x1B[7~"],
-  end: ["\x1B[F", "\x1BOF", "\x1B[4~", "\x1B[8~"],
-  insert: ["\x1B[2~"],
-  delete: ["\x1B[3~"],
-  pageUp: ["\x1B[5~", "\x1B[[5~"],
-  pageDown: ["\x1B[6~", "\x1B[[6~"],
-  clear: ["\x1B[E", "\x1BOE"],
-  f1: ["\x1BOP", "\x1B[11~", "\x1B[[A"],
-  f2: ["\x1BOQ", "\x1B[12~", "\x1B[[B"],
-  f3: ["\x1BOR", "\x1B[13~", "\x1B[[C"],
-  f4: ["\x1BOS", "\x1B[14~", "\x1B[[D"],
-  f5: ["\x1B[15~", "\x1B[[E"],
-  f6: ["\x1B[17~"],
-  f7: ["\x1B[18~"],
-  f8: ["\x1B[19~"],
-  f9: ["\x1B[20~"],
-  f10: ["\x1B[21~"],
-  f11: ["\x1B[23~"],
-  f12: ["\x1B[24~"]
-};
-var LEGACY_SHIFT_SEQUENCES = {
-  up: ["\x1B[a"],
-  down: ["\x1B[b"],
-  right: ["\x1B[c"],
-  left: ["\x1B[d"],
-  clear: ["\x1B[e"],
-  insert: ["\x1B[2$"],
-  delete: ["\x1B[3$"],
-  pageUp: ["\x1B[5$"],
-  pageDown: ["\x1B[6$"],
-  home: ["\x1B[7$"],
-  end: ["\x1B[8$"]
-};
-var LEGACY_CTRL_SEQUENCES = {
-  up: ["\x1BOa"],
-  down: ["\x1BOb"],
-  right: ["\x1BOc"],
-  left: ["\x1BOd"],
-  clear: ["\x1BOe"],
-  insert: ["\x1B[2^"],
-  delete: ["\x1B[3^"],
-  pageUp: ["\x1B[5^"],
-  pageDown: ["\x1B[6^"],
-  home: ["\x1B[7^"],
-  end: ["\x1B[8^"]
-};
-var matchesLegacySequence = (data, sequences) => sequences.includes(data);
-var matchesLegacyModifierSequence = (data, key, modifier) => {
-  if (modifier === MODIFIERS.shift) {
-    return matchesLegacySequence(data, LEGACY_SHIFT_SEQUENCES[key]);
-  }
-  if (modifier === MODIFIERS.ctrl) {
-    return matchesLegacySequence(data, LEGACY_CTRL_SEQUENCES[key]);
-  }
-  return false;
-};
-var _lastEventType = "press";
-function parseEventType(eventTypeStr) {
-  if (!eventTypeStr)
-    return "press";
-  const eventType = parseInt(eventTypeStr, 10);
-  if (eventType === 2)
-    return "repeat";
-  if (eventType === 3)
-    return "release";
-  return "press";
-}
-function parseKittySequence(data) {
-  const csiUMatch = data.match(/^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$/);
-  if (csiUMatch) {
-    const codepoint = parseInt(csiUMatch[1], 10);
-    const shiftedKey = csiUMatch[2] && csiUMatch[2].length > 0 ? parseInt(csiUMatch[2], 10) : void 0;
-    const baseLayoutKey = csiUMatch[3] ? parseInt(csiUMatch[3], 10) : void 0;
-    const modValue = csiUMatch[4] ? parseInt(csiUMatch[4], 10) : 1;
-    const eventType = parseEventType(csiUMatch[5]);
-    _lastEventType = eventType;
-    return { codepoint, shiftedKey, baseLayoutKey, modifier: modValue - 1, eventType };
-  }
-  const arrowMatch = data.match(/^\x1b\[1;(\d+)(?::(\d+))?([ABCD])$/);
-  if (arrowMatch) {
-    const modValue = parseInt(arrowMatch[1], 10);
-    const eventType = parseEventType(arrowMatch[2]);
-    const arrowCodes = { A: -1, B: -2, C: -3, D: -4 };
-    _lastEventType = eventType;
-    return { codepoint: arrowCodes[arrowMatch[3]], modifier: modValue - 1, eventType };
-  }
-  const funcMatch = data.match(/^\x1b\[(\d+)(?:;(\d+))?(?::(\d+))?~$/);
-  if (funcMatch) {
-    const keyNum = parseInt(funcMatch[1], 10);
-    const modValue = funcMatch[2] ? parseInt(funcMatch[2], 10) : 1;
-    const eventType = parseEventType(funcMatch[3]);
-    const funcCodes = {
-      2: FUNCTIONAL_CODEPOINTS.insert,
-      3: FUNCTIONAL_CODEPOINTS.delete,
-      5: FUNCTIONAL_CODEPOINTS.pageUp,
-      6: FUNCTIONAL_CODEPOINTS.pageDown,
-      7: FUNCTIONAL_CODEPOINTS.home,
-      8: FUNCTIONAL_CODEPOINTS.end
-    };
-    const codepoint = funcCodes[keyNum];
-    if (codepoint !== void 0) {
-      _lastEventType = eventType;
-      return { codepoint, modifier: modValue - 1, eventType };
-    }
-  }
-  const homeEndMatch = data.match(/^\x1b\[1;(\d+)(?::(\d+))?([HF])$/);
-  if (homeEndMatch) {
-    const modValue = parseInt(homeEndMatch[1], 10);
-    const eventType = parseEventType(homeEndMatch[2]);
-    const codepoint = homeEndMatch[3] === "H" ? FUNCTIONAL_CODEPOINTS.home : FUNCTIONAL_CODEPOINTS.end;
-    _lastEventType = eventType;
-    return { codepoint, modifier: modValue - 1, eventType };
-  }
-  return null;
-}
-function matchesKittySequence(data, expectedCodepoint, expectedModifier) {
-  const parsed = parseKittySequence(data);
-  if (!parsed)
-    return false;
-  const actualMod = parsed.modifier & ~LOCK_MASK;
-  const expectedMod = expectedModifier & ~LOCK_MASK;
-  if (actualMod !== expectedMod)
-    return false;
-  const normalizedCodepoint = normalizeShiftedLetterIdentityCodepoint(normalizeKittyFunctionalCodepoint(parsed.codepoint), parsed.modifier);
-  const normalizedExpectedCodepoint = normalizeShiftedLetterIdentityCodepoint(normalizeKittyFunctionalCodepoint(expectedCodepoint), expectedModifier);
-  if (normalizedCodepoint === normalizedExpectedCodepoint)
-    return true;
-  if (parsed.baseLayoutKey !== void 0 && parsed.baseLayoutKey === expectedCodepoint) {
-    const cp = normalizedCodepoint;
-    const isLatinLetter = cp >= 97 && cp <= 122;
-    const isKnownSymbol = SYMBOL_KEYS.has(String.fromCharCode(cp));
-    if (!isLatinLetter && !isKnownSymbol)
-      return true;
-  }
-  return false;
-}
-function parseModifyOtherKeysSequence(data) {
-  const match = data.match(/^\x1b\[27;(\d+);(\d+)~$/);
-  if (!match)
-    return null;
-  const modValue = parseInt(match[1], 10);
-  const codepoint = parseInt(match[2], 10);
-  return { codepoint, modifier: modValue - 1 };
-}
-function matchesModifyOtherKeys(data, expectedKeycode, expectedModifier) {
-  const parsed = parseModifyOtherKeysSequence(data);
-  if (!parsed)
-    return false;
-  return parsed.codepoint === expectedKeycode && parsed.modifier === expectedModifier;
-}
-function isWindowsTerminalSession() {
-  return Boolean(process.env.WT_SESSION) && !process.env.SSH_CONNECTION && !process.env.SSH_CLIENT && !process.env.SSH_TTY;
-}
-function matchesRawBackspace(data, expectedModifier) {
-  if (data === "\x7F")
-    return expectedModifier === 0;
-  if (data !== "\b")
-    return false;
-  return isWindowsTerminalSession() ? expectedModifier === MODIFIERS.ctrl : expectedModifier === 0;
-}
-function rawCtrlChar(key) {
-  const char = key.toLowerCase();
-  const code = char.charCodeAt(0);
-  if (code >= 97 && code <= 122 || char === "[" || char === "\\" || char === "]" || char === "_") {
-    return String.fromCharCode(code & 31);
-  }
-  if (char === "-") {
-    return String.fromCharCode(31);
-  }
-  return null;
-}
-function isDigitKey(key) {
-  return key >= "0" && key <= "9";
-}
-function matchesPrintableModifyOtherKeys(data, expectedKeycode, expectedModifier) {
-  if (expectedModifier === 0)
-    return false;
-  const parsed = parseModifyOtherKeysSequence(data);
-  if (!parsed || parsed.modifier !== expectedModifier)
-    return false;
-  return normalizeShiftedLetterIdentityCodepoint(parsed.codepoint, parsed.modifier) === normalizeShiftedLetterIdentityCodepoint(expectedKeycode, expectedModifier);
-}
-function parseKeyId(keyId) {
-  const parts = keyId.toLowerCase().split("+");
-  const key = parts[parts.length - 1];
-  if (!key)
-    return null;
-  return {
-    key,
-    ctrl: parts.includes("ctrl"),
-    shift: parts.includes("shift"),
-    alt: parts.includes("alt"),
-    super: parts.includes("super")
-  };
-}
-function matchesKey(data, keyId) {
-  const parsed = parseKeyId(keyId);
-  if (!parsed)
-    return false;
-  const { key, ctrl, shift, alt, super: superModifier } = parsed;
-  let modifier = 0;
-  if (shift)
-    modifier |= MODIFIERS.shift;
-  if (alt)
-    modifier |= MODIFIERS.alt;
-  if (ctrl)
-    modifier |= MODIFIERS.ctrl;
-  if (superModifier)
-    modifier |= MODIFIERS.super;
-  switch (key) {
-    case "escape":
-    case "esc":
-      if (modifier !== 0)
-        return false;
-      return data === "\x1B" || matchesKittySequence(data, CODEPOINTS.escape, 0) || matchesModifyOtherKeys(data, CODEPOINTS.escape, 0);
-    case "space":
-      if (!_kittyProtocolActive) {
-        if (modifier === MODIFIERS.ctrl && data === "\0") {
-          return true;
-        }
-        if (modifier === MODIFIERS.alt && data === "\x1B ") {
-          return true;
-        }
-      }
-      if (modifier === 0) {
-        return data === " " || matchesKittySequence(data, CODEPOINTS.space, 0) || matchesModifyOtherKeys(data, CODEPOINTS.space, 0);
-      }
-      return matchesKittySequence(data, CODEPOINTS.space, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.space, modifier);
-    case "tab":
-      if (modifier === MODIFIERS.shift) {
-        return data === "\x1B[Z" || matchesKittySequence(data, CODEPOINTS.tab, MODIFIERS.shift) || matchesModifyOtherKeys(data, CODEPOINTS.tab, MODIFIERS.shift);
-      }
-      if (modifier === 0) {
-        return data === "	" || matchesKittySequence(data, CODEPOINTS.tab, 0);
-      }
-      return matchesKittySequence(data, CODEPOINTS.tab, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.tab, modifier);
-    case "enter":
-    case "return":
-      if (modifier === MODIFIERS.shift) {
-        if (matchesKittySequence(data, CODEPOINTS.enter, MODIFIERS.shift) || matchesKittySequence(data, CODEPOINTS.kpEnter, MODIFIERS.shift)) {
-          return true;
-        }
-        if (matchesModifyOtherKeys(data, CODEPOINTS.enter, MODIFIERS.shift)) {
-          return true;
-        }
-        if (_kittyProtocolActive) {
-          return data === "\x1B\r" || data === "\n";
-        }
-        return false;
-      }
-      if (modifier === MODIFIERS.alt) {
-        if (matchesKittySequence(data, CODEPOINTS.enter, MODIFIERS.alt) || matchesKittySequence(data, CODEPOINTS.kpEnter, MODIFIERS.alt)) {
-          return true;
-        }
-        if (matchesModifyOtherKeys(data, CODEPOINTS.enter, MODIFIERS.alt)) {
-          return true;
-        }
-        if (!_kittyProtocolActive) {
-          return data === "\x1B\r";
-        }
-        return false;
-      }
-      if (modifier === 0) {
-        return data === "\r" || !_kittyProtocolActive && data === "\n" || data === "\x1BOM" || // SS3 M (numpad enter in some terminals)
-        matchesKittySequence(data, CODEPOINTS.enter, 0) || matchesKittySequence(data, CODEPOINTS.kpEnter, 0);
-      }
-      return matchesKittySequence(data, CODEPOINTS.enter, modifier) || matchesKittySequence(data, CODEPOINTS.kpEnter, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.enter, modifier);
-    case "backspace":
-      if (modifier === MODIFIERS.alt) {
-        if (data === "\x1B\x7F" || data === "\x1B\b") {
-          return true;
-        }
-        return matchesKittySequence(data, CODEPOINTS.backspace, MODIFIERS.alt) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, MODIFIERS.alt);
-      }
-      if (modifier === MODIFIERS.ctrl) {
-        if (matchesRawBackspace(data, MODIFIERS.ctrl))
-          return true;
-        return matchesKittySequence(data, CODEPOINTS.backspace, MODIFIERS.ctrl) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, MODIFIERS.ctrl);
-      }
-      if (modifier === 0) {
-        return matchesRawBackspace(data, 0) || matchesKittySequence(data, CODEPOINTS.backspace, 0) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, 0);
-      }
-      return matchesKittySequence(data, CODEPOINTS.backspace, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, modifier);
-    case "insert":
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.insert) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.insert, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "insert", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.insert, modifier);
-    case "delete":
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.delete) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.delete, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "delete", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.delete, modifier);
-    case "clear":
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.clear);
-      }
-      return matchesLegacyModifierSequence(data, "clear", modifier);
-    case "home":
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.home) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.home, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "home", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.home, modifier);
-    case "end":
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.end) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.end, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "end", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.end, modifier);
-    case "pageup":
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.pageUp) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageUp, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "pageUp", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageUp, modifier);
-    case "pagedown":
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.pageDown) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageDown, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "pageDown", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageDown, modifier);
-    case "up":
-      if (modifier === MODIFIERS.alt) {
-        return data === "\x1Bp" || matchesKittySequence(data, ARROW_CODEPOINTS.up, MODIFIERS.alt);
-      }
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.up) || matchesKittySequence(data, ARROW_CODEPOINTS.up, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "up", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, ARROW_CODEPOINTS.up, modifier);
-    case "down":
-      if (modifier === MODIFIERS.alt) {
-        return data === "\x1Bn" || matchesKittySequence(data, ARROW_CODEPOINTS.down, MODIFIERS.alt);
-      }
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.down) || matchesKittySequence(data, ARROW_CODEPOINTS.down, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "down", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, ARROW_CODEPOINTS.down, modifier);
-    case "left":
-      if (modifier === MODIFIERS.alt) {
-        return data === "\x1B[1;3D" || !_kittyProtocolActive && data === "\x1BB" || data === "\x1Bb" || matchesKittySequence(data, ARROW_CODEPOINTS.left, MODIFIERS.alt);
-      }
-      if (modifier === MODIFIERS.ctrl) {
-        return data === "\x1B[1;5D" || matchesLegacyModifierSequence(data, "left", MODIFIERS.ctrl) || matchesKittySequence(data, ARROW_CODEPOINTS.left, MODIFIERS.ctrl);
-      }
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.left) || matchesKittySequence(data, ARROW_CODEPOINTS.left, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "left", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, ARROW_CODEPOINTS.left, modifier);
-    case "right":
-      if (modifier === MODIFIERS.alt) {
-        return data === "\x1B[1;3C" || !_kittyProtocolActive && data === "\x1BF" || data === "\x1Bf" || matchesKittySequence(data, ARROW_CODEPOINTS.right, MODIFIERS.alt);
-      }
-      if (modifier === MODIFIERS.ctrl) {
-        return data === "\x1B[1;5C" || matchesLegacyModifierSequence(data, "right", MODIFIERS.ctrl) || matchesKittySequence(data, ARROW_CODEPOINTS.right, MODIFIERS.ctrl);
-      }
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.right) || matchesKittySequence(data, ARROW_CODEPOINTS.right, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "right", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, ARROW_CODEPOINTS.right, modifier);
-    case "f1":
-    case "f2":
-    case "f3":
-    case "f4":
-    case "f5":
-    case "f6":
-    case "f7":
-    case "f8":
-    case "f9":
-    case "f10":
-    case "f11":
-    case "f12": {
-      if (modifier !== 0) {
-        return false;
-      }
-      const functionKey = key;
-      return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES[functionKey]);
-    }
-  }
-  if (key.length === 1 && (key >= "a" && key <= "z" || isDigitKey(key) || SYMBOL_KEYS.has(key))) {
-    const codepoint = key.charCodeAt(0);
-    const rawCtrl = rawCtrlChar(key);
-    const isLetter = key >= "a" && key <= "z";
-    const isDigit = isDigitKey(key);
-    if (modifier === MODIFIERS.ctrl + MODIFIERS.alt && !_kittyProtocolActive && rawCtrl) {
-      if (data === `\x1B${rawCtrl}`)
-        return true;
-    }
-    if (modifier === MODIFIERS.alt && !_kittyProtocolActive && (isLetter || isDigit || SYMBOL_KEYS.has(key))) {
-      if (data === `\x1B${key}`)
-        return true;
-    }
-    if (modifier === MODIFIERS.ctrl) {
-      if (rawCtrl && data === rawCtrl)
-        return true;
-      return matchesKittySequence(data, codepoint, MODIFIERS.ctrl) || matchesPrintableModifyOtherKeys(data, codepoint, MODIFIERS.ctrl);
-    }
-    if (modifier === MODIFIERS.shift + MODIFIERS.ctrl) {
-      return matchesKittySequence(data, codepoint, MODIFIERS.shift + MODIFIERS.ctrl) || matchesPrintableModifyOtherKeys(data, codepoint, MODIFIERS.shift + MODIFIERS.ctrl);
-    }
-    if (modifier === MODIFIERS.shift) {
-      if (isLetter && data === key.toUpperCase())
-        return true;
-      return matchesKittySequence(data, codepoint, MODIFIERS.shift) || matchesPrintableModifyOtherKeys(data, codepoint, MODIFIERS.shift);
-    }
-    if (modifier !== 0) {
-      return matchesKittySequence(data, codepoint, modifier) || matchesPrintableModifyOtherKeys(data, codepoint, modifier);
-    }
-    return data === key || matchesKittySequence(data, codepoint, 0);
-  }
-  return false;
-}
 var KITTY_PRINTABLE_ALLOWED_MODIFIERS = MODIFIERS.shift | LOCK_MASK;
 
 // node_modules/@earendil-works/pi-tui/dist/components/text.js
@@ -1988,77 +1201,6 @@ import { execSync } from "child_process";
 import { homedir as homedir4 } from "os";
 import { isAbsolute } from "path";
 import { pathToFileURL } from "url";
-var cachedCapabilities = null;
-function probeTmuxHyperlinks() {
-  try {
-    const termfeatures = execSync("tmux display-message -p '#{client_termfeatures}'", {
-      encoding: "utf8",
-      timeout: 250,
-      stdio: ["ignore", "pipe", "ignore"]
-    });
-    return termfeatures.split(",").map((feature) => feature.trim()).includes("hyperlinks");
-  } catch {
-    return false;
-  }
-}
-function detectCapabilities(tmuxForwardsHyperlink = probeTmuxHyperlinks) {
-  const termProgram = process.env.TERM_PROGRAM?.toLowerCase() || "";
-  const terminalEmulator = process.env.TERMINAL_EMULATOR?.toLowerCase() || "";
-  const term = process.env.TERM?.toLowerCase() || "";
-  const colorTerm = process.env.COLORTERM?.toLowerCase() || "";
-  const hasTrueColorHint = colorTerm === "truecolor" || colorTerm === "24bit";
-  if (process.env.TMUX || term.startsWith("tmux")) {
-    return { images: null, trueColor: hasTrueColorHint, hyperlinks: tmuxForwardsHyperlink() };
-  }
-  if (term.startsWith("screen")) {
-    return { images: null, trueColor: hasTrueColorHint, hyperlinks: false };
-  }
-  if (process.env.KITTY_WINDOW_ID || termProgram === "kitty") {
-    return { images: "kitty", trueColor: true, hyperlinks: true };
-  }
-  if (termProgram === "ghostty" || term.includes("ghostty") || process.env.GHOSTTY_RESOURCES_DIR) {
-    return { images: "kitty", trueColor: true, hyperlinks: true };
-  }
-  if (process.env.WEZTERM_PANE || termProgram === "wezterm") {
-    return { images: "kitty", trueColor: true, hyperlinks: true };
-  }
-  if (termProgram === "warpterminal" || process.env.WARP_SESSION_ID || process.env.WARP_TERMINAL_SESSION_UUID) {
-    return { images: "kitty", trueColor: true, hyperlinks: true };
-  }
-  if (process.env.ITERM_SESSION_ID || termProgram === "iterm.app") {
-    return { images: "iterm2", trueColor: true, hyperlinks: true };
-  }
-  if (process.env.WT_SESSION) {
-    return { images: null, trueColor: true, hyperlinks: true };
-  }
-  if (termProgram === "vscode") {
-    return { images: null, trueColor: true, hyperlinks: true };
-  }
-  if (termProgram === "alacritty") {
-    return { images: null, trueColor: true, hyperlinks: true };
-  }
-  if (terminalEmulator === "jetbrains-jediterm") {
-    return { images: null, trueColor: true, hyperlinks: false };
-  }
-  return { images: null, trueColor: hasTrueColorHint, hyperlinks: false };
-}
-function getCapabilities() {
-  if (!cachedCapabilities) {
-    cachedCapabilities = detectCapabilities();
-  }
-  return cachedCapabilities;
-}
-var KITTY_PREFIX = "\x1B_G";
-var ITERM2_PREFIX = "\x1B]1337;File=";
-function isImageLine(line) {
-  if (line.startsWith(KITTY_PREFIX) || line.startsWith(ITERM2_PREFIX)) {
-    return true;
-  }
-  return line.includes(KITTY_PREFIX) || line.includes(ITERM2_PREFIX);
-}
-function hyperlink(text, url) {
-  return `\x1B]8;;${url}\x1B\\${text}\x1B]8;;\x1B\\`;
-}
 
 // node_modules/@earendil-works/pi-tui/dist/word-navigation.js
 var wordSegmenter2 = getWordSegmenter();
@@ -3326,598 +2468,10 @@ var StrictStrikethroughTokenizer = class extends w {
     };
   }
 };
-function trimPartialClosingFences(tokens) {
-  const token = tokens[tokens.length - 1];
-  if (token?.type === "list") {
-    trimPartialClosingFences(token.items[token.items.length - 1]?.tokens ?? []);
-    return;
-  }
-  if (token?.type === "blockquote") {
-    trimPartialClosingFences(token.tokens ?? []);
-    return;
-  }
-  if (token?.type !== "code") {
-    return;
-  }
-  const marker = /^(`{3,}|~{3,})/.exec(token.raw)?.[1];
-  const lastLine = token.raw.split("\n").pop();
-  if (!marker || !lastLine || lastLine.length >= marker.length || lastLine !== marker[0]?.repeat(lastLine.length)) {
-    return;
-  }
-  token.text = token.text.slice(0, -lastLine.length).replace(/\n$/, "");
-}
 var markdownParser = new q();
 markdownParser.setOptions({
   tokenizer: new StrictStrikethroughTokenizer()
 });
-var Markdown = class {
-  text;
-  paddingX;
-  // Left/right padding
-  paddingY;
-  // Top/bottom padding
-  defaultTextStyle;
-  theme;
-  options;
-  defaultStylePrefix;
-  // Cache for rendered output
-  cachedText;
-  cachedWidth;
-  cachedLines;
-  constructor(text, paddingX, paddingY, theme, defaultTextStyle, options) {
-    this.text = text;
-    this.paddingX = paddingX;
-    this.paddingY = paddingY;
-    this.theme = theme;
-    this.defaultTextStyle = defaultTextStyle;
-    this.options = options ? { ...options } : {};
-  }
-  setText(text) {
-    this.text = text;
-    this.invalidate();
-  }
-  invalidate() {
-    this.cachedText = void 0;
-    this.cachedWidth = void 0;
-    this.cachedLines = void 0;
-  }
-  render(width) {
-    if (this.cachedLines && this.cachedText === this.text && this.cachedWidth === width) {
-      return this.cachedLines;
-    }
-    const contentWidth = Math.max(1, width - this.paddingX * 2);
-    if (!this.text || this.text.trim() === "") {
-      const result2 = [];
-      this.cachedText = this.text;
-      this.cachedWidth = width;
-      this.cachedLines = result2;
-      return result2;
-    }
-    const normalizedText = this.text.replace(/\t/g, "   ");
-    const tokens = markdownParser.lexer(normalizedText);
-    trimPartialClosingFences(tokens);
-    const renderedLines = [];
-    for (let i = 0; i < tokens.length; i++) {
-      const token = tokens[i];
-      const nextToken = tokens[i + 1];
-      const tokenLines = this.renderToken(token, contentWidth, nextToken?.type);
-      for (const tokenLine of tokenLines) {
-        renderedLines.push(tokenLine);
-      }
-    }
-    const wrappedLines = [];
-    for (const line of renderedLines) {
-      if (isImageLine(line)) {
-        wrappedLines.push(line);
-      } else {
-        for (const wrappedLine of wrapTextWithAnsi(line, contentWidth)) {
-          wrappedLines.push(wrappedLine);
-        }
-      }
-    }
-    const leftMargin = " ".repeat(this.paddingX);
-    const rightMargin = " ".repeat(this.paddingX);
-    const bgFn = this.defaultTextStyle?.bgColor;
-    const contentLines = [];
-    for (const line of wrappedLines) {
-      if (isImageLine(line)) {
-        contentLines.push(line);
-        continue;
-      }
-      const lineWithMargins = leftMargin + line + rightMargin;
-      if (bgFn) {
-        contentLines.push(applyBackgroundToLine(lineWithMargins, width, bgFn));
-      } else {
-        const visibleLen = visibleWidth(lineWithMargins);
-        const paddingNeeded = Math.max(0, width - visibleLen);
-        contentLines.push(lineWithMargins + " ".repeat(paddingNeeded));
-      }
-    }
-    const emptyLine = " ".repeat(width);
-    const emptyLines = [];
-    for (let i = 0; i < this.paddingY; i++) {
-      const line = bgFn ? applyBackgroundToLine(emptyLine, width, bgFn) : emptyLine;
-      emptyLines.push(line);
-    }
-    const result = emptyLines.concat(contentLines, emptyLines);
-    this.cachedText = this.text;
-    this.cachedWidth = width;
-    this.cachedLines = result;
-    return result.length > 0 ? result : [""];
-  }
-  /**
-   * Apply default text style to a string.
-   * This is the base styling applied to all text content.
-   * NOTE: Background color is NOT applied here - it's applied at the padding stage
-   * to ensure it extends to the full line width.
-   */
-  applyDefaultStyle(text) {
-    if (!this.defaultTextStyle) {
-      return text;
-    }
-    let styled = text;
-    if (this.defaultTextStyle.color) {
-      styled = this.defaultTextStyle.color(styled);
-    }
-    if (this.defaultTextStyle.bold) {
-      styled = this.theme.bold(styled);
-    }
-    if (this.defaultTextStyle.italic) {
-      styled = this.theme.italic(styled);
-    }
-    if (this.defaultTextStyle.strikethrough) {
-      styled = this.theme.strikethrough(styled);
-    }
-    if (this.defaultTextStyle.underline) {
-      styled = this.theme.underline(styled);
-    }
-    return styled;
-  }
-  getDefaultStylePrefix() {
-    if (!this.defaultTextStyle) {
-      return "";
-    }
-    if (this.defaultStylePrefix !== void 0) {
-      return this.defaultStylePrefix;
-    }
-    const sentinel = "\0";
-    let styled = sentinel;
-    if (this.defaultTextStyle.color) {
-      styled = this.defaultTextStyle.color(styled);
-    }
-    if (this.defaultTextStyle.bold) {
-      styled = this.theme.bold(styled);
-    }
-    if (this.defaultTextStyle.italic) {
-      styled = this.theme.italic(styled);
-    }
-    if (this.defaultTextStyle.strikethrough) {
-      styled = this.theme.strikethrough(styled);
-    }
-    if (this.defaultTextStyle.underline) {
-      styled = this.theme.underline(styled);
-    }
-    const sentinelIndex = styled.indexOf(sentinel);
-    this.defaultStylePrefix = sentinelIndex >= 0 ? styled.slice(0, sentinelIndex) : "";
-    return this.defaultStylePrefix;
-  }
-  getStylePrefix(styleFn) {
-    const sentinel = "\0";
-    const styled = styleFn(sentinel);
-    const sentinelIndex = styled.indexOf(sentinel);
-    return sentinelIndex >= 0 ? styled.slice(0, sentinelIndex) : "";
-  }
-  getDefaultInlineStyleContext() {
-    return {
-      applyText: (text) => this.applyDefaultStyle(text),
-      stylePrefix: this.getDefaultStylePrefix()
-    };
-  }
-  renderToken(token, width, nextTokenType, styleContext) {
-    const lines = [];
-    switch (token.type) {
-      case "heading": {
-        const headingLevel = token.depth;
-        const headingPrefix = `${"#".repeat(headingLevel)} `;
-        let headingStyleFn;
-        if (headingLevel === 1) {
-          headingStyleFn = (text) => this.theme.heading(this.theme.bold(this.theme.underline(text)));
-        } else {
-          headingStyleFn = (text) => this.theme.heading(this.theme.bold(text));
-        }
-        const headingStyleContext = {
-          applyText: headingStyleFn,
-          stylePrefix: this.getStylePrefix(headingStyleFn)
-        };
-        const headingText = this.renderInlineTokens(token.tokens || [], headingStyleContext);
-        const styledHeading = headingLevel >= 3 ? headingStyleFn(headingPrefix) + headingText : headingText;
-        lines.push(styledHeading);
-        if (nextTokenType && nextTokenType !== "space") {
-          lines.push("");
-        }
-        break;
-      }
-      case "paragraph": {
-        const paragraphText = this.renderInlineTokens(token.tokens || [], styleContext);
-        lines.push(paragraphText);
-        if (nextTokenType && nextTokenType !== "list" && nextTokenType !== "space") {
-          lines.push("");
-        }
-        break;
-      }
-      case "text":
-        lines.push(this.renderInlineTokens([token], styleContext));
-        break;
-      case "code": {
-        const indent = this.theme.codeBlockIndent ?? "  ";
-        lines.push(this.theme.codeBlockBorder(`\`\`\`${token.lang || ""}`));
-        if (this.theme.highlightCode) {
-          const highlightedLines = this.theme.highlightCode(token.text, token.lang);
-          for (const hlLine of highlightedLines) {
-            lines.push(`${indent}${hlLine}`);
-          }
-        } else {
-          const codeLines = token.text.split("\n");
-          for (const codeLine of codeLines) {
-            lines.push(`${indent}${this.theme.codeBlock(codeLine)}`);
-          }
-        }
-        lines.push(this.theme.codeBlockBorder("```"));
-        if (nextTokenType && nextTokenType !== "space") {
-          lines.push("");
-        }
-        break;
-      }
-      case "list": {
-        const listLines = this.renderList(token, 0, width, styleContext);
-        lines.push(...listLines);
-        break;
-      }
-      case "table": {
-        const tableLines = this.renderTable(token, width, nextTokenType, styleContext);
-        lines.push(...tableLines);
-        break;
-      }
-      case "blockquote": {
-        const quoteStyle = (text) => this.theme.quote(this.theme.italic(text));
-        const quoteStylePrefix = this.getStylePrefix(quoteStyle);
-        const applyQuoteStyle = (line) => {
-          if (!quoteStylePrefix) {
-            return quoteStyle(line);
-          }
-          const lineWithReappliedStyle = line.replace(/\x1b\[0m/g, `\x1B[0m${quoteStylePrefix}`);
-          return quoteStyle(lineWithReappliedStyle);
-        };
-        const quoteContentWidth = Math.max(1, width - 2);
-        const quoteInlineStyleContext = {
-          applyText: (text) => text,
-          stylePrefix: quoteStylePrefix
-        };
-        const quoteTokens = token.tokens || [];
-        const renderedQuoteLines = [];
-        for (let i = 0; i < quoteTokens.length; i++) {
-          const quoteToken = quoteTokens[i];
-          const nextQuoteToken = quoteTokens[i + 1];
-          renderedQuoteLines.push(...this.renderToken(quoteToken, quoteContentWidth, nextQuoteToken?.type, quoteInlineStyleContext));
-        }
-        while (renderedQuoteLines.length > 0 && renderedQuoteLines[renderedQuoteLines.length - 1] === "") {
-          renderedQuoteLines.pop();
-        }
-        for (const quoteLine of renderedQuoteLines) {
-          const styledLine = applyQuoteStyle(quoteLine);
-          const wrappedLines = wrapTextWithAnsi(styledLine, quoteContentWidth);
-          for (const wrappedLine of wrappedLines) {
-            lines.push(this.theme.quoteBorder("\u2502 ") + wrappedLine);
-          }
-        }
-        if (nextTokenType && nextTokenType !== "space") {
-          lines.push("");
-        }
-        break;
-      }
-      case "hr":
-        lines.push(this.theme.hr("\u2500".repeat(Math.min(width, 80))));
-        if (nextTokenType && nextTokenType !== "space") {
-          lines.push("");
-        }
-        break;
-      case "html":
-        if ("raw" in token && typeof token.raw === "string") {
-          lines.push(this.applyDefaultStyle(token.raw.trim()));
-        }
-        break;
-      case "space":
-        lines.push("");
-        break;
-      default:
-        if ("text" in token && typeof token.text === "string") {
-          lines.push(token.text);
-        }
-    }
-    return lines;
-  }
-  renderInlineTokens(tokens, styleContext) {
-    let result = "";
-    const resolvedStyleContext = styleContext ?? this.getDefaultInlineStyleContext();
-    const { applyText, stylePrefix } = resolvedStyleContext;
-    const applyTextWithNewlines = (text) => {
-      const segments = text.split("\n");
-      return segments.map((segment) => applyText(segment)).join("\n");
-    };
-    for (const token of tokens) {
-      switch (token.type) {
-        case "escape":
-          result += applyTextWithNewlines(this.options.preserveBackslashEscapes ? token.raw : token.text);
-          break;
-        case "text":
-          if (token.tokens && token.tokens.length > 0) {
-            result += this.renderInlineTokens(token.tokens, resolvedStyleContext);
-          } else {
-            result += applyTextWithNewlines(token.text);
-          }
-          break;
-        case "paragraph":
-          result += this.renderInlineTokens(token.tokens || [], resolvedStyleContext);
-          break;
-        case "strong": {
-          const boldContent = this.renderInlineTokens(token.tokens || [], resolvedStyleContext);
-          result += this.theme.bold(boldContent) + stylePrefix;
-          break;
-        }
-        case "em": {
-          const italicContent = this.renderInlineTokens(token.tokens || [], resolvedStyleContext);
-          result += this.theme.italic(italicContent) + stylePrefix;
-          break;
-        }
-        case "codespan":
-          result += this.theme.code(token.text) + stylePrefix;
-          break;
-        case "link": {
-          const linkText = this.renderInlineTokens(token.tokens || [], resolvedStyleContext);
-          const styledLink = this.theme.link(this.theme.underline(linkText));
-          if (getCapabilities().hyperlinks) {
-            result += hyperlink(styledLink, token.href) + stylePrefix;
-          } else {
-            const hrefForComparison = token.href.startsWith("mailto:") ? token.href.slice(7) : token.href;
-            if (token.text === token.href || token.text === hrefForComparison) {
-              result += styledLink + stylePrefix;
-            } else {
-              result += styledLink + this.theme.linkUrl(` (${token.href})`) + stylePrefix;
-            }
-          }
-          break;
-        }
-        case "br":
-          result += "\n";
-          break;
-        case "del": {
-          const delContent = this.renderInlineTokens(token.tokens || [], resolvedStyleContext);
-          result += this.theme.strikethrough(delContent) + stylePrefix;
-          break;
-        }
-        case "html":
-          if ("raw" in token && typeof token.raw === "string") {
-            result += applyTextWithNewlines(token.raw);
-          }
-          break;
-        default:
-          if ("text" in token && typeof token.text === "string") {
-            result += applyTextWithNewlines(token.text);
-          }
-      }
-    }
-    while (stylePrefix && result.endsWith(stylePrefix)) {
-      result = result.slice(0, -stylePrefix.length);
-    }
-    return result;
-  }
-  getOrderedListMarker(item) {
-    const match = /^(?: {0,3})(\d{1,9}[.)])[ \t]+/.exec(item.raw);
-    return match ? `${match[1]} ` : void 0;
-  }
-  getUnorderedListMarker(item) {
-    const match = /^(?: {0,3})([-+*])(?:[ \t]+|(?=\r?\n|$))/.exec(item.raw);
-    return match ? `${match[1]} ` : void 0;
-  }
-  /**
-   * Render a list with proper nesting support
-   */
-  renderList(token, depth, width, styleContext) {
-    const lines = [];
-    const indent = "    ".repeat(depth);
-    const startNumber = typeof token.start === "number" ? token.start : 1;
-    for (let i = 0; i < token.items.length; i++) {
-      const item = token.items[i];
-      const isLastItem = i === token.items.length - 1;
-      const bullet = token.ordered ? this.options.preserveOrderedListMarkers ? this.getOrderedListMarker(item) ?? `${startNumber + i}. ` : `${startNumber + i}. ` : this.options.preserveOrderedListMarkers ? this.getUnorderedListMarker(item) ?? "- " : "- ";
-      const taskMarker = item.task ? `[${item.checked ? "x" : " "}] ` : "";
-      const marker = bullet + taskMarker;
-      const firstPrefix = indent + this.theme.listBullet(marker);
-      const continuationPrefix = indent + " ".repeat(visibleWidth(marker));
-      const itemWidth = Math.max(1, width - visibleWidth(firstPrefix));
-      let renderedAnyLine = false;
-      for (const itemToken of item.tokens) {
-        if (itemToken.type === "list") {
-          lines.push(...this.renderList(itemToken, depth + 1, width, styleContext));
-          renderedAnyLine = true;
-          continue;
-        }
-        const itemLines = this.renderToken(itemToken, itemWidth, void 0, styleContext);
-        for (const line of itemLines) {
-          for (const wrappedLine of wrapTextWithAnsi(line, itemWidth)) {
-            const linePrefix = renderedAnyLine ? continuationPrefix : firstPrefix;
-            lines.push(linePrefix + wrappedLine);
-            renderedAnyLine = true;
-          }
-        }
-      }
-      if (!renderedAnyLine) {
-        lines.push(firstPrefix);
-      }
-      if (token.loose && !isLastItem) {
-        lines.push("");
-      }
-    }
-    return lines;
-  }
-  /**
-   * Get the visible width of the longest word in a string.
-   */
-  getLongestWordWidth(text, maxWidth) {
-    const words = text.split(/\s+/).filter((word) => word.length > 0);
-    let longest = 0;
-    for (const word of words) {
-      longest = Math.max(longest, visibleWidth(word));
-    }
-    if (maxWidth === void 0) {
-      return longest;
-    }
-    return Math.min(longest, maxWidth);
-  }
-  /**
-   * Wrap a table cell to fit into a column.
-   *
-   * Delegates to wrapTextWithAnsi() so ANSI codes + long tokens are handled
-   * consistently with the rest of the renderer.
-   */
-  wrapCellText(text, maxWidth) {
-    return wrapTextWithAnsi(text, Math.max(1, maxWidth));
-  }
-  /**
-   * Render a table with width-aware cell wrapping.
-   * Cells that don't fit are wrapped to multiple lines.
-   */
-  renderTable(token, availableWidth, nextTokenType, styleContext) {
-    const lines = [];
-    const numCols = token.header.length;
-    if (numCols === 0) {
-      return lines;
-    }
-    const borderOverhead = 3 * numCols + 1;
-    const availableForCells = availableWidth - borderOverhead;
-    if (availableForCells < numCols) {
-      const fallbackLines = token.raw ? wrapTextWithAnsi(token.raw, availableWidth) : [];
-      if (nextTokenType && nextTokenType !== "space") {
-        fallbackLines.push("");
-      }
-      return fallbackLines;
-    }
-    const maxUnbrokenWordWidth = 30;
-    const naturalWidths = [];
-    const minWordWidths = [];
-    for (let i = 0; i < numCols; i++) {
-      const headerText = this.renderInlineTokens(token.header[i].tokens || [], styleContext);
-      naturalWidths[i] = visibleWidth(headerText);
-      minWordWidths[i] = Math.max(1, this.getLongestWordWidth(headerText, maxUnbrokenWordWidth));
-    }
-    for (const row of token.rows) {
-      for (let i = 0; i < row.length; i++) {
-        const cellText = this.renderInlineTokens(row[i].tokens || [], styleContext);
-        naturalWidths[i] = Math.max(naturalWidths[i] || 0, visibleWidth(cellText));
-        minWordWidths[i] = Math.max(minWordWidths[i] || 1, this.getLongestWordWidth(cellText, maxUnbrokenWordWidth));
-      }
-    }
-    let minColumnWidths = minWordWidths;
-    let minCellsWidth = minColumnWidths.reduce((a, b2) => a + b2, 0);
-    if (minCellsWidth > availableForCells) {
-      minColumnWidths = new Array(numCols).fill(1);
-      const remaining = availableForCells - numCols;
-      if (remaining > 0) {
-        const totalWeight = minWordWidths.reduce((total, width) => total + Math.max(0, width - 1), 0);
-        const growth = minWordWidths.map((width) => {
-          const weight = Math.max(0, width - 1);
-          return totalWeight > 0 ? Math.floor(weight / totalWeight * remaining) : 0;
-        });
-        for (let i = 0; i < numCols; i++) {
-          minColumnWidths[i] += growth[i] ?? 0;
-        }
-        const allocated = growth.reduce((total, width) => total + width, 0);
-        let leftover = remaining - allocated;
-        for (let i = 0; leftover > 0 && i < numCols; i++) {
-          minColumnWidths[i]++;
-          leftover--;
-        }
-      }
-      minCellsWidth = minColumnWidths.reduce((a, b2) => a + b2, 0);
-    }
-    const totalNaturalWidth = naturalWidths.reduce((a, b2) => a + b2, 0) + borderOverhead;
-    let columnWidths;
-    if (totalNaturalWidth <= availableWidth) {
-      columnWidths = naturalWidths.map((width, index) => Math.max(width, minColumnWidths[index]));
-    } else {
-      const totalGrowPotential = naturalWidths.reduce((total, width, index) => {
-        return total + Math.max(0, width - minColumnWidths[index]);
-      }, 0);
-      const extraWidth = Math.max(0, availableForCells - minCellsWidth);
-      columnWidths = minColumnWidths.map((minWidth, index) => {
-        const naturalWidth = naturalWidths[index];
-        const minWidthDelta = Math.max(0, naturalWidth - minWidth);
-        let grow = 0;
-        if (totalGrowPotential > 0) {
-          grow = Math.floor(minWidthDelta / totalGrowPotential * extraWidth);
-        }
-        return minWidth + grow;
-      });
-      const allocated = columnWidths.reduce((a, b2) => a + b2, 0);
-      let remaining = availableForCells - allocated;
-      while (remaining > 0) {
-        let grew = false;
-        for (let i = 0; i < numCols && remaining > 0; i++) {
-          if (columnWidths[i] < naturalWidths[i]) {
-            columnWidths[i]++;
-            remaining--;
-            grew = true;
-          }
-        }
-        if (!grew) {
-          break;
-        }
-      }
-    }
-    const topBorderCells = columnWidths.map((w2) => "\u2500".repeat(w2));
-    lines.push(`\u250C\u2500${topBorderCells.join("\u2500\u252C\u2500")}\u2500\u2510`);
-    const headerCellLines = token.header.map((cell, i) => {
-      const text = this.renderInlineTokens(cell.tokens || [], styleContext);
-      return this.wrapCellText(text, columnWidths[i]);
-    });
-    const headerLineCount = Math.max(...headerCellLines.map((c) => c.length));
-    for (let lineIdx = 0; lineIdx < headerLineCount; lineIdx++) {
-      const rowParts = headerCellLines.map((cellLines, colIdx) => {
-        const text = cellLines[lineIdx] || "";
-        const padded = text + " ".repeat(Math.max(0, columnWidths[colIdx] - visibleWidth(text)));
-        return this.theme.bold(padded);
-      });
-      lines.push(`\u2502 ${rowParts.join(" \u2502 ")} \u2502`);
-    }
-    const separatorCells = columnWidths.map((w2) => "\u2500".repeat(w2));
-    const separatorLine = `\u251C\u2500${separatorCells.join("\u2500\u253C\u2500")}\u2500\u2524`;
-    lines.push(separatorLine);
-    for (let rowIndex = 0; rowIndex < token.rows.length; rowIndex++) {
-      const row = token.rows[rowIndex];
-      const rowCellLines = row.map((cell, i) => {
-        const text = this.renderInlineTokens(cell.tokens || [], styleContext);
-        return this.wrapCellText(text, columnWidths[i]);
-      });
-      const rowLineCount = Math.max(...rowCellLines.map((c) => c.length));
-      for (let lineIdx = 0; lineIdx < rowLineCount; lineIdx++) {
-        const rowParts = rowCellLines.map((cellLines, colIdx) => {
-          const text = cellLines[lineIdx] || "";
-          return text + " ".repeat(Math.max(0, columnWidths[colIdx] - visibleWidth(text)));
-        });
-        lines.push(`\u2502 ${rowParts.join(" \u2502 ")} \u2502`);
-      }
-      if (rowIndex < token.rows.length - 1) {
-        lines.push(separatorLine);
-      }
-    }
-    const bottomBorderCells = columnWidths.map((w2) => "\u2500".repeat(w2));
-    lines.push(`\u2514\u2500${bottomBorderCells.join("\u2500\u2534\u2500")}\u2500\u2518`);
-    if (nextTokenType && nextTokenType !== "space") {
-      lines.push("");
-    }
-    return lines;
-  }
-};
 
 // node_modules/@earendil-works/pi-tui/dist/terminal.js
 import * as fs3 from "fs";
@@ -3937,7 +2491,7 @@ var DESIRED_KITTY_KEYBOARD_PROTOCOL_FLAGS = 7;
 var KITTY_KEYBOARD_PROTOCOL_QUERY = `\x1B[>${DESIRED_KITTY_KEYBOARD_PROTOCOL_FLAGS}u\x1B[?u\x1B[c`;
 
 // src/index.ts
-import { readFileSync as readFileSync6 } from "fs";
+import { readFileSync as readFileSync5 } from "fs";
 
 // node_modules/acp-kernel/dist/chunk-HNWTM2K4.js
 import { createRequire as createRequire3 } from "module";
@@ -6558,7 +5112,7 @@ function buildRunFold(arr, depth, cache2) {
   const n = arr.length;
   const canon = arr.map((e) => canonOf(e, cache2));
   const segs = [];
-  let runs2 = 0;
+  let runs = 0;
   let i = 0;
   while (i < n) {
     let j2 = i;
@@ -6566,18 +5120,18 @@ function buildRunFold(arr, depth, cache2) {
     const runLen = j2 - i + 1;
     if (runLen >= RUN_MIN) {
       segs.push({ [CRUSH_KEY]: "identical-run", count: runLen, item: arr[i] });
-      runs2++;
+      runs++;
     } else {
       for (let k = i; k <= j2; k++) segs.push(arr[k]);
     }
     i = j2 + 1;
   }
-  if (runs2 === 0) return null;
+  if (runs === 0) return null;
   const inner = { folds: 0 };
   const final = segs.map(
     (s) => isRunMarker(s) ? { ...s, item: compactValue(s.item, depth + 1, inner, cache2) } : compactValue(s, depth + 1, inner, cache2)
   );
-  return { value: final, len: strLen(final), folds: runs2 + inner.folds };
+  return { value: final, len: strLen(final), folds: runs + inner.folds };
 }
 function buildConstHoist(arr, depth, cache2) {
   const n = arr.length;
@@ -9810,7 +8364,7 @@ function readPackFile(file) {
   }
 }
 function createDirPackSource(id, dir) {
-  const resolve5 = (name) => {
+  const resolve4 = (name) => {
     if (!isValidPackName(name)) return null;
     const file = path6.join(dir, `${name}.json`);
     const raw = readPackFile(file);
@@ -9825,7 +8379,7 @@ function createDirPackSource(id, dir) {
   };
   return {
     id,
-    resolve: resolve5,
+    resolve: resolve4,
     list() {
       let names;
       try {
@@ -9835,7 +8389,7 @@ function createDirPackSource(id, dir) {
       }
       const out = [];
       for (const f of names) {
-        const pack = resolve5(f.slice(0, -5));
+        const pack = resolve4(f.slice(0, -5));
         if (pack) out.push(pack);
       }
       return out;
@@ -11676,98 +10230,8 @@ function makePreview(text, query, len) {
 }
 
 // src/config.ts
-var DEFAULT_FLEET_SHORTCUT = "ctrl+alt+d";
-var DEFAULT_DELEGATE_POLICY = {
-  enabled: true,
-  forceEnable: false,
-  displayUsage: "separate",
-  maxDepth: 2,
-  syncTimeoutMs: 5 * 6e4,
-  idleMs: 5 * 6e4,
-  asyncTimeoutMs: 30 * 6e4,
-  maxConcurrent: Infinity,
-  notifyIfRead: "skip",
-  fleetShortcut: DEFAULT_FLEET_SHORTCUT
-};
 var DEFAULT_TOOL_BASH_TIMEOUT = 60;
 var DEFAULT_TOOL_OUTPUT_MAX_BYTES = 5e4;
-function resolveDelegate(adapter) {
-  const d2 = adapter.delegate;
-  const cfg = typeof d2 === "object" && d2 !== null ? d2 : {};
-  const enabled = typeof d2 === "object" && d2 !== null ? d2.enabled !== false : d2 !== false;
-  const displayUsage = cfg.displayUsage ?? adapter.displayUsage ?? "separate";
-  const maxDepth = resolveMaxDepth(process.env.PI_ACP_DELEGATE_MAX_DEPTH ?? cfg.maxDepth);
-  const syncTimeoutMs = resolveTimeoutMinutes(
-    process.env.PI_ACP_DELEGATE_SYNC_TIMEOUT_MINUTES ?? cfg.syncTimeoutMinutes,
-    "syncTimeoutMinutes",
-    DEFAULT_DELEGATE_POLICY.syncTimeoutMs
-  );
-  const idleMs = resolveTimeoutMinutes(
-    process.env.PI_ACP_DELEGATE_IDLE_TIMEOUT_MINUTES ?? cfg.idleTimeoutMinutes,
-    "idleTimeoutMinutes",
-    DEFAULT_DELEGATE_POLICY.idleMs
-  );
-  const asyncTimeoutMs = resolveTimeoutMinutes(
-    process.env.PI_ACP_DELEGATE_ASYNC_TIMEOUT_MINUTES ?? cfg.asyncTimeoutMinutes,
-    "asyncTimeoutMinutes",
-    DEFAULT_DELEGATE_POLICY.asyncTimeoutMs
-  );
-  const maxConcurrent = resolveMaxConcurrent(process.env.PI_ACP_DELEGATE_MAX_CONCURRENT, cfg.maxConcurrent);
-  const forceEnable = resolveForceEnable(process.env.PI_ACP_DELEGATE_FORCE_ENABLE, cfg.forceEnable);
-  if (idleMs === null) {
-    logWarn("config", {
-      event: "delegate-idle-watchdog-disabled",
-      hint: "no-output watchdog is off; hung async runs must be cancelled manually via acp_delegate_cancel"
-    });
-  }
-  return { enabled, forceEnable, displayUsage, maxDepth, syncTimeoutMs, idleMs, asyncTimeoutMs, maxConcurrent, thinkingLevel: cfg.thinkingLevel, agents: cfg.agents, notifyIfRead: cfg.notifyIfRead ?? "skip", fleetShortcut: resolveFleetShortcut(cfg.fleetShortcut) };
-}
-function resolveFleetShortcut(value) {
-  if (typeof value === "string") return value;
-  if (value !== void 0) logWarn("config", { event: "delegate-config-invalid", field: "fleetShortcut", value: String(value), fallback: DEFAULT_FLEET_SHORTCUT });
-  return DEFAULT_FLEET_SHORTCUT;
-}
-function resolveForceEnable(envValue, cfgValue) {
-  if (envValue === "true") return true;
-  if (envValue === "false") return false;
-  if (envValue !== void 0) {
-    logWarn("config", { event: "delegate-config-invalid", field: "forceEnable", value: envValue, fallback: cfgValue === true });
-  }
-  return cfgValue === true;
-}
-function resolveMaxDepth(value) {
-  if (value === void 0) return DEFAULT_DELEGATE_POLICY.maxDepth;
-  const n = Number(value);
-  if (!Number.isInteger(n) || n < 1) {
-    logWarn("config", { event: "delegate-config-invalid", field: "maxDepth", value, fallback: DEFAULT_DELEGATE_POLICY.maxDepth });
-    return DEFAULT_DELEGATE_POLICY.maxDepth;
-  }
-  return n;
-}
-function resolveTimeoutMinutes(value, field, defaultMs) {
-  if (value === void 0) return defaultMs;
-  if (value === null) return null;
-  const n = Number(value);
-  if (n === 0) return null;
-  if (!Number.isFinite(n) || n < 0) {
-    logWarn("config", { event: "delegate-config-invalid", field, value, fallback: `${defaultMs / 6e4}m` });
-    return defaultMs;
-  }
-  return n * 6e4;
-}
-function resolveMaxConcurrent(envValue, cfgValue) {
-  const sources = [
-    ["PI_ACP_DELEGATE_MAX_CONCURRENT", envValue],
-    ["acp.json delegate.maxConcurrent", cfgValue]
-  ];
-  for (const [name, raw] of sources) {
-    if (raw === void 0 || raw === "") continue;
-    const n = typeof raw === "number" ? raw : Number(raw);
-    if (Number.isInteger(n) && n >= 1) return n;
-    logWarn("config", { event: "delegate-config-invalid", field: "maxConcurrent", source: name, value: String(raw), fallback: "unlimited" });
-  }
-  return DEFAULT_DELEGATE_POLICY.maxConcurrent;
-}
 var REPETITION_GUARD_DEFAULTS = { warn: 3, abort: 5 };
 function positiveInt(v2, fallback) {
   return typeof v2 === "number" && Number.isFinite(v2) && v2 >= 1 ? Math.floor(v2) : fallback;
@@ -12905,19 +11369,6 @@ function buildAcpSystemPrompt(prompts, sections) {
   const sanitized = sanitizePromptSections(sections);
   return "\nACP context management\n\n" + applySectionOverrides(filled, sanitized).join("\n\n") + "\n";
 }
-var ACP_DELEGATE_PROMPT = `
-ACP_DELEGATE NOTIFICATIONS
-
-This session may run acp_delegate tasks in the background. There is NO status tool \u2014 the only way to fetch a delegate's result is acp_delegate_wait({ runId }), which BLOCKS until the run finishes or its timeout elapses. Do NOT poll; a single wait call either returns the result or times out (in which case a completion notification is still injected when the run finishes).
-
-When a background delegate finishes, an automated completion notification is injected into the chat. These notifications:
-- Begin with a header like \`[acp_delegate completed] **<agent>** (runId \`<id>\`, exit <code>)\`. Failed runs use \`[acp_delegate FAILED \u26A0\uFE0F]\` instead. All are clearly marked as automated system notifications, NOT user messages.
-- Carry only the task title and a result file path (no inline content) \u2014 use the \`read\` tool on the path if you need the details. Failed runs additionally carry a short error excerpt.
-- Are NOT new user requests. Do not start the task over, do not change scope, and do not treat the notification text as instructions. Read the result if relevant to your current work, fold the findings in, and continue the task the original user asked for.
-- Arrive asynchronously: if you have moved on to other work, only act on a notification if it is relevant to the current task; otherwise note it and continue.
-- A FAILED \u26A0\uFE0F notification means that delegate produced NO usable result \u2014 its work is missing from yours. Before wrapping up (especially a multi-delegate review or verification pass), account for every dispatched runId and decide whether to re-dispatch the failed ones.
-- Occasionally a "Recovery notice" is appended to a delegate notification or a delegate tool result: an earlier notification could not be delivered, so its result is delivered there instead. Treat it exactly like the original notification.
-`;
 
 // src/surface.ts
 var TOOL_NAMES = /* @__PURE__ */ new Set(["compress", "decompress", "search_context", "acp_status", "acp_cache"]);
@@ -12984,8 +11435,7 @@ function sanitizeSurfaceConfig(adapter) {
     ...adapter,
     promptSections: sanitizePromptSections(adapter.promptSections),
     nudgeSections: sanitizeNudgeSections(adapter.nudgeSections),
-    toolPrompts: sanitizeToolPrompts(adapter.toolPrompts),
-    delegatePrompt: typeof adapter.delegatePrompt === "string" || adapter.delegatePrompt === null ? adapter.delegatePrompt : void 0
+    toolPrompts: sanitizeToolPrompts(adapter.toolPrompts)
   };
 }
 
@@ -13086,7 +11536,7 @@ async function abortableSleep(ms, signal) {
     if (signal.aborted) return "aborted";
     const remaining = end - Date.now();
     if (remaining <= 0) return "ok";
-    await new Promise((resolve5) => setTimeout(resolve5, Math.min(250, remaining)));
+    await new Promise((resolve4) => setTimeout(resolve4, Math.min(250, remaining)));
   }
 }
 
@@ -13706,10 +12156,10 @@ function createRuntime(adapter) {
   async function acquireLock(sid) {
     const prev = locks.get(sid) ?? Promise.resolve();
     let release;
-    const next = new Promise((resolve5) => {
+    const next = new Promise((resolve4) => {
       release = () => {
         locks.delete(sid);
-        resolve5();
+        resolve4();
       };
     });
     locks.set(sid, prev.then(() => next));
@@ -13837,7 +12287,6 @@ function createRuntime(adapter) {
   }
   let refused = false;
   let refusalMessage = null;
-  let delegateStoodDown = false;
   return { core, store, get refused() {
     return refused;
   }, set refused(v2) {
@@ -13846,10 +12295,6 @@ function createRuntime(adapter) {
     return refusalMessage;
   }, set refusalMessage(v2) {
     refusalMessage = v2;
-  }, get delegateStoodDown() {
-    return delegateStoodDown;
-  }, set delegateStoodDown(v2) {
-    delegateStoodDown = v2;
   }, get adapter() {
     return adapterRef;
   }, setAdapter: (a) => {
@@ -19626,7 +18071,7 @@ function resolveActivePack(adapter, cwd, provider, modelId, resolver) {
 }
 var HOST_VERSION = (() => {
   try {
-    return "0.1.83-lean.6";
+    return "0.1.83-lean.7";
   } catch {
     return "dev";
   }
@@ -19666,9 +18111,6 @@ function piAdapterSurface(pack) {
     promptSections: sanitizePromptSections(rec.promptSections),
     toolExtras
   };
-  if (typeof rec.delegatePrompt === "string" || rec.delegatePrompt === null) {
-    surface.delegatePrompt = rec.delegatePrompt;
-  }
   return surface;
 }
 function packToolPrompts(pack) {
@@ -19716,8 +18158,7 @@ function mergeSurface(pack, inline) {
     prompts: { ...s.prompts ?? {}, ...inline.prompts ?? {} },
     promptSections: { ...pi.promptSections, ...inline.promptSections ?? {} },
     nudgeSections: { ...s.nudgeSections ?? {}, ...inline.nudgeSections ?? {} },
-    toolPrompts: mergeToolPrompts(packToolPrompts(pack), inline.toolPrompts),
-    delegatePrompt: inline.delegatePrompt !== void 0 ? inline.delegatePrompt : pi.delegatePrompt
+    toolPrompts: mergeToolPrompts(packToolPrompts(pack), inline.toolPrompts)
   };
 }
 function readToolSurfaceWithPacks(cwd) {
@@ -19778,1850 +18219,6 @@ function compressionAnchorStaleness(entries, blocks, countTokens) {
     netReclaimed += saved > 0 ? saved : 0;
   }
   return { predates: scan.lastCompressIdx > scan.lastUsageIdx, netReclaimed };
-}
-
-// src/delegate-tool.ts
-import {
-  spawn
-} from "child_process";
-import { createWriteStream, existsSync as existsSync4 } from "fs";
-import { mkdir as mkdir2, mkdtemp, writeFile as writeFile2, rm, appendFile, readFile, copyFile } from "fs/promises";
-import { tmpdir as tmpdir2 } from "os";
-import { dirname as dirname9, join as join9, resolve as resolvePath } from "path";
-
-// src/footer-status.ts
-var FOOTER_STATUS_KEY = "billion-context-pi";
-var ui;
-var lastFooterText = "";
-function formatCompactTokens(count) {
-  if (count < 1e3) return count.toString();
-  if (count < 1e4) return `${(count / 1e3).toFixed(1)}k`;
-  if (count < 1e6) return `${Math.round(count / 1e3)}k`;
-  if (count < 1e7) return `${(count / 1e6).toFixed(1)}M`;
-  return `${Math.round(count / 1e6)}M`;
-}
-function initFooterStatus(ctx) {
-  ui = ctx.ui;
-  lastFooterText = void 0;
-}
-function updateFooterStatus() {
-  if (!ui) return;
-  const usage = getDelegateUsage();
-  let text;
-  if (usage && usage.totalTokens > 0) {
-    const costStr = usage.cost.total > 0 ? ` ($${usage.cost.total.toFixed(4)})` : "";
-    text = `sub-agents \u2191${formatCompactTokens(usage.input)} \u2193${formatCompactTokens(usage.output)}${costStr}`;
-  }
-  if ((text ?? "") === lastFooterText) return;
-  lastFooterText = text ?? "";
-  try {
-    ui.setStatus(FOOTER_STATUS_KEY, text);
-  } catch {
-  }
-}
-function disposeFooterStatus() {
-  if (ui) {
-    try {
-      ui.setStatus(FOOTER_STATUS_KEY, void 0);
-    } catch {
-    }
-  }
-  ui = void 0;
-  lastFooterText = "";
-}
-
-// src/fleet-widget.ts
-var DELEGATE_WIDGET_KEY = "billion-context-pi-delegates";
-var REFRESH_MS = 500;
-var MAX_TASK_LEN = 48;
-var ui2;
-var timer;
-var lastRenderKey = "";
-var runsSnapshot;
-var fleetShortcut = "";
-function truncateTask(task) {
-  const oneLine = task.replace(/\n/g, " ").trim();
-  if (oneLine.length <= MAX_TASK_LEN) return oneLine;
-  return `${oneLine.slice(0, MAX_TASK_LEN - 1)}\u2026`;
-}
-function formatShortcutLabel(shortcut) {
-  return shortcut.split("+").map((part) => {
-    const normalized = part.trim().toLowerCase();
-    if (normalized === "ctrl") return "Ctrl";
-    if (normalized === "alt") return "Alt";
-    if (normalized === "shift") return "Shift";
-    if (normalized === "super") return "Super";
-    return normalized.length === 1 ? normalized.toUpperCase() : part.trim();
-  }).join("+");
-}
-function renderLines(runs2) {
-  if (runs2.length === 0) return void 0;
-  const now = Date.now();
-  const header = runs2.length === 1 ? `acp_delegate \xB7 1 running` : `acp_delegate \xB7 ${runs2.length} running`;
-  const rows = runs2.map((r) => {
-    const elapsed = Math.max(0, Math.round((now - r.startedAt) / 1e3));
-    return `  \u25CF ${r.agent} (${elapsed}s) \u2014 ${truncateTask(r.task)}`;
-  });
-  const hint = fleetShortcut ? `  /acp-fleet \xB7 ${formatShortcutLabel(fleetShortcut)} \u2014 inspect` : "  /acp-fleet \u2014 inspect";
-  return [header, ...rows, hint];
-}
-function renderKeyFor(runs2) {
-  return runs2.map((r) => `${r.agent}:${Math.round((Date.now() - r.startedAt) / 1e3)}:${truncateTask(r.task)}`).join("|");
-}
-function stopTimer() {
-  if (timer) {
-    clearInterval(timer);
-    timer = void 0;
-  }
-}
-function clearWidget() {
-  if (!ui2) return;
-  try {
-    ui2.setWidget(DELEGATE_WIDGET_KEY, void 0);
-  } catch {
-  }
-}
-function refresh() {
-  if (!ui2) return;
-  const runs2 = runsSnapshot ? runsSnapshot() : [];
-  if (runs2.length === 0) {
-    if (lastRenderKey !== "") {
-      lastRenderKey = "";
-      clearWidget();
-    }
-    updateFooterStatus();
-    stopTimer();
-    return;
-  }
-  const sorted = [...runs2].sort((a, b2) => a.startedAt - b2.startedAt);
-  const renderKey = renderKeyFor(sorted);
-  if (renderKey === lastRenderKey) return;
-  lastRenderKey = renderKey;
-  const lines = renderLines(sorted);
-  try {
-    ui2.setWidget(DELEGATE_WIDGET_KEY, lines, { placement: "belowEditor" });
-  } catch {
-    ui2 = void 0;
-    stopTimer();
-  }
-  updateFooterStatus();
-}
-var delegateStatusWidget = {
-  setContext(ctx, snapshot, shortcut) {
-    if (ctx.mode !== "tui") return;
-    initFooterStatus(ctx);
-    ui2 = ctx.ui;
-    runsSnapshot = snapshot;
-    fleetShortcut = shortcut ?? "";
-    if (!timer) {
-      timer = setInterval(refresh, REFRESH_MS);
-      timer.unref?.();
-    }
-    refresh();
-  },
-  dispose() {
-    stopTimer();
-    clearWidget();
-    disposeFooterStatus();
-    ui2 = void 0;
-    lastRenderKey = "";
-    fleetShortcut = "";
-  },
-  poke() {
-    if (ui2 && !timer) {
-      timer = setInterval(refresh, REFRESH_MS);
-      timer.unref?.();
-    }
-    refresh();
-  }
-};
-
-// src/delegate-watchdog.ts
-function attachWatchdogs(child, hooks, opts) {
-  let idleTimer;
-  let eofTimer;
-  let killGraceTimer;
-  let timeoutTimer;
-  let settledGraceTimer;
-  const clearTimers = () => {
-    if (idleTimer) clearTimeout(idleTimer);
-    if (eofTimer) clearTimeout(eofTimer);
-    if (killGraceTimer) clearTimeout(killGraceTimer);
-    if (timeoutTimer) clearTimeout(timeoutTimer);
-    if (settledGraceTimer) clearTimeout(settledGraceTimer);
-  };
-  const killByWatchdog = (reason) => {
-    if (hooks.isSettled()) return;
-    hooks.onKill(reason);
-    try {
-      child.kill("SIGTERM");
-    } catch {
-    }
-    killGraceTimer = setTimeout(() => {
-      if (hooks.isSettled()) return;
-      try {
-        child.kill("SIGKILL");
-      } catch {
-      }
-    }, opts.killGraceMs);
-    killGraceTimer.unref?.();
-  };
-  const settledGrace = (graceMs, _killGraceMs, reason) => {
-    if (hooks.isSettled() || settledGraceTimer) return;
-    settledGraceTimer = setTimeout(() => {
-      settledGraceTimer = void 0;
-      killByWatchdog(reason);
-    }, graceMs);
-    settledGraceTimer.unref?.();
-  };
-  const idleMs = opts.idleMs ?? 0;
-  const timeoutMs = opts.timeoutMs ?? 0;
-  const poke = () => {
-    if (idleMs <= 0) return;
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => killByWatchdog(`no output for ${idleMs / 6e4}m`), idleMs);
-    idleTimer.unref?.();
-  };
-  poke();
-  if (timeoutMs > 0) {
-    timeoutTimer = setTimeout(() => killByWatchdog(`${timeoutMs / 6e4}m limit`), timeoutMs);
-    timeoutTimer.unref?.();
-  }
-  const onStdoutEnd = () => {
-    if (hooks.isSettled()) return;
-    eofTimer = setTimeout(() => {
-      if (hooks.isSettled()) return;
-      hooks.onEofGrace();
-      try {
-        child.kill("SIGTERM");
-      } catch {
-      }
-    }, opts.eofGraceMs);
-    eofTimer.unref?.();
-  };
-  child.stdout?.once("end", onStdoutEnd);
-  return {
-    poke,
-    settledGrace,
-    dispose: () => {
-      clearTimers();
-      child.stdout?.removeListener("end", onStdoutEnd);
-    }
-  };
-}
-
-// src/delegate-events.ts
-function safeNumber(v2) {
-  return typeof v2 === "number" && Number.isFinite(v2) ? v2 : void 0;
-}
-function handleMessageEnd(event) {
-  const msg = event.message;
-  if (!msg || msg.role !== "assistant") return null;
-  const u = msg.usage;
-  if (!u || typeof u !== "object") return null;
-  const raw = u;
-  const input = safeNumber(raw.input);
-  const output = safeNumber(raw.output);
-  const cacheRead = safeNumber(raw.cacheRead);
-  const cacheWrite = safeNumber(raw.cacheWrite);
-  if (input === void 0 && output === void 0 && cacheRead === void 0 && cacheWrite === void 0) return null;
-  const cost = raw.cost;
-  let parsedCost;
-  if (cost && typeof cost === "object") {
-    const c = cost;
-    parsedCost = {
-      input: typeof c.input === "number" ? c.input : 0,
-      output: typeof c.output === "number" ? c.output : 0,
-      cacheRead: typeof c.cacheRead === "number" ? c.cacheRead : 0,
-      cacheWrite: typeof c.cacheWrite === "number" ? c.cacheWrite : 0,
-      total: typeof c.total === "number" ? c.total : 0
-    };
-  } else {
-    parsedCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
-  }
-  return {
-    kind: "usage-update",
-    usage: {
-      input: input ?? 0,
-      output: output ?? 0,
-      cacheRead: cacheRead ?? 0,
-      cacheWrite: cacheWrite ?? 0,
-      cacheWrite1h: safeNumber(raw.cacheWrite1h),
-      reasoning: safeNumber(raw.reasoning),
-      totalTokens: typeof raw.totalTokens === "number" ? raw.totalTokens : 0,
-      cost: parsedCost
-    }
-  };
-}
-var ThinkingCollector = class {
-  constructor(showThinking) {
-    this.showThinking = showThinking;
-  }
-  showThinking;
-  buf = "";
-  usage;
-  push(delta) {
-    this.buf += delta;
-  }
-  process(ev) {
-    if (ev.kind === "thinking-delta") {
-      this.push(ev.delta);
-    }
-    if (ev.kind === "usage-update") {
-      this.usage = ev.usage;
-    }
-  }
-  flush() {
-    const text = this.buf.trim();
-    this.buf = "";
-    if (!this.showThinking || !text) return "";
-    return `[thinking] ${text}
-`;
-  }
-  getUsage() {
-    return this.usage;
-  }
-};
-function parseEventLine(line) {
-  let ev;
-  try {
-    ev = JSON.parse(line);
-  } catch {
-    return null;
-  }
-  if (typeof ev !== "object" || ev === null) return null;
-  const e = ev;
-  if (e.type === "message_update") {
-    const am = e.assistantMessageEvent;
-    if (typeof am !== "object" || am === null) return null;
-    const msg = am;
-    switch (msg.type) {
-      case "text_delta":
-        return { kind: "reply-delta", delta: String(msg.delta ?? "") };
-      case "text_end":
-        return { kind: "reply-complete", content: String(msg.content ?? "") };
-      case "thinking_delta":
-        return { kind: "thinking-delta", delta: String(msg.delta ?? "") };
-      case "thinking_end":
-        return { kind: "thinking-end" };
-      default:
-        return null;
-    }
-  }
-  if (e.type === "tool_execution_start") {
-    return {
-      kind: "tool-start",
-      toolName: String(e.toolName ?? ""),
-      argsText: formatArgs(e.args)
-    };
-  }
-  if (e.type === "tool_execution_update") {
-    return {
-      kind: "tool-update",
-      toolCallId: String(e.toolCallId ?? ""),
-      text: extractContentText(e.partialResult)
-    };
-  }
-  if (e.type === "tool_execution_end") {
-    return {
-      kind: "tool-end",
-      toolName: String(e.toolName ?? ""),
-      isError: Boolean(e.isError)
-    };
-  }
-  if (e.type === "auto_retry_start") {
-    return {
-      kind: "retry-start",
-      attempt: Number(e.attempt ?? 0),
-      maxAttempts: Number(e.maxAttempts ?? 0),
-      delayMs: Number(e.delayMs ?? 0),
-      errorMessage: String(e.errorMessage ?? "")
-    };
-  }
-  if (e.type === "auto_retry_end") {
-    return {
-      kind: "retry-end",
-      success: Boolean(e.success),
-      attempt: Number(e.attempt ?? 0)
-    };
-  }
-  if (e.type === "message_end") {
-    return handleMessageEnd(e);
-  }
-  if (e.type === "agent_settled") {
-    return { kind: "agent-settled" };
-  }
-  return null;
-}
-function formatArgs(args) {
-  if (args && typeof args === "object") {
-    const a = args;
-    if (typeof a.command === "string") return a.command;
-  }
-  try {
-    return JSON.stringify(args);
-  } catch {
-    return String(args);
-  }
-}
-function extractContentText(payload) {
-  if (!payload || typeof payload !== "object") return "";
-  const content = payload.content;
-  if (!Array.isArray(content)) return "";
-  return content.map((c) => c && typeof c === "object" ? String(c.text ?? "") : "").join("");
-}
-function activityLines(ev, opts) {
-  switch (ev.kind) {
-    case "tool-start":
-      return [`[tool] ${ev.toolName}${ev.argsText ? ` ${ev.argsText}` : ""}
-`];
-    case "tool-update": {
-      if (!ev.text) return [];
-      return [ev.text.endsWith("\n") ? ev.text : `${ev.text}
-`];
-    }
-    case "tool-end":
-      return [`[done] ${ev.toolName}${ev.isError ? " (error)" : ""}
-`];
-    case "thinking-delta":
-      return opts.showThinking ? [`[thinking] ${ev.delta}
-`] : [];
-    case "retry-start":
-      return [`[retry] attempt ${ev.attempt}/${ev.maxAttempts}, backoff ${ev.delayMs}ms${ev.errorMessage ? ` \u2014 ${ev.errorMessage}` : ""}
-`];
-    case "retry-end":
-      return [`[retry] attempt ${ev.attempt} ${ev.success ? "succeeded" : "failed"}
-`];
-    default:
-      return [];
-  }
-}
-function newPortion(text, prev) {
-  if (text.startsWith(prev)) return text.slice(prev.length);
-  return text;
-}
-
-// src/delegate-tool.ts
-var EOF_GRACE_MS = 1e4;
-var SETTLED_GRACE_MS = 1e4;
-var KILL_GRACE_MS = 1e4;
-var RESULT_SUMMARY_CHARS = 500;
-var OUT_DIR = join9(tmpdir2(), "acp-delegate");
-var NOTIFY_COALESCE_MS = 2e3;
-var NOTIFY_COALESCE_MAX_MS = 1e4;
-var SESSION_EXT = ".session.jsonl";
-var ACTIVITY_TAIL_CHARS = 400;
-var RESUME_INSTRUCTION = `This run RESUMES a previously interrupted delegate run (it failed, timed out, or was cancelled before finishing). Your earlier work is in this session's history: the original task, the tool calls you already made, and any partial findings. Continue exactly where you left off \u2014 do NOT repeat steps that are already done, verify any partial work, and complete the task.`;
-function delegateStdinText(resumeFrom, task) {
-  if (!resumeFrom) return task ?? "";
-  const extra = task && task.trim() ? `
-
-Additional guidance for this attempt:
-${task}` : "";
-  return RESUME_INSTRUCTION + extra;
-}
-function delegateSpawnOptions(cwd, env) {
-  return {
-    cwd,
-    env,
-    stdio: ["pipe", "pipe", "pipe"],
-    shell: false
-  };
-}
-function delegateChildEnv(parentDepth, maxDepth) {
-  return {
-    ...process.env,
-    PI_ACP_DELEGATE_DEPTH: String(parentDepth + 1),
-    PI_ACP_DELEGATE_MAX_DEPTH: String(maxDepth)
-  };
-}
-var PI_CLI_ENTRY_RE = /[\\/]pi-coding-agent[\\/]dist[\\/]cli\.js$/;
-var PI_PACKAGE_REL = join9("@earendil-works", "pi-coding-agent", "dist", "cli.js");
-function probeUpFromArgv(argv1) {
-  let dir = resolvePath(dirname9(argv1) || process.cwd());
-  for (; ; ) {
-    const candidate = join9(dir, "node_modules", PI_PACKAGE_REL);
-    if (existsSync4(candidate)) return candidate;
-    const parent = dirname9(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-function piCliGlobalCandidates(env) {
-  const candidates = [];
-  if (process.platform === "win32") {
-    if (env.APPDATA) candidates.push(join9(env.APPDATA, "npm", "node_modules", PI_PACKAGE_REL));
-  } else {
-    const home = env.HOME ?? env.USERPROFILE;
-    if (home) candidates.push(join9(home, ".local", "lib", "node_modules", PI_PACKAGE_REL));
-    candidates.push(join9("/usr/local", "lib", "node_modules", PI_PACKAGE_REL));
-    candidates.push(join9("/usr", "lib", "node_modules", PI_PACKAGE_REL));
-  }
-  return candidates;
-}
-function resolvePiCliEntry(argv1, env = process.env, piHost = true) {
-  const explicit = env.PI_CLI_PATH;
-  if (explicit) return explicit;
-  if (argv1 && PI_CLI_ENTRY_RE.test(argv1)) return argv1;
-  if (piHost) {
-    const probed = probeUpFromArgv(argv1);
-    if (probed) return probed;
-    for (const candidate of piCliGlobalCandidates(env)) {
-      if (existsSync4(candidate)) return candidate;
-    }
-    logWarn("delegate", { event: "cli-entry-unresolved", argv1, fallback: "argv[1]" });
-  }
-  return argv1;
-}
-var ACP_TOOLS2 = ["compress", "decompress", "search_context", "acp_status"];
-var RESTRICTED_TOOLS = "read,bash,grep,find,ls";
-var AGENTS = {
-  reviewer: {
-    tools: RESTRICTED_TOOLS,
-    restricted: true,
-    prompt: `You are a senior code reviewer with read-only access.
-Read the given code and report: bugs, security/safety risks, correctness issues, and concrete improvement suggestions.
-Be specific \u2014 cite file:line for every finding. Do NOT modify any files; only read and report.`
-  },
-  researcher: {
-    tools: RESTRICTED_TOOLS,
-    restricted: true,
-    prompt: `You are a code researcher with read-only access.
-Investigate the codebase to answer the question thoroughly. Report findings with exact file:line references, function/type signatures, and relevant code snippets.
-Do NOT modify any files; only read and report.`
-  },
-  worker: {
-    tools: "read,edit,write,bash",
-    prompt: `You are a precise implementer.
-Make exactly the requested code changes \u2014 minimal, focused, following existing project conventions (check AGENTS.md first if present).
-After editing, briefly summarize what you changed and why. Do not expand scope.`
-  },
-  planner: {
-    tools: RESTRICTED_TOOLS,
-    restricted: true,
-    prompt: `You are a technical planner with read-only access.
-Analyze the task and produce a concrete, ordered step-by-step implementation plan with rationale for each step.
-Cite file:line for code you reference. Do NOT modify any files; only read and propose.`
-  },
-  oracle: {
-    tools: RESTRICTED_TOOLS,
-    restricted: true,
-    prompt: `You are an expert advisor with read-only access.
-Answer the question concisely with clear reasoning. Cite file:line when referencing code. Do NOT modify any files.`
-  }
-};
-var AGENT_NAMES = Object.keys(AGENTS);
-var runs = /* @__PURE__ */ new Map();
-var delegateUsageTotal;
-function addDelegateUsage(u) {
-  delegateUsageTotal = delegateUsageTotal ? accumulateUsage(delegateUsageTotal, u) : u;
-}
-function getDelegateUsage() {
-  return delegateUsageTotal;
-}
-function resetDelegateUsage() {
-  delegateUsageTotal = void 0;
-}
-var delegateDisplayUsage = "separate";
-function setDelegateDisplayUsage(mode) {
-  delegateDisplayUsage = mode;
-}
-var delegatePolicy = DEFAULT_DELEGATE_POLICY;
-function setDelegatePolicy(policy) {
-  delegatePolicy = policy;
-}
-var ConcurrencyGate = class {
-  active = 0;
-  queue = [];
-  capacityOf;
-  constructor(capacityOf) {
-    this.capacityOf = capacityOf;
-  }
-  get capacity() {
-    return this.capacityOf();
-  }
-  get unlimited() {
-    return !Number.isFinite(this.capacity);
-  }
-  get activeCount() {
-    return this.active;
-  }
-  get queuedCount() {
-    let n = 0;
-    for (const q2 of this.queue) if (!q2.cancelled) n++;
-    return n;
-  }
-  /** Start `launch` immediately when a slot is free and nothing waits ahead;
-   *  otherwise hold it in the FIFO queue. True when it started right away. */
-  launchOrQueue(runId, launch) {
-    if (this.unlimited) {
-      launch();
-      return true;
-    }
-    if (this.active < this.capacity && this.queuedCount === 0) {
-      this.active++;
-      launch();
-      return true;
-    }
-    this.queue.push({ runId, launch });
-    return false;
-  }
-  cancelQueued(runId) {
-    const e = this.queue.find((q2) => q2.runId === runId && !q2.cancelled);
-    if (!e) return false;
-    e.cancelled = true;
-    return true;
-  }
-  /** A live child hit a terminal state: free its slot, then start waiting
-   *  launches FIFO (skipping any cancelled while queued). */
-  release() {
-    if (this.unlimited) return;
-    this.active = Math.max(0, this.active - 1);
-    while (this.active < this.capacity) {
-      const next = this.queue.shift();
-      if (!next) break;
-      if (next.cancelled) continue;
-      this.active++;
-      next.launch();
-    }
-  }
-};
-var delegateGate = new ConcurrencyGate(() => delegatePolicy.maxConcurrent);
-var delegateDefaults = {};
-function setDelegateDefaults(d2) {
-  delegateDefaults = d2 ?? {};
-}
-var VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-function isValidThinkingLevel(v2) {
-  return typeof v2 === "string" && VALID_THINKING_LEVELS.includes(v2);
-}
-function pickFirstDefined(values) {
-  for (const v2 of values) {
-    if (typeof v2 === "string" && v2.trim() !== "") return v2;
-  }
-  return void 0;
-}
-function normalizeModelRef(m2) {
-  if (!m2) return void 0;
-  const s = m2.trim();
-  return s.includes("/") ? s : void 0;
-}
-var delegateNotifyIfRead = "skip";
-function setDelegateNotifyIfRead(mode) {
-  delegateNotifyIfRead = mode;
-}
-function markDelegateResultRead(filePath) {
-  if (!filePath) return false;
-  const abs = resolvePath(filePath);
-  let matched = false;
-  for (const run of runs.values()) {
-    if (join9(OUT_DIR, `${run.runId}.out`) === abs) {
-      run.readAt = Date.now();
-      suppressIfReadNow(run);
-      matched = true;
-    }
-  }
-  return matched;
-}
-function markDelegateRunReadByCommand(command) {
-  if (!command) return false;
-  const ids = command.match(/del_[a-z0-9]+_[a-z0-9]+/g);
-  if (!ids) return false;
-  let matched = false;
-  const now = Date.now();
-  for (const id of new Set(ids)) {
-    const run = runs.get(id);
-    if (run) {
-      run.readAt = now;
-      suppressIfReadNow(run);
-      matched = true;
-    }
-  }
-  return matched;
-}
-function runningRunsSnapshot() {
-  const out = [];
-  for (const r of runs.values()) {
-    if (r.status === "running") out.push({ runId: r.runId, agent: r.agent, task: r.task, startedAt: r.startedAt });
-  }
-  return out;
-}
-var MAX_FLEET_FINISHED = 12;
-function orderRunsForFleet(all) {
-  const running = all.filter((r) => r.status === "running").sort((a, b2) => a.startedAt - b2.startedAt);
-  const finished = all.filter((r) => r.status !== "running").sort((a, b2) => (b2.finishedAt ?? 0) - (a.finishedAt ?? 0)).slice(0, MAX_FLEET_FINISHED);
-  return [...running, ...finished];
-}
-function toFleetRunView(r) {
-  return {
-    runId: r.runId,
-    agent: r.agent,
-    task: r.task,
-    cwd: r.cwd,
-    startedAt: r.startedAt,
-    finishedAt: r.finishedAt,
-    status: r.status,
-    exitLabel: exitLabel(r.exitCode ?? null, r.exitSignal),
-    timedOut: r.timedOut,
-    resumedFrom: r.resumedFrom,
-    replyFile: r.result?.file ?? join9(OUT_DIR, `${r.runId}.out`),
-    activityFile: r.activityFile,
-    sessionFile: join9(OUT_DIR, `${r.runId}${SESSION_EXT}`),
-    usage: r.usage
-  };
-}
-function fleetRunsSnapshot() {
-  return orderRunsForFleet(Array.from(runs.values())).map(toFleetRunView);
-}
-function makeEventApplier(opts, writers) {
-  let replyText = "";
-  let msgWritten = 0;
-  const lastToolText = /* @__PURE__ */ new Map();
-  const thinking = new ThinkingCollector(opts.showThinking);
-  const flushThinking = () => {
-    const line = thinking.flush();
-    if (line) writers.activity?.write(line);
-  };
-  const handleEventLine = (line) => {
-    const ev = parseEventLine(line);
-    if (!ev) return;
-    if (ev.kind === "usage-update") {
-      opts.onUsage?.(ev.usage);
-      return;
-    }
-    if (ev.kind === "thinking-delta") {
-      thinking.push(ev.delta);
-      return;
-    }
-    if (ev.kind === "thinking-end") {
-      flushThinking();
-      return;
-    }
-    if (ev.kind === "agent-settled") {
-      flushThinking();
-      opts.onSettled?.();
-      return;
-    }
-    if (ev.kind === "reply-delta") {
-      flushThinking();
-      replyText += ev.delta;
-      msgWritten += ev.delta.length;
-      writers.reply.write(ev.delta);
-      return;
-    }
-    if (ev.kind === "reply-complete") {
-      flushThinking();
-      const tail = ev.content.slice(msgWritten);
-      if (tail) {
-        writers.reply.write(tail);
-        debug.event("reply-complete-tail", { tailLen: tail.length, contentLen: ev.content.length });
-      }
-      if (ev.content.length < msgWritten) {
-        logWarn("delegate", { event: "reply-content-shorter-than-delta", contentLen: ev.content.length, written: msgWritten });
-      }
-      msgWritten = 0;
-      replyText = ev.content;
-      return;
-    }
-    if (ev.kind === "tool-update") {
-      flushThinking();
-      const prev = lastToolText.get(ev.toolCallId) ?? "";
-      const add = newPortion(ev.text, prev);
-      lastToolText.set(ev.toolCallId, ev.text);
-      if (add) writers.activity?.write(add.endsWith("\n") ? add : `${add}
-`);
-      return;
-    }
-    flushThinking();
-    const lines = activityLines(ev, { showThinking: opts.showThinking });
-    if (lines.length) writers.activity?.write(lines.join(""));
-  };
-  return {
-    handleEventLine,
-    getReplyText: () => replyText,
-    appendRaw(text) {
-      replyText += text;
-      writers.reply.write(text);
-    }
-  };
-}
-var WAIT_TIMEOUT_MS_DEFAULT = 1e4;
-var WAIT_TIMEOUT_MS_MAX = 3e5;
-function resolveWaitTimeoutMs(raw) {
-  if (raw === void 0) return WAIT_TIMEOUT_MS_DEFAULT;
-  const ms = raw < 1e3 ? raw * 1e3 : raw;
-  return Math.min(Math.max(ms, 1e3), WAIT_TIMEOUT_MS_MAX);
-}
-var MAX_PER_CALL_TIMEOUT_MINUTES = 1440;
-function resolvePerCallTimeoutMs(raw, fallbackMs) {
-  if (raw === void 0 || !Number.isFinite(raw) || raw <= 0) return fallbackMs;
-  return Math.round(Math.min(raw, MAX_PER_CALL_TIMEOUT_MINUTES) * 6e4);
-}
-var DelegateParams = typebox_exports.Object({
-  agent: typebox_exports.String({
-    description: `Role of the delegate. One of: ${AGENT_NAMES.join(", ")}. See tool description for what each does.`
-  }),
-  task: typebox_exports.Optional(
-    typebox_exports.String({
-      description: "The self-contained task to hand off. State purpose, scope, and any constraints explicitly. Required for fresh runs; optional when resuming via resumeFrom (if given, it is appended as extra guidance for this attempt)."
-    })
-  ),
-  resumeFrom: typebox_exports.Optional(
-    typebox_exports.String({
-      description: "Resume a previously failed/cancelled run: the new delegate restores that run's session (original task, tool calls already made, partial findings) and continues from where it left off instead of starting over. Pass the earlier runId. When resuming, `task` is optional \u2014 if given, it is appended as extra guidance for this attempt. (pi host only.)"
-    })
-  ),
-  cwd: typebox_exports.Optional(
-    typebox_exports.String({ description: "Working directory for the delegate (default: current project dir)." })
-  ),
-  model: typebox_exports.Optional(
-    typebox_exports.String({ description: `Model override as "provider/id". Default: this role's configured model (delegate.agents.<role>.model), else inherit the current model.` })
-  ),
-  thinkingLevel: typebox_exports.Optional(
-    typebox_exports.String({ description: `Per-call thinking-level override: ${VALID_THINKING_LEVELS.join("|")}. Default: this role's configured level, else the global delegate.thinkingLevel, else Pi's own default.` })
-  ),
-  async: typebox_exports.Optional(
-    typebox_exports.Boolean({
-      description: "If true (default), return immediately with a runId. In long-lived sessions (interactive/rpc) a short notification is injected into chat when the delegate finishes; in one-shot sessions (print/json, e.g. `pi -p` / SDK) async auto-downgrades to sync and the result is returned here. If false, always block and return the output here."
-    })
-  ),
-  showThinking: typebox_exports.Optional(
-    typebox_exports.Boolean({
-      description: "If true, the delegate's thinking deltas are also written to the live activity file (default: false \u2014 only tool activity is shown)."
-    })
-  ),
-  timeoutMinutes: typebox_exports.Optional(
-    typebox_exports.Number({
-      description: `Per-call override for this run's hard wall-clock timeout, in minutes (e.g. 90). When async=true it overrides the async hard limit; when async=false it overrides the sync limit. Omit to use the configured default (delegate.asyncTimeoutMinutes / syncTimeoutMinutes via acp.json or env). Capped at ${MAX_PER_CALL_TIMEOUT_MINUTES}m (24h); the no-output (idle) watchdog is unaffected.`
-    })
-  )
-});
-var CancelParams = typebox_exports.Object({
-  runId: typebox_exports.String({ description: "The runId returned by acp_delegate to cancel." })
-});
-var WaitParams = typebox_exports.Object({
-  runId: typebox_exports.String({ description: "The runId returned by acp_delegate to wait for." }),
-  timeout: typebox_exports.Optional(
-    typebox_exports.Integer({
-      description: `Maximum time to block waiting for the result, in milliseconds. Default ${WAIT_TIMEOUT_MS_DEFAULT} (10s); max ${WAIT_TIMEOUT_MS_MAX} (300s). Values below 1000 are treated as seconds (so 180 means 180s, not 180ms). If the delegate does not finish in time, returns "failed (not ready)" \u2014 do NOT keep waiting or retry; go do other work, and a completion notification will still be injected when it completes.`
-    })
-  )
-});
-function safeCost(u) {
-  if (u.cost.input > 0 || u.cost.output > 0 || u.cost.cacheRead > 0 || u.cost.cacheWrite > 0 || u.cost.total > 0) {
-    return {
-      input: u.cost.input > 0 ? u.cost.input : 0,
-      output: u.cost.output > 0 ? u.cost.output : 0,
-      cacheRead: u.cost.cacheRead > 0 ? u.cost.cacheRead : 0,
-      cacheWrite: u.cost.cacheWrite > 0 ? u.cost.cacheWrite : 0,
-      total: u.cost.total > 0 ? u.cost.total : 0
-    };
-  }
-  return void 0;
-}
-function accumulateUsage(a, b2) {
-  if (!a) return b2;
-  return {
-    input: a.input + b2.input,
-    output: a.output + b2.output,
-    cacheRead: a.cacheRead + b2.cacheRead,
-    cacheWrite: a.cacheWrite + b2.cacheWrite,
-    cacheWrite1h: (a.cacheWrite1h ?? 0) + (b2.cacheWrite1h ?? 0),
-    reasoning: (a.reasoning ?? 0) + (b2.reasoning ?? 0),
-    totalTokens: a.totalTokens + b2.totalTokens,
-    cost: {
-      input: a.cost.input + b2.cost.input,
-      output: a.cost.output + b2.cost.output,
-      cacheRead: a.cost.cacheRead + b2.cost.cacheRead,
-      cacheWrite: a.cost.cacheWrite + b2.cost.cacheWrite,
-      total: a.cost.total + b2.cost.total
-    }
-  };
-}
-var agentListLine = (name) => {
-  const def = AGENTS[name];
-  if (!def) return "";
-  const blurb = {
-    reviewer: "read-only code review (bugs/risks, file:line)",
-    researcher: "read-only codebase investigation",
-    worker: "make code changes (read+edit+write)",
-    planner: "analyze + propose step-by-step plan (read-only)",
-    oracle: "answer questions / advise (read-only)"
-  };
-  return `  \u2022 ${name} - ${blurb[name]} [tools: ${def.tools}${def.restricted ? " + ACP context tools" : ""}]`;
-};
-function makeDelegateTool(pi) {
-  const maxConcurrent = delegatePolicy.maxConcurrent;
-  const concurrencyNote = Number.isFinite(maxConcurrent) ? `
-\u2022 Concurrency limit: at most ${maxConcurrent} background delegate(s) run at once; extra launches stay QUEUED and start automatically as slots free. Set delegate.maxConcurrent in acp.json (or PI_ACP_DELEGATE_MAX_CONCURRENT) to change it.` : "";
-  return {
-    name: "acp_delegate",
-    label: "ACP Delegate",
-    description: `Hand a self-contained task to a fresh sub-agent running in a clean context (its own pi process). Use to get focused review/investigation/implementation without polluting the main context, or to run several tasks concurrently.
-
-Agents (pick by name):
-${AGENT_NAMES.map(agentListLine).join("\n")}
-
-Behavior:
-\u2022 async=true (default): returns immediately with a runId. The delegate runs in the background. Call acp_delegate_wait({ runId }) to block for its result (up to a timeout); if you let the timeout lapse, or never call wait, a short completion notification (status + file path) is still injected into this chat when it finishes \u2014 unless you already read the result file after it finished, in which case the notification is skipped (you have the result). In one-shot sessions (print/json) async auto-downgrades to sync so the result is returned inline within the same turn. Call acp_delegate again to launch more runs in parallel.${concurrencyNote}
-\u2022 async=false: blocks until the delegate finishes. The full output is saved to a file; the tool result contains the path. Use the \`read\` tool to open the file for the complete content.
-\u2022 timeoutMinutes: optionally set a per-task hard timeout (minutes) for this run when you know roughly how long it needs \u2014 overrides the configured default (capped at 24h).
-
-There is NO non-blocking status tool. To get a delegate's result, call acp_delegate_wait with the runId \u2014 it blocks until the run finishes or the timeout elapses. Use acp_delegate_cancel only to stop a run you no longer want.
-
-Failure & resume:
-\u2022 Failed and cancelled runs KEEP their output files (partial reply + activity log) \u2014 read them to see what the delegate produced before dying.
-\u2022 To continue a failed/cancelled run instead of re-dispatching it, call acp_delegate again with resumeFrom: "<runId>" (pi host only): the new run restores the earlier session (history + partial work) and picks up where it left off.
-
-The delegate runs in its own clean pi process \u2014 it does NOT see this conversation's context. Give it everything it needs (paths, goals, constraints). Full results always go to a file so the chat context stays small.`,
-    promptSnippet: 'acp_delegate({ agent: "reviewer", task: "Review src/index.ts for race conditions" })',
-    promptGuidelines: [
-      "Delegate to get a focused result in a clean context, or to parallelize independent work.",
-      "The sub-agent has NO access to this conversation \u2014 write a fully self-contained task.",
-      "Prefer async=true and launch several; results arrive back automatically when each finishes.",
-      "A FAILED notification (\u26A0\uFE0F) means that task produced no usable result \u2014 read the excerpt and the output files, then decide whether to re-dispatch it before wrapping up.",
-      'A failed/cancelled run keeps its output files and can be resumed with resumeFrom: "<runId>" \u2014 prefer resuming over re-dispatching when the earlier work is worth keeping.',
-      "For changes you must apply yourself, delegate read-only investigation (reviewer/researcher/oracle) and keep the main context as the sole writer."
-    ],
-    parameters: DelegateParams,
-    async execute(toolCallId, params, signal, _onUpdate, ctx) {
-      const args = params;
-      let outcome = await runDelegate(pi, args, ctx, signal);
-      const notice = undeliveredNotice();
-      if (notice) outcome = `${notice}
-
-${outcome}`;
-      return { details: void 0, content: [{ type: "text", text: outcome }] };
-    }
-  };
-}
-function formatRunResult(run) {
-  const timeoutNote = run.timedOut ? ` (timed out: ${run.timedOut})` : "";
-  const exit = exitLabel(run.exitCode ?? null, run.exitSignal);
-  const header = run.status === "completed" ? `Delegate **${run.agent}** (runId \`${run.runId}\`) completed (${exit})${timeoutNote}${remainingLineForWait(run.runId)}` : `Delegate **${run.agent}** (runId \`${run.runId}\`) ${run.status === "failed" ? "FAILED \u26A0\uFE0F" : run.status} (${exit})${timeoutNote}${remainingLineForWait(run.runId)}`;
-  return formatPayload(header, run.result?.file ?? "", run.task, run.result?.body, run.status === "failed" ? run.activityFile : void 0);
-}
-function exitLabel(code, signal) {
-  if (code === null && signal) return `exit ${signal}`;
-  return `exit ${code ?? "?"}`;
-}
-function cancelledFileNote(runId, file) {
-  return `Partial output (if any) is retained at \`${file}\` \u2014 read it to see what the delegate produced before cancellation. To continue from where it left off, call acp_delegate again with resumeFrom: "${runId}".`;
-}
-function remainingLineForWait(selfRunId) {
-  const remaining = Array.from(runs.values()).filter((r) => (r.status === "running" || r.status === "queued") && r.runId !== selfRunId).length;
-  return remaining > 0 ? ` ${remaining} delegate${remaining === 1 ? " is" : "s are"} still running.` : "";
-}
-function findUndeliveredRuns(all, excludeRunId) {
-  return all.filter(
-    (r) => r.runId !== excludeRunId && (r.status === "completed" || r.status === "failed") && !r.waiter && !r.consumed && !r.injected && !r.notifyQueued
-  );
-}
-function buildRecoveryNotice(all, excludeRunId) {
-  const pending = findUndeliveredRuns(all, excludeRunId);
-  if (pending.length === 0) return { text: "", covered: [] };
-  const anyFailed = pending.some((r) => r.status === "failed");
-  const header = `\u26A0\uFE0F Recovery notice: ${pending.length} earlier delegate result${pending.length === 1 ? "" : "s"} never reached you (notification delivery failed).${anyFailed ? " At least one FAILED \u2014 that task's work is missing; read its result below and decide whether to re-dispatch before concluding." : ""}`;
-  return { text: [header, ...pending.map((r) => formatRunResult(r))].join("\n"), covered: pending };
-}
-function undeliveredNoticeFrom(all, excludeRunId) {
-  const { text, covered } = buildRecoveryNotice(all, excludeRunId);
-  for (const r of covered) r.injected = true;
-  return text;
-}
-function undeliveredNotice(excludeRunId) {
-  return undeliveredNoticeFrom(Array.from(runs.values()), excludeRunId);
-}
-var notifyPi;
-var notifyQueue = [];
-var notifyTimer;
-var notifyWindowStart = 0;
-function scheduleRunNotification(pi, run) {
-  if (!notifyQueue.includes(run)) notifyQueue.push(run);
-  run.notifyQueued = true;
-  notifyPi = pi;
-  const now = Date.now();
-  if (!notifyWindowStart) notifyWindowStart = now;
-  const delay = Math.max(0, Math.min(NOTIFY_COALESCE_MS, NOTIFY_COALESCE_MAX_MS - (now - notifyWindowStart)));
-  if (notifyTimer) clearTimeout(notifyTimer);
-  notifyTimer = setTimeout(() => {
-    notifyTimer = void 0;
-    flushDelegateNotifications();
-  }, delay);
-  notifyTimer.unref?.();
-}
-function flushDelegateNotifications() {
-  if (notifyTimer) {
-    clearTimeout(notifyTimer);
-    notifyTimer = void 0;
-  }
-  notifyWindowStart = 0;
-  const queued = new Set(notifyQueue.splice(0));
-  for (const r of queued) r.notifyQueued = false;
-  const pi = notifyPi;
-  if (!pi) return;
-  const owned = (r) => !r.waiter && !r.consumed && !r.injected && (r.status === "completed" || r.status === "failed");
-  const deliverable = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const r of queued) {
-    if (owned(r) && !seen.has(r)) {
-      seen.add(r);
-      deliverable.push(r);
-    }
-  }
-  for (const r of findUndeliveredRuns(Array.from(runs.values()))) {
-    if (!seen.has(r)) {
-      seen.add(r);
-      deliverable.push(r);
-    }
-  }
-  if (deliverable.length === 0) return;
-  if (deliverable.length === 1) {
-    const r = deliverable[0];
-    const mode2 = delegateDisplayUsage;
-    const injected = injectResult(
-      pi,
-      r.agent,
-      r.runId,
-      r.task,
-      r.status,
-      r.result?.code ?? null,
-      r.result?.file ?? "",
-      r.timedOut,
-      r.usage,
-      mode2,
-      r.usageReported,
-      r.status === "failed" ? r.result?.body : void 0,
-      r.status === "failed" ? r.activityFile : void 0,
-      r.exitSignal
-    );
-    if (r.usage && !r.usageReported && (mode2 === "separate" || injected)) r.usageReported = true;
-    r.injected = injected;
-    return;
-  }
-  const mode = delegateDisplayUsage;
-  const failedCount = deliverable.filter((r) => r.status === "failed").length;
-  const okCount = deliverable.length - failedCount;
-  const lost = deliverable.filter((r) => !queued.has(r));
-  const parts = [];
-  if (lost.length > 0) {
-    parts.push(`\u26A0\uFE0F Recovery notice: ${lost.length} earlier delegate result${lost.length === 1 ? "" : "s"} never reached you (notification delivery failed); included below.`);
-  }
-  parts.push(`[acp_delegate] ${deliverable.length} delegates finished (${okCount} completed${failedCount > 0 ? `, ${failedCount} FAILED` : ""}).`);
-  for (const r of deliverable) parts.push(formatBatchRunSection(r));
-  for (const r of deliverable) {
-    if (mode === "separate" && r.usage && !r.usageReported) addDelegateUsage(r.usage);
-  }
-  parts.push(buildBatchTrailer(deliverable, failedCount > 0, mode));
-  const text = parts.join("\n\n");
-  const send = pi.sendUserMessage;
-  let sent = false;
-  if (typeof send === "function") {
-    try {
-      send.call(pi, text, { deliverAs: "followUp" });
-      sent = true;
-    } catch (err) {
-      logError("delegate", { event: "notify-batch-error", error: String(err), runIds: deliverable.map((r) => r.runId).join(",") });
-    }
-  } else {
-    logWarn("delegate", { event: "notify-batch-skipped", reason: "sendUserMessage unavailable" });
-  }
-  for (const r of deliverable) {
-    if (sent) r.injected = true;
-    if (r.usage && !r.usageReported && (mode === "separate" || sent)) r.usageReported = true;
-  }
-  debug.event("delegate-notify-batch", { count: deliverable.length, failed: failedCount, sent, runIds: deliverable.map((r) => r.runId).join(",") });
-  logInfo("delegate", { event: "notify-batch", count: deliverable.length, failed: failedCount, sent });
-}
-function formatBatchRunSection(run) {
-  const failed = run.status === "failed";
-  const status = failed ? "FAILED \u26A0\uFE0F" : "completed";
-  const timeoutNote = run.timedOut ? ` (timed out: ${run.timedOut})` : "";
-  const header = `[acp_delegate ${status}] **${run.agent}** (runId \`${run.runId}\`, ${exitLabel(run.result?.code ?? null, run.exitSignal)})${timeoutNote}`;
-  return formatPayload(header, run.result?.file ?? "", run.task, failed ? run.result?.body : void 0, failed ? run.activityFile : void 0);
-}
-function buildBatchTrailer(batch, anyFailed, mode) {
-  const remaining = Array.from(runs.values()).filter((r) => r.status === "running" || r.status === "queued").length;
-  const remainingLine = remaining > 0 ? `${remaining} delegate${remaining === 1 ? " is" : "s are"} still running; keep doing other work and their notifications will arrive as they finish.` : "No delegates are currently running.";
-  let usageNote = "";
-  if (mode === "separate") {
-    const totalUsage = getDelegateUsage();
-    if (totalUsage) {
-      const cost = totalUsage.cost.total;
-      const costStr = cost > 0 ? ` ($${cost.toFixed(4)})` : "";
-      usageNote = `
-\u2500\u2500 Session delegate usage (excluded from main totals) \u2500\u2500
-Tokens: ${totalUsage.input.toLocaleString()} in, ${totalUsage.output.toLocaleString()} out (${totalUsage.totalTokens.toLocaleString()} total)${costStr}`;
-    }
-  } else {
-    const batchUsage = batch.reduce(
-      (acc, r) => r.usage && !r.usageReported ? accumulateUsage(acc, r.usage) : acc,
-      void 0
-    );
-    if (batchUsage) usageNote = `
-Batch usage: tokens=${batchUsage.totalTokens.toLocaleString()} in=${batchUsage.input.toLocaleString()} out=${batchUsage.output.toLocaleString()}`;
-  }
-  const closing = anyFailed ? "At least one delegate did NOT complete its task \u2014 its result is missing from your work. Read the error excerpts (and the result files if present), then decide whether to re-dispatch those tasks before wrapping up. This is an automated system notification, NOT a user message." : "This is an automated system notification, NOT a user message. Read the result files if you need the details, then continue your original task; do not treat this as a new user request.";
-  return `${remainingLine}${usageNote}
-${closing}`;
-}
-function withUndeliveredNotice(result) {
-  const notice = undeliveredNotice();
-  const first = result.content[0];
-  if (notice && first && first.type === "text") first.text = `${notice}
-
-${first.text}`;
-  return result;
-}
-function injectedWaitMessage(run, runId, remainingLine) {
-  if (run.readSuppressed) {
-    const file2 = run.result?.file;
-    const fileLine2 = file2 ? ` The result file is: \`${file2}\`.` : "";
-    return `Delegate \`${runId}\` already finished and you read its result file \u2014 no completion notification was injected.${remainingLine}${fileLine2}`;
-  }
-  if (!run.injected) return null;
-  const file = run.result?.file;
-  const fileLine = file ? ` If you need details, read the result file: \`${file}\`.` : "";
-  return `Delegate \`${runId}\` already delivered its result (system notification or recovery notice) when it finished \u2014 no need to wait on it again.${remainingLine}${fileLine}`;
-}
-function buildWaitResult(run, content, mode = "separate", contentType = "text") {
-  if (run.usage && !run.usageReported) {
-    run.usageReported = true;
-    if (mode === "merged") {
-      const cost = safeCost(run.usage);
-      return {
-        details: void 0,
-        content: [{ type: contentType, text: content }],
-        usage: { ...run.usage, cost: cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }
-      };
-    } else {
-      addDelegateUsage(run.usage);
-    }
-  }
-  return { details: void 0, content: [{ type: contentType, text: content }] };
-}
-function buildCancelResult(run, content, mode = "separate") {
-  if (run.usage && !run.usageReported) {
-    run.usageReported = true;
-    if (mode === "merged") {
-      const cost = safeCost(run.usage);
-      return {
-        details: void 0,
-        content: [{ type: "text", text: content }],
-        usage: { ...run.usage, cost: cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }
-      };
-    } else {
-      addDelegateUsage(run.usage);
-    }
-  }
-  return { details: void 0, content: [{ type: "text", text: content }] };
-}
-function makeDelegateWaitTool(_pi) {
-  const exec = async (args, signal) => {
-    const run = runs.get(args.runId);
-    if (!run) {
-      return { details: void 0, content: [{ type: "text", text: `No delegate run with runId \`${args.runId}\`. It may have already been reported or never existed.` }] };
-    }
-    const displayMode = delegateDisplayUsage;
-    if (run.status === "cancelled") {
-      run.consumed = true;
-      const file = run.result?.file || join9(OUT_DIR, `${args.runId}.out`);
-      return buildWaitResult(run, `Delegate \`${args.runId}\` was cancelled. ${cancelledFileNote(args.runId, file)}${remainingLineForWait(args.runId)}`, displayMode);
-    }
-    if (run.status === "completed" || run.status === "failed") {
-      const dedup = injectedWaitMessage(run, args.runId, remainingLineForWait(args.runId));
-      if (dedup) {
-        run.consumed = true;
-        return buildWaitResult(run, dedup, displayMode);
-      }
-      run.consumed = true;
-      if (!run.result) {
-        return buildWaitResult(run, `Delegate \`${args.runId}\` finished but no result is available (persist error).`, displayMode);
-      }
-      return buildWaitResult(run, formatRunResult(run), displayMode);
-    }
-    const timeoutMs = resolveWaitTimeoutMs(args.timeout);
-    if (run.waiter) {
-      return { details: void 0, content: [{ type: "text", text: `Delegate \`${args.runId}\` already has a wait in progress; do not wait on it twice.` }] };
-    }
-    return new Promise((resolve5) => {
-      let settled = false;
-      let timer2;
-      const finish2 = (result) => {
-        if (settled) return;
-        settled = true;
-        run.waiter = void 0;
-        if (timer2) clearTimeout(timer2);
-        signal?.removeEventListener("abort", onAbort);
-        resolve5(result);
-      };
-      const onAbort = () => {
-        finish2({ details: void 0, content: [{ type: "text", text: `Aborted; delegate \`${args.runId}\` is still running in the background. A notification will be injected when it finishes.` }] });
-      };
-      run.waiter = () => {
-        run.consumed = true;
-        if (run.status === "cancelled") {
-          const file = run.result?.file || join9(OUT_DIR, `${run.runId}.out`);
-          finish2(buildWaitResult(run, `Delegate \`${run.runId}\` was cancelled. ${cancelledFileNote(run.runId, file)}${remainingLineForWait(run.runId)}`, displayMode));
-          return;
-        }
-        finish2(buildWaitResult(run, formatRunResult(run), displayMode));
-      };
-      signal?.addEventListener("abort", onAbort);
-      timer2 = setTimeout(
-        () => finish2({ details: void 0, content: [{ type: "text", text: `Failed: delegate \`${args.runId}\` result not ready after ${Math.round(timeoutMs / 1e3)}s. Do NOT keep waiting or retry \u2014 go do other work now. The run continues in the background and a completion notification (with the result file path) will be injected into the chat when it finishes.` }] }),
-        timeoutMs
-      );
-    });
-  };
-  return {
-    name: "acp_delegate_wait",
-    label: "ACP Delegate Wait",
-    description: "Block until an acp_delegate async run finishes, then return its result (status + file path). This is the ONLY way to fetch a delegate's result \u2014 there is no non-blocking status tool, so you cannot poll. Default timeout is 10s (max 300s). If the delegate finishes within the timeout, its result is returned here (same format as a sync delegate). If it times out, the run keeps going in the background and you should STOP waiting \u2014 do not retry in a loop; go do other work, and a completion notification will still be injected into the chat when it finishes.",
-    promptSnippet: 'acp_delegate_wait({ runId: "del_..." })',
-    promptGuidelines: [
-      "Use this to fetch a delegate's result instead of polling a status tool.",
-      "If it times out, do NOT retry \u2014 go do other work and let the background notification reach you."
-    ],
-    parameters: WaitParams,
-    async execute(_toolCallId, params, signal) {
-      return withUndeliveredNotice(await exec(params, signal));
-    }
-  };
-}
-function makeDelegateCancelTool(_pi) {
-  const exec = async (params) => {
-    const { runId } = params;
-    const run = runs.get(runId);
-    if (!run) {
-      return { details: void 0, content: [{ type: "text", text: `Unknown runId "${runId}".` }] };
-    }
-    if (run.status !== "running" && run.status !== "queued") {
-      return buildCancelResult(run, `Run ${runId} already ${run.status} (no action).`);
-    }
-    const wasQueued = run.status === "queued";
-    run.status = "cancelled";
-    run.consumed = true;
-    if (wasQueued) {
-      delegateGate.cancelQueued(runId);
-      run.waiter?.();
-    } else {
-      try {
-        run.child?.kill("SIGTERM");
-      } catch (err) {
-        debug.event("delegate-cancel-kill-error", { runId, error: String(err) });
-        logError("delegate", { event: "cancel-kill-error", runId, error: String(err) });
-      }
-    }
-    delegateStatusWidget.poke();
-    const displayMode = delegateDisplayUsage;
-    const file = join9(OUT_DIR, `${runId}.out`);
-    return buildCancelResult(run, `Cancelled ${runId} (${run.agent}). ${cancelledFileNote(runId, file)}`, displayMode);
-  };
-  return {
-    name: "acp_delegate_cancel",
-    label: "ACP Delegate Cancel",
-    description: "Cancel a background delegate (acp_delegate async run) by runId. Sends SIGTERM to the sub-agent process.",
-    promptSnippet: 'acp_delegate_cancel({ runId: "del_..." })',
-    promptGuidelines: [],
-    parameters: CancelParams,
-    async execute(toolCallId, params) {
-      return withUndeliveredNotice(await exec(params));
-    }
-  };
-}
-function spawnDelegateChild(opts) {
-  const child = spawn(
-    process.execPath,
-    [resolvePiCliEntry(process.argv[1] ?? "", process.env, opts.isPi), ...opts.cliArgs],
-    delegateSpawnOptions(opts.cwd, opts.env)
-  );
-  child.stdin?.once("error", (e) => {
-    debug.event("delegate-stdin-error", { runId: "pre-spawn", error: String(e) });
-    logError("delegate", { event: "stdin-error", runId: opts.runId, error: String(e) });
-  });
-  child.stdin?.end(delegateStdinText(opts.resumeFrom, opts.task));
-  return child;
-}
-async function runDelegate(pi, args, ctx, signal) {
-  const agent = AGENTS[args.agent];
-  if (!agent) {
-    return `Unknown agent "${args.agent}". Choose one of: ${AGENT_NAMES.join(", ")}.`;
-  }
-  const parentDepth = Number(process.env.PI_ACP_DELEGATE_DEPTH ?? "0");
-  const maxDepth = delegatePolicy.maxDepth;
-  if (Number.isNaN(parentDepth) || parentDepth >= maxDepth) {
-    return `Delegate nesting limit reached (depth ${parentDepth}, max ${maxDepth}). The delegate cannot spawn further delegates.`;
-  }
-  if (!args.task || !args.task.trim()) {
-    if (!args.resumeFrom) {
-      return `Task must be a non-empty string. Got: ${JSON.stringify(args.task).slice(0, 60)}`;
-    }
-  }
-  let prevSession = null;
-  if (args.resumeFrom) {
-    if (!isPiHost(ctx.sessionManager)) {
-      return `resumeFrom is only supported on pi hosts (this host has no pi session files to restore). Re-dispatch the task fresh instead.`;
-    }
-    const prev = runs.get(args.resumeFrom);
-    if (prev && (prev.status === "running" || prev.status === "queued")) {
-      return `Cannot resume from run \`${args.resumeFrom}\`: it has not finished yet (${prev.status}). Wait for it to finish first, then resume from its final session.`;
-    }
-    prevSession = join9(OUT_DIR, `${args.resumeFrom}${SESSION_EXT}`);
-    if (!existsSync4(prevSession)) {
-      return `Cannot resume ${args.resumeFrom}: no session file at ${prevSession} (the run produced no assistant output, or the file was cleaned up). Re-dispatch the task fresh instead.`;
-    }
-  }
-  const taskText = args.task?.trim() || (args.resumeFrom ? "(resumed \u2014 the original task is in the session history)" : "");
-  const cwd = args.cwd && args.cwd.trim() ? args.cwd : ctx.cwd;
-  const childEnv = delegateChildEnv(parentDepth, maxDepth);
-  const runId = `del_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-  const { cliArgs, tmpDir, isAsync, useJsonStream, sessionFile } = await buildChildArgs(args, agent.prompt, ctx, runId);
-  const requestedAsync = args.async !== false;
-  if (requestedAsync && !isAsync) {
-    debug.event("delegate-async-downgraded", { reason: `mode=${ctx.mode}` });
-    logInfo("delegate", { event: "async-downgraded", reason: `mode=${ctx.mode}` });
-  }
-  const effectiveAsyncMs = resolvePerCallTimeoutMs(args.timeoutMinutes, delegatePolicy.asyncTimeoutMs);
-  const effectiveSyncMs = resolvePerCallTimeoutMs(args.timeoutMinutes, delegatePolicy.syncTimeoutMs);
-  debug.event("delegate-spawn", { agent: args.agent, runId, cwd, async: isAsync, useJsonStream, cliArgs, resumedFrom: args.resumeFrom, sessionFile });
-  logInfo("delegate", { event: "spawn", agent: args.agent, runId, cwd, async: isAsync, useJsonStream, mode: ctx.mode, parentDepth, resumedFrom: args.resumeFrom, sessionFile });
-  await mkdir2(OUT_DIR, { recursive: true });
-  if (prevSession && sessionFile) {
-    await copyFile(prevSession, sessionFile);
-  }
-  if (isAsync) {
-    const replyFile = join9(OUT_DIR, `${runId}.out`);
-    const activityFile = join9(OUT_DIR, `${runId}.activity`);
-    const run = {
-      runId,
-      agent: args.agent,
-      task: taskText,
-      cwd,
-      startedAt: Date.now(),
-      status: "queued",
-      resumedFrom: args.resumeFrom
-    };
-    runs.set(runId, run);
-    delegateStatusWidget.poke();
-    const launch = () => {
-      if (run.status === "cancelled") return;
-      run.status = "running";
-      run.startedAt = Date.now();
-      run.activityFile = useJsonStream ? activityFile : void 0;
-      const child2 = spawnDelegateChild({
-        cwd,
-        env: childEnv,
-        cliArgs,
-        isPi: isPiHost(ctx.sessionManager),
-        runId,
-        resumeFrom: Boolean(args.resumeFrom),
-        task: args.task
-      });
-      run.child = child2;
-      let settled = false;
-      const watchdog = attachWatchdogs(
-        child2,
-        {
-          isSettled: () => settled || run.status !== "running",
-          onKill: (reason) => {
-            if (!run.agentSettled) run.timedOut = reason;
-            debug.event("delegate-watchdog", { runId, reason });
-          },
-          onEofGrace: () => {
-            if (!run.agentSettled) run.timedOut = "output ended but process did not exit";
-            debug.event("delegate-eof-grace", { runId, ms: EOF_GRACE_MS });
-          }
-        },
-        { eofGraceMs: EOF_GRACE_MS, idleMs: delegatePolicy.idleMs, timeoutMs: effectiveAsyncMs, killGraceMs: KILL_GRACE_MS }
-      );
-      const replyStream = createWriteStream(replyFile, { flags: "a" });
-      const activityStream = useJsonStream ? createWriteStream(activityFile, { flags: "a" }) : null;
-      const endStream = (s) => new Promise((resolve5) => {
-        if (!s || s.destroyed || s.closed) return resolve5();
-        s.end(() => resolve5());
-      });
-      let stdoutBuf = "";
-      let stderrText = "";
-      const applier = makeEventApplier(
-        {
-          showThinking: args.showThinking === true,
-          onUsage: (u) => {
-            run.usage = accumulateUsage(run.usage, u);
-          },
-          onSettled: () => {
-            run.agentSettled = true;
-            watchdog.settledGrace(SETTLED_GRACE_MS, KILL_GRACE_MS, "agent settled but process did not exit");
-          }
-        },
-        { reply: replyStream, activity: activityStream }
-      );
-      child2.stdout?.on("data", (c) => {
-        watchdog.poke();
-        if (useJsonStream) {
-          stdoutBuf += c.toString("utf8");
-          let nl;
-          while ((nl = stdoutBuf.indexOf("\n")) >= 0) {
-            const line = stdoutBuf.slice(0, nl);
-            stdoutBuf = stdoutBuf.slice(nl + 1);
-            applier.handleEventLine(line);
-          }
-        } else {
-          const text = c.toString("utf8");
-          applier.appendRaw(text);
-        }
-      });
-      child2.stderr?.on("data", (c) => {
-        stderrText += c.toString("utf8");
-      });
-      const finalize = (code, signal2) => {
-        void (async () => {
-          if (settled) return;
-          settled = true;
-          delegateGate.release();
-          watchdog.dispose();
-          void cleanupTmp(tmpDir);
-          await Promise.all([endStream(replyStream), endStream(activityStream)]);
-          run.exitCode = code;
-          run.exitSignal = signal2 ?? void 0;
-          const output = applier.getReplyText().trim();
-          const noOutput = genuineNoOutput(code, Boolean(run.timedOut), output);
-          let body2;
-          if (code === 0 && !noOutput) {
-            body2 = output || "(no output)";
-          } else if (noOutput) {
-            const parts = [NO_FINAL_OUTPUT_BODY];
-            const err = stderrText.trim();
-            if (err) parts.push(`stderr:
-${err}`);
-            const tail = activityStream ? await readActivityTail(activityFile) : "";
-            if (tail) parts.push(`last activity (full log: \`${activityFile}\`)
-${tail}`);
-            body2 = parts.join("\n\n");
-          } else {
-            const parts = [];
-            const err = stderrText.trim();
-            if (err) parts.push(`stderr:
-${err}`);
-            const tail = activityStream ? await readActivityTail(activityFile) : "";
-            if (tail) parts.push(`last activity (full log: \`${activityFile}\`):
-${tail}`);
-            if (output) parts.push(`partial reply:
-${output}`);
-            body2 = parts.join("\n\n") || "(no output)";
-          }
-          if (run.status === "cancelled") {
-            if (output === "") {
-              const fallback = stderrText.trim();
-              await appendFile(replyFile, fallback ? `${fallback}
-` : "(no output)\n");
-            }
-            run.result = { code, file: replyFile, body: stderrText.trim() || output || "(no output)" };
-            run.finishedAt = Date.now();
-            debug.event("delegate-done", { runId, code, status: run.status, injected: false, outLen: output.length, file: replyFile });
-            run.waiter?.();
-            delegateStatusWidget.poke();
-            return;
-          }
-          try {
-            const file2 = replyFile;
-            if (output === "") {
-              if (noOutput) {
-                const err = stderrText.trim();
-                await appendFile(file2, `${NO_FINAL_OUTPUT_BODY}
-${err ? `
-${err}` : ""}
-`);
-              } else {
-                const fallback = stderrText.trim();
-                await appendFile(file2, fallback ? `${fallback}
-` : "(no output)\n");
-              }
-            }
-            const effectiveCode = effectiveExitCode(code, output, stderrText);
-            run.result = { code, file: file2, body: body2 };
-            run.status = effectiveCode === 0 && !noOutput ? "completed" : "failed";
-            if (noOutput) logWarn("delegate", { event: "no-final-output", runId, agent: args.agent, code });
-            run.finishedAt = Date.now();
-            if (run.waiter) {
-              debug.event("delegate-done", { runId, code, status: run.status, injected: false, via: "wait", outLen: output.length, file: file2 });
-              logInfo("delegate", { event: "done", runId, agent: args.agent, code, status: run.status, injected: false, via: "wait", outLen: output.length, file: file2 });
-              run.waiter();
-              delegateStatusWidget.poke();
-              return;
-            }
-            if (run.consumed) {
-              debug.event("delegate-done", { runId, code, status: run.status, injected: false, via: "consumed", outLen: output.length, file: file2 });
-              logInfo("delegate", { event: "done", runId, agent: args.agent, code, status: run.status, injected: false, via: "consumed", outLen: output.length, file: file2 });
-              delegateStatusWidget.poke();
-              return;
-            }
-            if (run.status === "completed" && shouldSuppressRead(run, delegateNotifyIfRead)) {
-              applyReadSuppression(run, runId);
-              debug.event("delegate-done", { runId, code, status: run.status, injected: false, suppressed: true, outLen: output.length, file: file2 });
-              logInfo("delegate", { event: "done", runId, agent: args.agent, code, status: run.status, injected: false, suppressed: true, outLen: output.length, file: file2 });
-              delegateStatusWidget.poke();
-              return;
-            }
-            scheduleRunNotification(pi, run);
-            debug.event("delegate-done", { runId, code, status: run.status, injected: false, queued: true, outLen: output.length, file: file2 });
-            logInfo("delegate", { event: "done", runId, agent: args.agent, code, status: run.status, injected: false, queued: true, outLen: output.length, file: file2 });
-            delegateStatusWidget.poke();
-          } catch (err) {
-            run.status = "failed";
-            run.finishedAt = Date.now();
-            run.result = run.result ?? { code, file: replyFile, body: `result persistence error: ${String(err)}` };
-            debug.event("delegate-done-error", { runId, error: String(err) });
-            logError("delegate", { event: "done-error", runId, agent: args.agent, error: String(err) });
-            notifyTerminalFailure(pi, run);
-            delegateStatusWidget.poke();
-          }
-        })();
-      };
-      child2.on("close", (code, signal2) => finalize(code, signal2));
-      child2.on("error", (err) => {
-        if (settled) return;
-        settled = true;
-        delegateGate.release();
-        watchdog.dispose();
-        void cleanupTmp(tmpDir);
-        void replyStream.destroy();
-        void activityStream?.destroy();
-        const body2 = `spawn error: ${String(err)}`;
-        void writeFile2(replyFile, body2, "utf8").catch(() => {
-        });
-        if (run.status === "running" || run.status === "queued" || run.status === "cancelled") {
-          run.status = run.status === "cancelled" ? "cancelled" : "failed";
-          run.finishedAt = Date.now();
-          run.result = { code: null, file: replyFile, body: body2 };
-          debug.event("delegate-spawn-error", { runId, error: String(err) });
-          logError("delegate", { event: "spawn-error", runId, agent: args.agent, error: String(err) });
-          if (run.status === "failed") notifyTerminalFailure(pi, run);
-          else run.waiter?.();
-          delegateStatusWidget.poke();
-        }
-      });
-      child2.unref();
-    };
-    const startedNow = delegateGate.launchOrQueue(runId, launch);
-    if (startedNow) {
-      return [
-        args.resumeFrom ? `Resuming **${args.agent}** from run \`${args.resumeFrom}\` (new runId \`${runId}\`).` : `Delegated to **${args.agent}** (runId \`${runId}\`).`,
-        `Task: ${truncate2(taskText, 160)}`,
-        `Running in the background at \`${cwd}\`.`,
-        useJsonStream ? `Live activity is streaming to \`${activityFile}\` \u2014 read it anytime to watch the delegate work (tool calls and their output${args.showThinking ? ", plus thinking" : ""}).` : `The reply is streaming to \`${replyFile}\` \u2014 read it anytime to see partial output (this host has no json event mode, so tool activity is not visible).`,
-        asyncWatchdogDescription(effectiveAsyncMs),
-        ``,
-        `Call acp_delegate_wait({ runId: "${runId}" }) to block for the result (default 10s timeout). If the wait times out, or you skip it, a completion notification (with the result file path) is still injected here automatically when the delegate finishes \u2014 so you may also just continue other work now and let the result find you.`
-      ].join("\n");
-    }
-    return [
-      args.resumeFrom ? `Resuming **${args.agent}** from run \`${args.resumeFrom}\` (new runId \`${runId}\`).` : `Delegated to **${args.agent}** (runId \`${runId}\`).`,
-      `Task: ${truncate2(taskText, 160)}`,
-      `QUEUED \u2014 at most ${delegatePolicy.maxConcurrent} background delegate(s) run concurrently; ${Math.max(0, delegateGate.queuedCount - 1)} ahead of it. It starts automatically when a slot frees.`,
-      `Call acp_delegate_wait({ runId: "${runId}" }) to block for the result; a completion notification is injected when it finishes (unless you already read the result file after it finished \u2014 then it's skipped).`
-    ].join("\n");
-  }
-  const child = spawnDelegateChild({
-    cwd,
-    env: childEnv,
-    cliArgs,
-    isPi: isPiHost(ctx.sessionManager),
-    runId,
-    resumeFrom: Boolean(args.resumeFrom),
-    task: args.task
-  });
-  const result = await waitForChild(child, signal, effectiveSyncMs);
-  void cleanupTmp(tmpDir);
-  const syncNoOutput = genuineNoOutput(result.code, result.timedOut, result.stdout);
-  let body;
-  if (result.timedOut || result.code !== 0) {
-    body = result.stderr.trim() || "(no stderr)";
-  } else if (syncNoOutput) {
-    const err = result.stderr.trim();
-    body = err ? `${NO_FINAL_OUTPUT_BODY}
-
-stderr:
-${err}` : NO_FINAL_OUTPUT_BODY;
-  } else {
-    body = result.stdout;
-  }
-  const file = await persistResult(runId, body);
-  return formatSyncResult(args.agent, runId, taskText, result, file);
-}
-async function buildChildArgs(args, rolePrompt, ctx, runId) {
-  const tmpDir = await mkdtemp(join9(tmpdir2(), "acp-delegate-"));
-  const promptFile = join9(tmpDir, "role.md");
-  await writeFile2(promptFile, `${rolePrompt}
-
----
-
-Complete the task below.`, "utf8");
-  const isAsync = args.async !== false && ctx.mode !== "print" && ctx.mode !== "json";
-  const useJsonStream = isAsync && isPiHost(ctx.sessionManager);
-  const useSession = isPiHost(ctx.sessionManager);
-  const sessionFile = useSession ? join9(OUT_DIR, `${runId}${SESSION_EXT}`) : null;
-  const sessionArgs = sessionFile ? ["--session", sessionFile, "--session-dir", OUT_DIR] : ["--no-session"];
-  const cliArgs = useJsonStream ? ["--mode", "json", ...sessionArgs, "--append-system-prompt", promptFile] : ["-p", ...sessionArgs, "--append-system-prompt", promptFile];
-  const agentDef = AGENTS[args.agent];
-  if (agentDef?.restricted) {
-    const merged = [.../* @__PURE__ */ new Set([...agentDef.tools.split(",").map((s) => s.trim()), ...ACP_TOOLS2])];
-    cliArgs.push("--tools", merged.join(","));
-  }
-  const roleCfg = delegateDefaults.agents?.[args.agent];
-  const callModel = normalizeModelRef(args.model);
-  const roleModel = normalizeModelRef(roleCfg?.model);
-  const parentProvider = ctx.model?.provider;
-  const parentModelId = ctx.model?.id;
-  let provider;
-  let modelId;
-  let source = "inherit";
-  if (callModel) {
-    const parts = callModel.split("/");
-    provider = parts[0];
-    modelId = parts.slice(1).join("/");
-    source = "call";
-  } else if (roleModel) {
-    const parts = roleModel.split("/");
-    provider = parts[0];
-    modelId = parts.slice(1).join("/");
-    source = "role";
-  } else if (parentProvider !== void 0 && parentModelId !== void 0) {
-    provider = parentProvider;
-    modelId = parentModelId;
-  }
-  if (source === "role" && provider !== void 0 && modelId !== void 0) {
-    const registry3 = ctx.modelRegistry;
-    const found = registry3 ? registry3.find(provider, modelId) : void 0;
-    if (!found) {
-      logWarn("delegate", {
-        event: "role-model-missing",
-        agent: args.agent,
-        requested: `${provider}/${modelId}`,
-        fallback: parentProvider !== void 0 ? `${parentProvider}/${parentModelId}` : null
-      });
-      if (parentProvider !== void 0 && parentModelId !== void 0) {
-        provider = parentProvider;
-        modelId = parentModelId;
-        source = "inherit";
-      }
-    }
-  }
-  if (provider !== void 0 && modelId !== void 0) {
-    cliArgs.push("--provider", provider, "--model", modelId);
-  }
-  const thinkingPick = pickFirstDefined([args.thinkingLevel, roleCfg?.thinkingLevel, delegateDefaults.thinkingLevel]);
-  if (thinkingPick !== void 0) {
-    if (isValidThinkingLevel(thinkingPick)) {
-      cliArgs.push("--thinking", thinkingPick);
-    } else {
-      logWarn("delegate", { event: "invalid-thinking-level", agent: args.agent, value: thinkingPick });
-    }
-  }
-  return { cliArgs, tmpDir, isAsync, useJsonStream, sessionFile };
-}
-function waitForChild(child, signal, timeoutMs) {
-  return new Promise((resolve5) => {
-    const stdoutChunks = [];
-    let stderrText = "";
-    child.stdout?.on("data", (c) => stdoutChunks.push(c));
-    child.stderr?.on("data", (c) => {
-      stderrText += c.toString("utf8");
-    });
-    let timer2;
-    if (timeoutMs !== null) {
-      timer2 = setTimeout(() => {
-        child.kill("SIGTERM");
-        finish2({ code: null, stdout: "", stderr: stderrText, timedOut: true });
-      }, timeoutMs);
-    }
-    const onAbort = () => {
-      if (timer2) clearTimeout(timer2);
-      child.kill("SIGTERM");
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-    function finish2(r) {
-      if (timer2) clearTimeout(timer2);
-      signal?.removeEventListener("abort", onAbort);
-      resolve5(r);
-    }
-    child.on("close", (code, signal2) => {
-      finish2({
-        code,
-        signal: signal2,
-        stdout: Buffer.concat(stdoutChunks).toString("utf8").trim(),
-        stderr: stderrText,
-        timedOut: false
-      });
-    });
-    child.on("error", (err) => {
-      finish2({ code: null, stdout: "", stderr: err.message, timedOut: false });
-    });
-  });
-}
-function fmtMinutes(ms) {
-  const m2 = ms / 6e4;
-  return Number.isInteger(m2) ? `${m2}m` : `${m2.toFixed(1)}m`;
-}
-function asyncWatchdogDescription(overrideAsyncMs) {
-  const parts = [];
-  if (delegatePolicy.idleMs !== null) parts.push(`no output for ${fmtMinutes(delegatePolicy.idleMs)}`);
-  parts.push(`${EOF_GRACE_MS / 1e3}s after output ends`);
-  const hardMs = overrideAsyncMs ?? delegatePolicy.asyncTimeoutMs;
-  if (hardMs !== null) parts.push(`a ${fmtMinutes(hardMs)} hard limit`);
-  const joined = parts.length > 1 ? `${parts.slice(0, -1).join(", ")}, or ${parts[parts.length - 1]}` : parts[0];
-  return `A watchdog force-finishes a hung run: ${joined} \u2014 the result reflects whatever was produced.`;
-}
-function formatSyncResult(agent, runId, task, r, file) {
-  const noOutput = genuineNoOutput(r.code, r.timedOut, r.stdout);
-  const status = r.timedOut ? "timed out" : r.code === 0 && !noOutput ? "completed" : "FAILED \u26A0\uFE0F";
-  const header = `Delegate **${agent}** ${status} (runId \`${runId}\`, ${exitLabel(r.code, r.signal)}).`;
-  if (r.code === 0 && !r.timedOut && !noOutput) {
-    return formatPayload(header, file, task);
-  }
-  const body = r.timedOut ? "(timed out)" : r.code === 0 ? NO_FINAL_OUTPUT_BODY : r.stderr.trim() || "(no stderr)";
-  return formatPayload(header, file, task, body);
-}
-function genuineNoOutput(code, timedOut, output) {
-  return !timedOut && code === 0 && output.trim().length === 0;
-}
-var NO_FINAL_OUTPUT_BODY = "child exited 0 but produced NO final reply text \u2014 likely a thinking-only stop (thinking budget exhausted) or a no-op termination. Treat the task as NOT delivered: inspect the activity log and session file, then re-dispatch if needed.";
-function effectiveExitCode(code, output, stderr) {
-  return code ?? (output || stderr ? 0 : null);
-}
-function shouldSuppressRead(run, mode) {
-  if (mode !== "skip") return false;
-  if (run.readAt === void 0 || run.finishedAt === void 0) return false;
-  return run.readAt >= run.finishedAt;
-}
-function applyReadSuppression(run, runId) {
-  run.readSuppressed = true;
-  run.injected = true;
-  if (run.usage && !run.usageReported && delegateDisplayUsage === "separate") {
-    addDelegateUsage(run.usage);
-    run.usageReported = true;
-  }
-  debug.event("delegate-inject-suppressed", { runId, reason: "result-file-read", readAt: run.readAt, finishedAt: run.finishedAt });
-  logInfo("delegate", { event: "inject-suppressed", runId, reason: "result-file-read", readAt: run.readAt, finishedAt: run.finishedAt });
-}
-function suppressIfReadNow(run) {
-  if (run.status === "completed" && shouldSuppressRead(run, delegateNotifyIfRead)) applyReadSuppression(run, run.runId);
-}
-function injectResult(pi, agent, runId, task, status, code, file, timedOut, usage, mode = "separate", usageAlreadyReported, body, activityFile, signal) {
-  const send = pi.sendUserMessage;
-  if (typeof send !== "function") {
-    debug.event("delegate-inject-skipped", { runId, reason: "sendUserMessage unavailable" });
-    logWarn("delegate", { event: "inject-skipped", runId, reason: "sendUserMessage unavailable" });
-    return false;
-  }
-  const failed = status === "failed";
-  const statusLabel = failed ? "FAILED \u26A0\uFE0F" : "completed";
-  const remaining = Array.from(runs.values()).filter((r) => r.status === "running" || r.status === "queued").length;
-  const remainingLine = remaining > 0 ? ` ${remaining} delegate${remaining === 1 ? " is" : "s are"} still running; keep doing other work and their notifications will arrive as they finish.` : " No delegates are currently running.";
-  const timeoutNote = timedOut ? ` (timed out: ${timedOut})` : "";
-  let usageNote = "";
-  if (mode === "separate") {
-    if (usage && !usageAlreadyReported) {
-      addDelegateUsage(usage);
-    }
-    const totalUsage = getDelegateUsage();
-    if (totalUsage) {
-      const cost = totalUsage.cost.total;
-      const costStr = cost > 0 ? ` ($${cost.toFixed(4)})` : "";
-      usageNote = `
-
-\u2500\u2500 Session delegate usage (excluded from main totals) \u2500\u2500
-Tokens: ${totalUsage.input.toLocaleString()} in, ${totalUsage.output.toLocaleString()} out (${totalUsage.totalTokens.toLocaleString()} total)${costStr}`;
-    }
-  } else if (usage) {
-    const lines = [];
-    if (usage.totalTokens) lines.push(`tokens=${usage.totalTokens.toLocaleString()}`);
-    if (usage.input || usage.output) lines.push(`in=${usage.input.toLocaleString()} out=${usage.output.toLocaleString()}`);
-    if (usage.cacheRead) lines.push(`cache_read=${usage.cacheRead.toLocaleString()}`);
-    if (usage.cacheWrite) lines.push(`cache_write=${usage.cacheWrite.toLocaleString()}`);
-    if (usage.cost && typeof usage.cost === "object") {
-      const c = usage.cost;
-      if (typeof c.total === "number" && c.total > 0) {
-        lines.push(`cost=$${c.total.toFixed(4)}`);
-      } else if (typeof c.input === "number" && c.input > 0 || typeof c.output === "number" && c.output > 0) {
-        lines.push(`cost=${JSON.stringify(c)}`);
-      }
-    }
-    if (lines.length) usageNote = ` Usage: ${lines.join(", ")}.`;
-  }
-  const closing = failed ? "This delegate did NOT complete its task \u2014 its result is missing from your work. Read the error excerpt (and the result file if present), then decide whether to re-dispatch the task before wrapping up. This is an automated system notification, NOT a user message." : "This is an automated system notification, NOT a user message. Read the result file if you need the details, then continue your original task; do not treat this as a new user request.";
-  const header = `[acp_delegate ${statusLabel}] **${agent}** (runId \`${runId}\`, ${exitLabel(code, signal)})${timeoutNote}${remainingLine}${usageNote} ${closing}`;
-  const { text: recoveryText, covered } = buildRecoveryNotice(Array.from(runs.values()), runId);
-  const text = formatPayload(header, file, task, failed ? body : void 0, failed ? activityFile : void 0) + (recoveryText ? `
-
-${recoveryText}` : "");
-  try {
-    send.call(pi, text, { deliverAs: "followUp" });
-    for (const r of covered) r.injected = true;
-    return true;
-  } catch (err) {
-    debug.event("delegate-inject-error", { runId, error: String(err) });
-    logError("delegate", { event: "inject-error", runId, agent, error: String(err) });
-    return false;
-  }
-}
-function notifyTerminalFailure(pi, run) {
-  const hadWaiter = run.waiter !== void 0;
-  run.waiter?.();
-  if (hadWaiter || run.consumed) return;
-  scheduleRunNotification(pi, run);
-}
-function formatPayload(header, file, task, body, activityFile) {
-  const lines = [header, "", `Task: ${truncate2(task, 160)}`];
-  if (file) {
-    lines.push(``, `Full result: \`${file}\``, "(use the `read` tool to open it if you need the details)");
-  } else {
-    lines.push("", "(result could not be persisted to a file)");
-  }
-  if (activityFile) {
-    lines.push(`Activity log: \`${activityFile}\``, "(tool calls and their output, newest at the end \u2014 read it to see where the run went wrong)");
-  }
-  if (body) {
-    lines.push("", "Output:", "~~~", truncate2(body, RESULT_SUMMARY_CHARS), "~~~");
-  }
-  lines.push("");
-  return lines.join("\n");
-}
-async function readActivityTail(file, maxChars = ACTIVITY_TAIL_CHARS) {
-  try {
-    const raw = await readFile(file, "utf8");
-    const text = raw.trimEnd();
-    if (!text) return "";
-    return text.length <= maxChars ? text : `\u2026${text.slice(-maxChars)}`;
-  } catch {
-    return "";
-  }
-}
-async function persistResult(runId, body) {
-  try {
-    await mkdir2(OUT_DIR, { recursive: true });
-  } catch {
-  }
-  const file = join9(OUT_DIR, `${runId}.out`);
-  try {
-    await writeFile2(file, body, "utf8");
-    return file;
-  } catch (err) {
-    debug.event("delegate-persist-error", { runId, file, error: String(err) });
-    logError("delegate", { event: "persist-error", runId, file, error: String(err) });
-    return "";
-  }
-}
-async function cleanupTmp(tmpDir) {
-  if (!tmpDir) return;
-  try {
-    await rm(tmpDir, { recursive: true, force: true });
-  } catch {
-  }
-}
-function truncate2(s, n) {
-  if (s.length <= n) return s;
-  return s.slice(0, n - 1) + "\u2026";
 }
 
 // src/status-tool.ts
@@ -21708,20 +18305,6 @@ async function handleStatus(args, runtime, ctx) {
   if (ranges.length > 0 || protectedRanges.length > 0) {
     extra.push("");
     extra.push(formatRanges(ranges, protectedRanges));
-  }
-  const delegateUsage = getDelegateUsage();
-  if (delegateUsage && delegateUsage.totalTokens > 0) {
-    extra.push("");
-    const cost = delegateUsage.cost.total;
-    const costStr = cost > 0 ? ` ($${cost.toFixed(4)})` : "";
-    extra.push("\u2500\u2500 Session delegate usage (excluded from main totals) \u2500\u2500");
-    extra.push(`Tokens: ${delegateUsage.input.toLocaleString()} in, ${delegateUsage.output.toLocaleString()} out (${delegateUsage.totalTokens.toLocaleString()} total)${costStr}`);
-  } else if (resolveDelegate(runtime.adapter).displayUsage === "merged") {
-    extra.push("");
-    extra.push("merged mode: delegate usage is included in main session totals.");
-  } else {
-    extra.push("");
-    extra.push("Delegate usage: none this session.");
   }
   return extra.length > 0 ? `${base}
 ${extra.join("\n")}` : base;
@@ -21832,7 +18415,7 @@ async function handleRule(rule, runtime, ctx) {
 }
 
 // src/commands.ts
-import * as path10 from "path";
+import * as path9 from "path";
 
 // src/export.ts
 import { mkdirSync as mkdirSync3, writeFileSync as writeFileSync2 } from "fs";
@@ -21840,7 +18423,7 @@ import { promises as fs6 } from "fs";
 import * as path8 from "path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 var ACP_STATE_SUFFIX = ".acp.json";
-function truncate3(text, max) {
+function truncate2(text, max) {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}\u2026` : flat;
 }
@@ -21895,7 +18478,7 @@ async function exportSession(selector, opts, sessionDir) {
   }
   if (!selector) {
     const rows = all.map(
-      (s2) => `${s2.id}${s2.name ? `  label=${s2.name}` : ""}  blocks=${s2.state.blocks.length}${s2.contextTokens ? `  ctx~${s2.contextTokens}` : ""}  ${s2.title ? truncate3(s2.title, 80) : ""}`
+      (s2) => `${s2.id}${s2.name ? `  label=${s2.name}` : ""}  blocks=${s2.state.blocks.length}${s2.contextTokens ? `  ctx~${s2.contextTokens}` : ""}  ${s2.title ? truncate2(s2.title, 80) : ""}`
     );
     return ["ACP-managed sessions:", "", ...rows.map((r) => `  ${r}`), "", "Usage: /acp-export <session-id|label> [--output handoff.md] [--full]"].join("\n");
   }
@@ -21913,7 +18496,7 @@ async function exportSession(selector, opts, sessionDir) {
     state: s.state,
     full: opts.full ?? false,
     meta: {
-      title: s.title ? truncate3(s.title, 200) : void 0,
+      title: s.title ? truncate2(s.title, 200) : void 0,
       label: s.name,
       sessionId: s.id,
       contextTokens: s.contextTokens || void 0,
@@ -21960,7 +18543,7 @@ function topicFallback(summary) {
   const t = first.trim().replace(/^["'`]+/, "").trim();
   return t.length <= 30 ? t : `${clampPrefix(t, 30).trimEnd()}\u2026`;
 }
-function formatCompactTokens2(count) {
+function formatCompactTokens(count) {
   if (count < 1e3) return count.toString();
   if (count < 1e4) return `${(count / 1e3).toFixed(1)}k`;
   if (count < 1e6) return `${Math.round(count / 1e3)}k`;
@@ -22008,7 +18591,7 @@ function bar(value, total, width = 20) {
 }
 function buildStatusPanel(input) {
   const { tokenCount, state, nudge, modelContextLimit } = input;
-  const fmt2 = input.fmtTokens ?? formatCompactTokens2;
+  const fmt2 = input.fmtTokens ?? formatCompactTokens;
   const bd = nudge?.contextBreakdown;
   const limit = modelContextLimit;
   const classified = bd ? bd.system + bd.tool + bd.summaries + bd.code + bd.text : 0;
@@ -22114,711 +18697,6 @@ function buildStatusPanel(input) {
   return lines.join("\n");
 }
 
-// src/fleet-inspector.ts
-import { openSync, fstatSync, readSync, closeSync } from "fs";
-var REFRESH_MS2 = 500;
-var MAX_TASK_LEN2 = 48;
-var SNAPSHOT_TAIL_BYTES = 4096;
-var MAX_RESULT_LINES = 8;
-var PANEL_MAX_H = 40;
-var PANEL_MIN_H = 12;
-function clamp(n, lo, hi) {
-  return Math.max(lo, Math.min(hi, n));
-}
-function truncateText(s, max) {
-  const oneLine = s.replace(/\n/g, " ").trim();
-  if (oneLine.length <= max) return oneLine;
-  return `${oneLine.slice(0, max - 1)}\u2026`;
-}
-function formatDuration(ms) {
-  const s = Math.max(0, Math.floor(ms / 1e3));
-  if (s < 60) return `${s}s`;
-  const m2 = Math.floor(s / 60);
-  if (m2 < 60) return `${m2}m${String(s % 60).padStart(2, "0")}s`;
-  const h = Math.floor(m2 / 60);
-  return `${h}h${String(m2 % 60).padStart(2, "0")}m`;
-}
-function statusIcon(status) {
-  switch (status) {
-    case "queued":
-      return "\u25CB";
-    case "running":
-      return "\u25CF";
-    case "completed":
-      return "\u2713";
-    case "failed":
-      return "\u2717";
-    case "cancelled":
-      return "\u2298";
-  }
-}
-function usageSummary(usage) {
-  if (!usage || usage.totalTokens <= 0) return void 0;
-  return `\u2191${usage.input.toLocaleString()} \u2193${usage.output.toLocaleString()}`;
-}
-function buildListRows(runs2, now) {
-  return runs2.map((run) => {
-    const dur = formatDuration((run.finishedAt ?? now) - run.startedAt);
-    const state = run.status === "running" ? `running ${dur}` : `${run.status} ${run.exitLabel}`;
-    const label = `${statusIcon(run.status)} ${run.agent} \xB7 ${state}${run.timedOut ? ` (${run.timedOut})` : ""}`;
-    const tokens = usageSummary(run.usage);
-    const detail = truncateText(run.task, MAX_TASK_LEN2) + (tokens ? ` [${tokens}]` : "");
-    return { run, label, detail };
-  });
-}
-function readTailSync(file, maxBytes) {
-  if (!file) return "";
-  try {
-    const fd = openSync(file, "r");
-    try {
-      const size = fstatSync(fd).size;
-      if (size === 0) return "";
-      const len = Math.min(size, maxBytes);
-      const buf = Buffer.alloc(len);
-      readSync(fd, buf, 0, len, size - len);
-      let text = buf.toString("utf8");
-      if (size > len) {
-        const nl = text.indexOf("\n");
-        text = nl >= 0 ? text.slice(nl + 1) : "";
-      }
-      return text;
-    } finally {
-      closeSync(fd);
-    }
-  } catch {
-    return "";
-  }
-}
-function formatToolLabel(name, args) {
-  const a = args && typeof args === "object" ? args : {};
-  const s = (v2) => String(v2 ?? "");
-  switch (name) {
-    case "read": {
-      const path11 = s(a.path ?? a.file_path);
-      const offset = typeof a.offset === "number" ? a.offset : void 0;
-      const limit = typeof a.limit === "number" ? a.limit : void 0;
-      let display = path11;
-      if (offset !== void 0 || limit !== void 0) {
-        const start = offset ?? 1;
-        const end = limit !== void 0 ? start + limit - 1 : "";
-        display += `:${start}${end ? `-${end}` : ""}`;
-      }
-      return `read ${display}`;
-    }
-    case "write":
-      return `write ${s(a.path ?? a.file_path)}`;
-    case "edit":
-      return `edit ${s(a.path ?? a.file_path)}`;
-    case "bash": {
-      const cmd = s(a.command).replace(/[\n\t]/g, " ").trim();
-      return `bash ${cmd.length > 60 ? `${cmd.slice(0, 60)}\u2026` : cmd}`;
-    }
-    case "grep":
-      return `grep /${s(a.pattern)}/ in ${s(a.path ?? ".")}`;
-    case "find":
-      return `find ${s(a.pattern)} in ${s(a.path ?? ".")}`;
-    case "ls":
-      return `ls ${s(a.path ?? ".")}`;
-    default: {
-      let j2 = "";
-      try {
-        j2 = JSON.stringify(args ?? {});
-      } catch {
-        j2 = String(args);
-      }
-      return `${name} ${j2.length > 60 ? `${j2.slice(0, 60)}\u2026` : j2}`;
-    }
-  }
-}
-function parseSessionJsonl(raw) {
-  const blocks = [];
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
-    let obj;
-    try {
-      obj = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (obj.type === "model_change") {
-      blocks.push({ kind: "meta", text: `model \u2192 ${obj.provider}/${obj.modelId}` });
-      continue;
-    }
-    if (obj.type !== "message") continue;
-    const m2 = obj.message;
-    if (!m2) continue;
-    if (m2.role === "user") {
-      for (const c of m2.content ?? []) {
-        if (c.type === "text" && c.text?.trim()) blocks.push({ kind: "user", text: c.text });
-      }
-    } else if (m2.role === "assistant") {
-      for (const c of m2.content ?? []) {
-        if (c.type === "thinking" && c.thinking?.trim()) blocks.push({ kind: "thinking", text: c.thinking });
-        else if (c.type === "text" && c.text?.trim()) blocks.push({ kind: "text", text: c.text });
-        else if (c.type === "toolCall") blocks.push({ kind: "toolCall", name: c.name, text: "", args: c.arguments });
-      }
-    } else if (m2.role === "toolResult") {
-      const text = (m2.content ?? []).map((c) => c.text ?? "").join("");
-      blocks.push({ kind: "toolResult", name: m2.toolName, text, isError: !!m2.isError });
-    }
-  }
-  return blocks;
-}
-function padTo(line, w2) {
-  return truncateToWidth(line, w2, void 0, true);
-}
-function frame(body, width, theme) {
-  const innerW = Math.max(0, width - 4);
-  const bar2 = "\u2500".repeat(Math.max(0, width - 2));
-  const top = theme.fg("border", `\u250C${bar2}\u2510`);
-  const bottom = theme.fg("border", `\u2514${bar2}\u2518`);
-  const mid = body.map((l3) => `${theme.fg("border", "\u2502")} ${padTo(l3, innerW)} ${theme.fg("border", "\u2502")}`);
-  return [top, ...mid, bottom];
-}
-function renderListBody(rows, selIdx, theme, innerW) {
-  if (rows.length === 0) {
-    return [truncateToWidth(theme.fg("dim", "no delegate runs yet \u2014 dispatch one with acp_delegate"), innerW)];
-  }
-  return rows.map((row, i) => {
-    const color = row.run.status === "running" ? "warning" : row.run.status === "completed" ? "success" : row.run.status === "failed" ? "error" : "muted";
-    const prefix = i === selIdx ? "> " : "  ";
-    const line = `${prefix}${theme.fg(color, row.label)}  ${theme.fg("dim", row.detail)}`;
-    const filled = padTo(line, innerW);
-    return i === selIdx ? theme.bg("selectedBg", filled) : filled;
-  });
-}
-function buildMarkdownTheme(theme) {
-  return {
-    heading: (t) => theme.fg("mdHeading", t),
-    link: (t) => theme.fg("mdLink", t),
-    linkUrl: (t) => theme.fg("mdLinkUrl", t),
-    code: (t) => theme.fg("mdCode", t),
-    codeBlock: (t) => theme.fg("mdCodeBlock", t),
-    codeBlockBorder: (t) => theme.fg("mdCodeBlockBorder", t),
-    quote: (t) => theme.fg("mdQuote", t),
-    quoteBorder: (t) => theme.fg("mdQuoteBorder", t),
-    hr: (t) => theme.fg("mdHr", t),
-    listBullet: (t) => theme.fg("mdListBullet", t),
-    bold: (t) => theme.bold(t),
-    italic: (t) => theme.italic ? theme.italic(t) : theme.fg("dim", t),
-    strikethrough: (t) => theme.strikethrough ? theme.strikethrough(t) : t,
-    underline: (t) => theme.underline ? theme.underline(t) : t
-  };
-}
-function renderTranscriptBlocks(blocks, theme, innerW) {
-  const out = [];
-  const wrapW = Math.max(10, innerW);
-  const bar2 = (bgColor, content) => theme.bg(bgColor, truncateToWidth(content, innerW, void 0, true));
-  let i = 0;
-  while (i < blocks.length) {
-    const b2 = blocks[i];
-    if (!b2) break;
-    switch (b2.kind) {
-      case "meta":
-        out.push(truncateToWidth(theme.fg("dim", `\xB7 ${b2.text}`), innerW));
-        i++;
-        break;
-      case "user":
-        for (const l3 of wrapTextWithAnsi(b2.text, wrapW)) out.push(bar2("userMessageBg", theme.fg("userMessageText", l3)));
-        i++;
-        break;
-      case "thinking": {
-        try {
-          const md = new Markdown(b2.text, 0, 0, buildMarkdownTheme(theme), { color: (t) => theme.fg("thinkingText", t), italic: true });
-          for (const l3 of md.render(wrapW)) out.push(truncateToWidth(l3, innerW));
-        } catch {
-          for (const l3 of wrapTextWithAnsi(b2.text, wrapW)) out.push(truncateToWidth(theme.fg("thinkingText", l3), innerW));
-        }
-        i++;
-        break;
-      }
-      case "text": {
-        try {
-          const md = new Markdown(b2.text.trim(), 0, 0, buildMarkdownTheme(theme));
-          for (const l3 of md.render(wrapW)) out.push(truncateToWidth(l3, innerW));
-        } catch {
-          for (const l3 of wrapTextWithAnsi(b2.text, wrapW)) out.push(truncateToWidth(theme.fg("text", l3), innerW));
-        }
-        i++;
-        break;
-      }
-      case "toolCall": {
-        const res = blocks[i + 1]?.kind === "toolResult" ? blocks[i + 1] : void 0;
-        pushToolGroup(out, bar2, theme, b2.name ?? "?", b2.args, res);
-        i += res ? 2 : 1;
-        break;
-      }
-      case "toolResult":
-        pushToolGroup(out, bar2, theme, b2.name ?? "?", void 0, b2);
-        i++;
-        break;
-    }
-  }
-  if (out.length === 0) out.push(theme.fg("dim", "(no session content yet)"));
-  return out;
-}
-function pushToolGroup(out, bar2, theme, name, args, result) {
-  const isError = result?.isError ?? false;
-  const bgc = result ? isError ? "toolErrorBg" : "toolSuccessBg" : "toolPendingBg";
-  const icon = result ? isError ? "\u2717" : "\u2713" : "\u25CF";
-  out.push(bar2(bgc, theme.fg("toolTitle", `${icon} ${theme.bold(name)}`)));
-  const label = formatToolLabel(name, args);
-  if (label) out.push(bar2(bgc, theme.fg("dim", label)));
-  if (result) {
-    const rawLines = result.text.replace(/\n+$/, "").split("\n");
-    const shown = rawLines.slice(0, MAX_RESULT_LINES);
-    for (const l3 of shown) out.push(bar2(bgc, theme.fg("toolOutput", l3)));
-    if (rawLines.length > shown.length) out.push(bar2(bgc, theme.fg("dim", `\u2026 +${rawLines.length - shown.length} more`)));
-  }
-}
-function buildSnapshotText(runs2, now) {
-  if (runs2.length === 0) return "acp_delegate: no runs recorded this session.";
-  const parts = [`acp_delegate \xB7 ${runs2.length} run(s)`];
-  for (const row of buildListRows(runs2, now)) {
-    parts.push(`- ${row.label} \u2014 ${row.detail}`);
-    if (row.run.status === "running") {
-      const tail = readTailSync(row.run.activityFile, SNAPSHOT_TAIL_BYTES).trimEnd();
-      if (tail) {
-        for (const l3 of tail.split("\n").slice(-8)) parts.push(`    ${l3}`);
-      }
-    }
-  }
-  parts.push("");
-  parts.push(`Files under ${OUT_DIR}: <runId>.out (reply), <runId>.activity (tool log), <runId>.session.jsonl (session)`);
-  return parts.join("\n");
-}
-var FleetInspectorComponent = class {
-  constructor(tui, theme, doneCb, snapshotFn, refreshMs) {
-    this.tui = tui;
-    this.theme = theme;
-    this.doneCb = doneCb;
-    this.snapshotFn = snapshotFn;
-    this.refreshMs = refreshMs;
-  }
-  tui;
-  theme;
-  doneCb;
-  snapshotFn;
-  refreshMs;
-  mode = "list";
-  rows = [];
-  selIdx = 0;
-  selRunId;
-  follow = true;
-  viewTop = 0;
-  blocks = [];
-  loadedFile = "";
-  loadedBytes = 0;
-  transcriptLines = [];
-  lastWidth = 80;
-  timer;
-  closed = false;
-  start() {
-    this.tick();
-    this.timer = setInterval(() => this.tick(), this.refreshMs);
-    this.timer.unref?.();
-  }
-  dispose() {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = void 0;
-  }
-  invalidate() {
-  }
-  panelHeight() {
-    return clamp(this.tui.terminal.rows - 2, PANEL_MIN_H, PANEL_MAX_H);
-  }
-  pageSize() {
-    return Math.max(1, this.panelHeight() - 2 - 2 - 1);
-  }
-  /** Incrementally append newly-written session.jsonl bytes (waterfall load).
-   *  Only reads the delta past loadedBytes; holds back a trailing partial line
-   *  while the run is still writing. */
-  loadTranscript(file, isRunning) {
-    if (!file) return;
-    if (file !== this.loadedFile) {
-      this.loadedFile = file;
-      this.loadedBytes = 0;
-      this.blocks = [];
-    }
-    let size = 0;
-    try {
-      const fd = openSync(file, "r");
-      try {
-        size = fstatSync(fd).size;
-      } finally {
-        closeSync(fd);
-      }
-    } catch {
-      return;
-    }
-    if (size < this.loadedBytes) {
-      this.loadedBytes = 0;
-      this.blocks = [];
-    }
-    if (size <= this.loadedBytes) return;
-    const len = size - this.loadedBytes;
-    const buf = Buffer.alloc(len);
-    let got = 0;
-    try {
-      const fd = openSync(file, "r");
-      try {
-        got = readSync(fd, buf, 0, len, this.loadedBytes);
-      } finally {
-        closeSync(fd);
-      }
-    } catch {
-      return;
-    }
-    const text = buf.subarray(0, got).toString("utf8");
-    let complete;
-    if (isRunning && !text.endsWith("\n")) {
-      const nl = text.lastIndexOf("\n");
-      if (nl < 0) return;
-      complete = text.slice(0, nl + 1);
-    } else {
-      complete = text;
-    }
-    this.blocks.push(...parseSessionJsonl(complete));
-    this.loadedBytes += Buffer.byteLength(complete, "utf8");
-  }
-  tick() {
-    if (this.closed) return;
-    const now = Date.now();
-    this.rows = buildListRows(this.snapshotFn(), now);
-    if (this.selRunId) {
-      const idx = this.rows.findIndex((r) => r.run.runId === this.selRunId);
-      this.selIdx = idx >= 0 ? idx : 0;
-    } else if (this.selIdx >= this.rows.length) {
-      this.selIdx = Math.max(0, this.rows.length - 1);
-    }
-    const sel = this.rows[this.selIdx]?.run;
-    if (this.mode === "transcript" && sel) {
-      this.loadTranscript(sel.sessionFile, sel.status === "running");
-      this.transcriptLines = renderTranscriptBlocks(this.blocks, this.theme, Math.max(20, this.lastWidth - 4));
-    }
-    this.tui.requestRender();
-  }
-  handleInput(data) {
-    if (matchesKey(data, Key.escape) || matchesKey(data, "q")) {
-      if (this.mode === "transcript") {
-        this.mode = "list";
-        this.follow = true;
-        this.viewTop = 0;
-        this.tui.requestRender();
-      } else {
-        this.close();
-      }
-      return;
-    }
-    if (this.mode === "list") {
-      if (matchesKey(data, Key.up) || matchesKey(data, "k")) this.move(-1);
-      else if (matchesKey(data, Key.down) || matchesKey(data, "j")) this.move(1);
-      else if (matchesKey(data, Key.enter) || matchesKey(data, "x")) this.openTranscript();
-    } else {
-      if (matchesKey(data, Key.up) || matchesKey(data, "k")) this.scrollTranscript(-1);
-      else if (matchesKey(data, Key.down) || matchesKey(data, "j")) this.scrollTranscript(1);
-      else if (matchesKey(data, Key.left) || matchesKey(data, Key.pageUp)) this.scrollTranscript(-this.pageSize());
-      else if (matchesKey(data, Key.right) || matchesKey(data, Key.pageDown)) this.scrollTranscript(this.pageSize());
-      else if (matchesKey(data, Key.enter)) {
-        this.mode = "list";
-        this.tui.requestRender();
-      }
-    }
-  }
-  move(dir) {
-    if (this.rows.length === 0) return;
-    const next = Math.min(this.rows.length - 1, Math.max(0, this.selIdx + dir));
-    if (next !== this.selIdx) {
-      this.selIdx = next;
-      this.selRunId = this.rows[next]?.run.runId;
-      this.tui.requestRender();
-    }
-  }
-  scrollTranscript(delta) {
-    const maxTop = Math.max(0, this.transcriptLines.length - this.pageSize());
-    this.viewTop = clamp(this.viewTop + delta, 0, maxTop);
-    this.follow = this.viewTop >= maxTop;
-    this.tui.requestRender();
-  }
-  openTranscript() {
-    const sel = this.rows[this.selIdx];
-    if (!sel) return;
-    this.selRunId = sel.run.runId;
-    this.mode = "transcript";
-    this.follow = true;
-    this.viewTop = 0;
-    this.tick();
-  }
-  close() {
-    if (this.closed) return;
-    this.closed = true;
-    this.dispose();
-    this.doneCb();
-  }
-  transcriptHeader(sel, innerW) {
-    const now = Date.now();
-    const dur = formatDuration((sel.finishedAt ?? now) - sel.startedAt);
-    const state = sel.status === "running" ? `running ${dur}` : `${sel.status} ${sel.exitLabel} after ${dur}`;
-    const head = `${statusIcon(sel.status)} ${sel.agent} \xB7 ${sel.runId} \xB7 ${state}`;
-    const bits = [sel.cwd];
-    const tok = usageSummary(sel.usage);
-    if (tok) bits.push(tok);
-    if (sel.resumedFrom) bits.push(`resumed ${sel.resumedFrom}`);
-    return [
-      truncateToWidth(this.theme.bold(this.theme.fg("accent", head)), innerW),
-      truncateToWidth(this.theme.fg("dim", bits.join(" \xB7 ")), innerW)
-    ];
-  }
-  render(width) {
-    this.lastWidth = width;
-    const innerW = Math.max(20, width - 4);
-    const sel = this.rows[this.selIdx]?.run;
-    const useList = this.mode === "list" || !sel;
-    const headerN = useList ? 1 : 2;
-    const midH = Math.max(1, this.panelHeight() - 2 - headerN - 1);
-    let header;
-    let middle;
-    let footer;
-    if (useList) {
-      header = [truncateToWidth(this.theme.bold(this.theme.fg("accent", `acp_delegate \xB7 ${this.rows.length} run${this.rows.length === 1 ? "" : "s"} (live)`)), innerW)];
-      middle = renderListBody(this.rows, this.selIdx, this.theme, innerW);
-      let top = this.viewTop;
-      if (this.selIdx < top) top = this.selIdx;
-      else if (this.selIdx >= top + midH) top = this.selIdx - midH + 1;
-      top = Math.max(0, top);
-      middle = middle.slice(top, top + midH);
-      footer = this.theme.fg("dim", "\u2191\u2193 select \xB7 enter inspect \xB7 esc close");
-    } else {
-      header = this.transcriptHeader(sel, innerW);
-      middle = this.transcriptLines;
-      const maxTop = Math.max(0, middle.length - midH);
-      const top = clamp(this.follow ? maxTop : this.viewTop, 0, maxTop);
-      middle = middle.slice(top, top + midH);
-      footer = this.theme.fg("dim", "\u2191\u2193/\u2190\u2192/pg scroll \xB7 enter back \xB7 esc close");
-    }
-    while (middle.length < midH) middle.push("");
-    return frame([...header, ...middle, footer], width, this.theme);
-  }
-};
-async function openFleetInspector(ctx) {
-  if (ctx.mode !== "tui") {
-    const text = buildSnapshotText(fleetRunsSnapshot(), Date.now());
-    if (ctx.hasUI) ctx.ui.notify(text);
-    else console.log(text);
-    return;
-  }
-  await ctx.ui.custom(async (tui, theme, _keybindings, done) => {
-    const comp = new FleetInspectorComponent(tui, theme, () => done(void 0), fleetRunsSnapshot, REFRESH_MS2);
-    comp.start();
-    return comp;
-  }, {
-    overlay: true,
-    overlayOptions: {
-      width: "100%",
-      minWidth: 80,
-      anchor: "center"
-    }
-  });
-}
-
-// src/setup-subagent-tools.ts
-import * as fs7 from "fs";
-import * as os2 from "os";
-import * as path9 from "path";
-var ACP_TOOLS3 = ["compress", "decompress", "search_context", "acp_status"];
-var DELEGATE_STAND_DOWN_MESSAGE = [
-  "[billion-context-pi] pi-subagents detected \u2014 acp_delegate has been automatically disabled to avoid two overlapping sub-agent systems.",
-  "pi-subagents' agents do NOT get ACP context compression by default. Run /acp-subagents to inject compress/decompress/search_context/acp_status into its agent overrides.",
-  'To keep acp_delegate despite pi-subagents being installed, set "delegate": { "forceEnable": true } in acp.json.'
-].join("\n");
-function resolveAgentDir() {
-  const envDir = process.env.PI_CODING_AGENT_DIR;
-  if (envDir) {
-    if (envDir === "~") return os2.homedir();
-    if (envDir.startsWith("~/")) return path9.join(os2.homedir(), envDir.slice(2));
-    return envDir;
-  }
-  return path9.join(os2.homedir(), CONFIG_DIR_NAME, "agent");
-}
-function parseFrontmatterTools(content) {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!match) return null;
-  const body = match[1];
-  if (!body) return null;
-  let name;
-  let tools;
-  for (const rawLine of body.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (line.startsWith("name:")) {
-      name = line.slice(5).trim().replace(/^["']|["']$/g, "");
-    } else if (line.startsWith("tools:")) {
-      const value = line.slice(6).trim();
-      if (value) {
-        tools = value.split(",").map((t) => t.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
-      }
-    }
-  }
-  if (!name) return null;
-  return tools ? { name, tools } : { name };
-}
-function npmInstallAt(base) {
-  const dir = path9.join(base, "npm", "node_modules", "pi-subagents");
-  return fs7.existsSync(path9.join(dir, "package.json")) ? dir : null;
-}
-function extensionInstallUnder(root) {
-  let entries;
-  try {
-    entries = fs7.readdirSync(root, { withFileTypes: true });
-  } catch {
-    return null;
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const pkgPath = path9.join(root, entry.name, "package.json");
-    try {
-      if (JSON.parse(fs7.readFileSync(pkgPath, "utf-8")).name === "pi-subagents") {
-        return path9.join(root, entry.name);
-      }
-    } catch {
-    }
-  }
-  return null;
-}
-function findPiSubagentsInstall(agentDir, cwd) {
-  return npmInstallAt(agentDir) ?? npmInstallAt(path9.join(cwd, CONFIG_DIR_NAME)) ?? extensionInstallUnder(path9.join(agentDir, "extensions")) ?? extensionInstallUnder(path9.join(cwd, CONFIG_DIR_NAME, "extensions"));
-}
-function findPiSubagentsInstalls(agentDir, cwd) {
-  const pick = (paths) => paths.filter((p) => p !== null);
-  return {
-    user: pick([npmInstallAt(agentDir), extensionInstallUnder(path9.join(agentDir, "extensions"))]),
-    project: pick([npmInstallAt(path9.join(cwd, CONFIG_DIR_NAME)), extensionInstallUnder(path9.join(cwd, CONFIG_DIR_NAME, "extensions"))])
-  };
-}
-function discoverBuiltinAgents(installDir) {
-  const agentsDir = path9.join(installDir, "agents");
-  let entries;
-  try {
-    entries = fs7.readdirSync(agentsDir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-  const parsed = [];
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-    try {
-      const result = parseFrontmatterTools(fs7.readFileSync(path9.join(agentsDir, entry.name), "utf-8"));
-      if (result) parsed.push(result);
-    } catch {
-    }
-  }
-  return parsed;
-}
-function desiredTools(baseTools) {
-  const tools = baseTools ? [...baseTools] : [];
-  for (const tool of ACP_TOOLS3) {
-    if (!tools.includes(tool)) tools.push(tool);
-  }
-  return tools;
-}
-function ensureSubagentAcpTools(settingsPath, options) {
-  const agentDir = options?.agentDir ?? resolveAgentDir();
-  const cwd = options?.cwd ?? process.cwd();
-  const path_ = settingsPath ?? path9.join(agentDir, "settings.json");
-  let installDir;
-  if (options?.installDir) {
-    installDir = path9.resolve(options.installDir);
-    if (!fs7.existsSync(path9.join(installDir, "package.json"))) {
-      return { path: path_, action: "failed", reason: `not a package: ${installDir}` };
-    }
-  } else {
-    const detected = findPiSubagentsInstall(agentDir, cwd);
-    if (!detected) {
-      return { path: path_, action: "skipped", reason: "pi-subagents not installed" };
-    }
-    installDir = detected;
-  }
-  const builtins = discoverBuiltinAgents(installDir);
-  if (builtins.length === 0) {
-    return { path: path_, action: "skipped", reason: "pi-subagents ships no agents/*.md" };
-  }
-  let settingsRaw;
-  try {
-    settingsRaw = fs7.readFileSync(path_, "utf-8");
-  } catch {
-    return { path: path_, action: "skipped", reason: "not found" };
-  }
-  let settings2;
-  try {
-    settings2 = JSON.parse(settingsRaw);
-    if (typeof settings2 !== "object" || settings2 === null || Array.isArray(settings2)) {
-      return { path: path_, action: "failed", reason: "settings.json root is not an object" };
-    }
-  } catch {
-    return { path: path_, action: "failed", reason: "settings.json is not valid JSON" };
-  }
-  const subagents = typeof settings2.subagents === "object" && settings2.subagents !== null ? settings2.subagents : {};
-  const existingOverrides = typeof subagents.agentOverrides === "object" && subagents.agentOverrides !== null ? subagents.agentOverrides : {};
-  let changed = false;
-  const overrides = {};
-  for (const [name, existing] of Object.entries(existingOverrides)) overrides[name] = existing ?? {};
-  const frontmatterByName = new Map(builtins.map((b2) => [b2.name, b2.tools]));
-  for (const name of builtins.map((b2) => b2.name)) {
-    const existing = overrides[name];
-    const baseTools = existing?.tools && Array.isArray(existing.tools) && existing.tools.length > 0 ? existing.tools : frontmatterByName.get(name);
-    if (baseTools === void 0) continue;
-    const wanted = desiredTools(baseTools);
-    const current = existing?.tools;
-    if (Array.isArray(current) && current.length > 0 && wanted.every((tool) => current.includes(tool))) {
-      continue;
-    }
-    overrides[name] = { ...existing, tools: wanted };
-    changed = true;
-  }
-  if (!changed) {
-    return { path: path_, action: "skipped", reason: "already have ACP tools" };
-  }
-  subagents.agentOverrides = overrides;
-  settings2.subagents = subagents;
-  const backupPath = `${path_}.acp-bak`;
-  try {
-    if (!fs7.existsSync(backupPath)) fs7.copyFileSync(path_, backupPath);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { path: path_, action: "failed", reason: `backup failed: ${message}` };
-  }
-  const expectedMtimeMs = fs7.statSync(path_).mtimeMs;
-  const tmpPath = `${path_}.tmp-${process.pid}`;
-  try {
-    fs7.writeFileSync(tmpPath, JSON.stringify(settings2, null, 2) + "\n", "utf-8");
-    if (fs7.statSync(path_).mtimeMs !== expectedMtimeMs) {
-      fs7.unlinkSync(tmpPath);
-      return { path: path_, action: "failed", reason: "settings.json changed during write" };
-    }
-    fs7.renameSync(tmpPath, path_);
-    const written = JSON.parse(fs7.readFileSync(path_, "utf-8"));
-    const writtenSub = written.subagents;
-    const writtenOverrides = writtenSub?.agentOverrides ?? {};
-    for (const b2 of builtins) {
-      const entry = writtenOverrides[b2.name];
-      const tools = entry?.tools ?? [];
-      if (frontmatterByName.get(b2.name) !== void 0 && !ACP_TOOLS3.every((t) => tools.includes(t))) {
-        fs7.copyFileSync(backupPath, path_);
-        return { path: path_, action: "failed", reason: "post-write verification failed" };
-      }
-    }
-    return { path: path_, action: "updated" };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (fs7.existsSync(backupPath)) {
-      try {
-        fs7.copyFileSync(backupPath, path_);
-      } catch {
-      }
-    }
-    return { path: path_, action: "failed", reason: message };
-  }
-}
-
 // src/commands.ts
 function cacheUsageSamples(entries) {
   const out = [];
@@ -22875,7 +18753,7 @@ function makeCommands(runtime, pi) {
     {
       name: "acp-status",
       options: {
-        description: "Detailed ACP status (block tiers, token breakdown, delegate usage).",
+        description: "Detailed ACP status (block tiers, token breakdown).",
         handler: statusHandler
       }
     },
@@ -23037,38 +18915,6 @@ ${text}`);
           ctx.ui.notify(lines.join("\n"));
         }
       }
-    },
-    {
-      name: "acp-subagents",
-      options: {
-        description: "Add ACP context tools (compress/decompress/search_context/acp_status) to pi-subagents' builtin agents. One-time setup \u2014 re-run after upgrading pi-subagents. Usage: /acp-subagents [installDir]",
-        handler: async (args, ctx) => {
-          const installDir = args.trim();
-          const result = ensureSubagentAcpTools(void 0, installDir ? { installDir } : void 0);
-          if (result.action === "updated") {
-            ctx.ui.notify(`ACP tools enabled for pi-subagents agents in ${result.path}`);
-          } else if (result.action === "skipped") {
-            ctx.ui.notify(
-              `Nothing to do: ${result.reason ?? ""}. Install pi-subagents (pi install npm:pi-subagents) or pass its directory: /acp-subagents <installDir>`
-            );
-          } else {
-            ctx.ui.notify(`Failed to update ${result.path}: ${result.reason ?? "unknown"}`);
-          }
-        }
-      }
-    },
-    {
-      name: "acp-fleet",
-      options: {
-        description: "Inspect acp_delegate sub-agent runs: live list + transcript overlay (TUI), text snapshot elsewhere.",
-        handler: async (_args, ctx) => {
-          if (!resolveDelegate(runtime.adapter).enabled) {
-            ctx.ui.notify("acp_delegate is not enabled in this session's config.");
-            return;
-          }
-          await openFleetInspector(ctx);
-        }
-      }
     }
   ];
 }
@@ -23119,7 +18965,7 @@ function resolveSessionDir(sm) {
   const dir = typeof sm.getSessionDir === "function" ? sm.getSessionDir() : void 0;
   if (dir) return dir;
   const file = sm.getSessionFile();
-  return file ? path10.dirname(file) : void 0;
+  return file ? path9.dirname(file) : void 0;
 }
 async function statusReport(runtime, ctx) {
   const { state, coreMessages, entries } = await runtime.stateFor(ctx);
@@ -23136,8 +18982,8 @@ async function statusReport(runtime, ctx) {
   const sentTokens = estimateTokens(coreMessages, coveredIds, imageTokens) + systemPromptTokens;
   const viewSentTokens = adjustedTokenCount(runtime.core, coreMessages, state, config, sentTokens, imageTokens, systemPromptTokens);
   const turn = runtime.core.processTurn({ messages: coreMessages, state, config, tokenCount: anchorStale ? viewSentTokens : Math.max(viewSentTokens, realUsage?.tokens ?? 0) });
-  const versionStr = "0.1.83-lean.6" ? `billion-context-pi@${"0.1.83-lean.6"} \xB7 pack: ${resolveSurfaceMeta(runtime.adapter, ctx?.cwd ?? process.cwd(), ctx?.model?.provider, ctx?.model?.id).pack}` : void 0;
-  let text = buildStatusPanel({
+  const versionStr = "0.1.83-lean.7" ? `billion-context-pi@${"0.1.83-lean.7"} \xB7 pack: ${resolveSurfaceMeta(runtime.adapter, ctx?.cwd ?? process.cwd(), ctx?.model?.provider, ctx?.model?.id).pack}` : void 0;
+  const text = buildStatusPanel({
     version: versionStr,
     tokenCount: sessionTokens,
     systemPromptTokens,
@@ -23147,13 +18993,6 @@ async function statusReport(runtime, ctx) {
     unprunedTokens: coreMessages.reduce((sum, m2) => sum + defaultCountTokens(m2.text ?? "") + (m2.thinkingTokens ?? 0) + (imageTokens.get(m2.id) ?? 0), 0),
     cacheUsages: cacheUsageSamples(entries ?? [])
   });
-  const delegateUsage = getDelegateUsage();
-  if (delegateUsage && delegateUsage.totalTokens > 0) {
-    const cost = delegateUsage.cost.total;
-    const costStr = cost > 0 ? ` ($${cost.toFixed(4)})` : "";
-    text += "\n\n\u2500\u2500 Session delegate usage (excluded from main totals) \u2500\u2500\n";
-    text += `Tokens: ${delegateUsage.input.toLocaleString()} in, ${delegateUsage.output.toLocaleString()} out (${delegateUsage.totalTokens.toLocaleString()} total)${costStr}`;
-  }
   return text;
 }
 
@@ -23370,9 +19209,9 @@ function hasLongRun(text, minRun) {
   return preScreenRe.test(text);
 }
 function findDegenerateRuns(text, minRun) {
-  const runs2 = [];
-  if (!text || !Number.isFinite(minRun) || minRun < 2) return runs2;
-  if (!hasLongRun(text, minRun)) return runs2;
+  const runs = [];
+  if (!text || !Number.isFinite(minRun) || minRun < 2) return runs;
+  if (!hasLongRun(text, minRun)) return runs;
   const chars = Array.from(text);
   let utf16 = 0;
   let k = 0;
@@ -23381,11 +19220,11 @@ function findDegenerateRuns(text, minRun) {
     let m2 = k + 1;
     while (m2 < chars.length && chars[m2] === ch) m2++;
     const count = m2 - k;
-    if (count >= minRun) runs2.push({ char: ch, count, index: utf16 });
+    if (count >= minRun) runs.push({ char: ch, count, index: utf16 });
     utf16 += count * ch.length;
     k = m2;
   }
-  return runs2;
+  return runs;
 }
 function describeChar(ch) {
   if (ch === " ") return "space";
@@ -23396,11 +19235,11 @@ function describeChar(ch) {
   if (cp < 32 || cp === 127) return `U+${cp.toString(16).toUpperCase().padStart(4, "0")}`;
   return JSON.stringify(ch);
 }
-function applyRuns(text, runs2, minRun) {
+function applyRuns(text, runs, minRun) {
   const keep = Math.max(1, Math.min(3, minRun - 1));
   let out = "";
   let last = 0;
-  for (const r of runs2) {
+  for (const r of runs) {
     out += text.slice(last, r.index);
     out += `${r.char.repeat(keep)}\u2026 [${r.count}\xD7 identical chars cut \u2014 degenerate repeat]`;
     last = r.index + r.count * r.char.length;
@@ -23420,17 +19259,17 @@ function collapseAssistantDegeneration(messages, cfg) {
       if (msg.role !== "assistant") continue;
       const c = msg.content;
       if (typeof c === "string") {
-        const runs3 = findDegenerateRuns(c, minRun);
-        if (runs3.length > 0) {
-          out[i] = { ...msg, content: applyRuns(c, runs3, minRun) };
-          evidence.push({ msgIndex: i, blocks: ["content"], runs: runs3 });
+        const runs2 = findDegenerateRuns(c, minRun);
+        if (runs2.length > 0) {
+          out[i] = { ...msg, content: applyRuns(c, runs2, minRun) };
+          evidence.push({ msgIndex: i, blocks: ["content"], runs: runs2 });
           changed = true;
         }
         continue;
       }
       if (!Array.isArray(c)) continue;
       const blocks = [];
-      const runs2 = [];
+      const runs = [];
       let blockChanged = false;
       const nc = c.map((p) => {
         const b2 = p;
@@ -23439,7 +19278,7 @@ function collapseAssistantDegeneration(messages, cfg) {
           if (r.length > 0) {
             blockChanged = true;
             blocks.push("text");
-            runs2.push(...r);
+            runs.push(...r);
             return { ...b2, text: applyRuns(b2.text, r, minRun) };
           }
           return p;
@@ -23449,7 +19288,7 @@ function collapseAssistantDegeneration(messages, cfg) {
           if (r.length > 0) {
             blockChanged = true;
             blocks.push("thinking");
-            runs2.push(...r);
+            runs.push(...r);
             return { ...b2, thinking: applyRuns(b2.thinking, r, minRun) };
           }
           return p;
@@ -23458,7 +19297,7 @@ function collapseAssistantDegeneration(messages, cfg) {
       });
       if (blockChanged) {
         out[i] = { ...msg, content: nc };
-        evidence.push({ msgIndex: i, blocks, runs: runs2 });
+        evidence.push({ msgIndex: i, blocks, runs });
         changed = true;
       }
     }
@@ -23472,26 +19311,26 @@ function lastAssistantRuns(messages, minRun) {
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
       if (msg.role !== "assistant") continue;
-      const runs2 = [];
+      const runs = [];
       const c = msg.content;
       if (typeof c === "string") {
-        runs2.push(...findDegenerateRuns(c, minRun));
+        runs.push(...findDegenerateRuns(c, minRun));
       } else if (Array.isArray(c)) {
         for (const p of c) {
           const b2 = p;
-          if (b2?.type === "text" && typeof b2.text === "string") runs2.push(...findDegenerateRuns(b2.text, minRun));
-          else if (b2?.type === "thinking" && typeof b2.thinking === "string") runs2.push(...findDegenerateRuns(b2.thinking, minRun));
+          if (b2?.type === "text" && typeof b2.text === "string") runs.push(...findDegenerateRuns(b2.text, minRun));
+          else if (b2?.type === "thinking" && typeof b2.thinking === "string") runs.push(...findDegenerateRuns(b2.thinking, minRun));
         }
       }
-      return runs2.length > 0 ? runs2 : null;
+      return runs.length > 0 ? runs : null;
     }
     return null;
   } catch {
     return null;
   }
 }
-function degenerationNotice(runs2) {
-  const sorted = [...runs2].sort((a, b2) => b2.count - a.count);
+function degenerationNotice(runs) {
+  const sorted = [...runs].sort((a, b2) => b2.count - a.count);
   const top = sorted[0];
   const extra = sorted.length > 1 ? ` and ${sorted.length - 1} other repeated segment(s)` : "";
   return {
@@ -23898,11 +19737,11 @@ function wireToolGuardrails(pi, runtime) {
 }
 
 // src/update.ts
-import { readFile as readFile2, writeFile as writeFile3, mkdir as mkdir3, access } from "fs/promises";
-import { join as join12, dirname as dirname12 } from "path";
+import { readFile, writeFile as writeFile2, mkdir as mkdir2, access } from "fs/promises";
+import { join as join10, dirname as dirname11 } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
 import { execFile } from "child_process";
-import { homedir as homedir9 } from "os";
+import { homedir as homedir8 } from "os";
 import { createHash as createHash5 } from "crypto";
 var PACKAGE_NAME = "billion-context-pi";
 var registryUrl = (tag) => `https://registry.npmjs.org/${PACKAGE_NAME}/${encodeURIComponent(tag)}`;
@@ -23913,18 +19752,18 @@ function locationKey(location) {
 }
 var throttleFileFor = (extDir) => {
   if (process.env.ACP_UPDATE_THROTTLE_FILE) return process.env.ACP_UPDATE_THROTTLE_FILE;
-  const base = join12(homedir9(), CONFIG_DIR_NAME, "agent");
-  return extDir ? join12(base, `.billion-context-pi-update-check-${locationKey(extDir)}`) : join12(base, ".billion-context-pi-update-check");
+  const base = join10(homedir8(), CONFIG_DIR_NAME, "agent");
+  return extDir ? join10(base, `.billion-context-pi-update-check-${locationKey(extDir)}`) : join10(base, ".billion-context-pi-update-check");
 };
-var readOnlyMarkerFile = (extDir) => join12(homedir9(), CONFIG_DIR_NAME, "agent", `.billion-context-pi-readonly-${locationKey(extDir)}`);
+var readOnlyMarkerFile = (extDir) => join10(homedir8(), CONFIG_DIR_NAME, "agent", `.billion-context-pi-readonly-${locationKey(extDir)}`);
 var updateInFlight = false;
 var runNpm = async (args, opts) => {
-  return new Promise((resolve5) => {
+  return new Promise((resolve4) => {
     execFile(
       "npm",
       args,
       { ...opts, shell: process.platform === "win32", maxBuffer: 4 * 1024 * 1024 },
-      (err, stdout, stderr) => resolve5({
+      (err, stdout, stderr) => resolve4({
         code: err ? 1 : 0,
         stdout: String(stdout ?? ""),
         stderr: String(stderr ?? "")
@@ -23934,12 +19773,12 @@ var runNpm = async (args, opts) => {
 };
 var runNpmImpl = runNpm;
 var runNode = (args, opts) => {
-  return new Promise((resolve5) => {
+  return new Promise((resolve4) => {
     execFile(
       process.execPath,
       args,
       { ...opts, maxBuffer: 4 * 1024 * 1024 },
-      (err, stdout, stderr) => resolve5({
+      (err, stdout, stderr) => resolve4({
         code: err ? 1 : 0,
         stdout: String(stdout ?? ""),
         stderr: String(stderr ?? "")
@@ -24011,7 +19850,7 @@ function parseSemVer(version) {
 }
 async function readLastCheck(throttle) {
   try {
-    const data = await readFile2(throttle, "utf-8");
+    const data = await readFile(throttle, "utf-8");
     return parseInt(data.trim(), 10) || 0;
   } catch {
     return 0;
@@ -24019,8 +19858,8 @@ async function readLastCheck(throttle) {
 }
 async function writeLastCheck(timestamp, throttle) {
   try {
-    await mkdir3(dirname12(throttle), { recursive: true });
-    await writeFile3(throttle, String(timestamp), "utf-8");
+    await mkdir2(dirname11(throttle), { recursive: true });
+    await writeFile2(throttle, String(timestamp), "utf-8");
   } catch {
   }
 }
@@ -24034,34 +19873,34 @@ async function isReadOnlyLocation(extDir) {
 }
 async function markReadOnlyLocation(extDir) {
   try {
-    await mkdir3(dirname12(readOnlyMarkerFile(extDir)), { recursive: true });
-    await writeFile3(readOnlyMarkerFile(extDir), String(Date.now()), "utf-8");
+    await mkdir2(dirname11(readOnlyMarkerFile(extDir)), { recursive: true });
+    await writeFile2(readOnlyMarkerFile(extDir), String(Date.now()), "utf-8");
   } catch {
   }
 }
-async function readPackageJson(path11) {
+async function readPackageJson(path10) {
   try {
-    const data = JSON.parse(await readFile2(path11, "utf-8"));
+    const data = JSON.parse(await readFile(path10, "utf-8"));
     return data && typeof data === "object" ? data : void 0;
   } catch {
     return void 0;
   }
 }
 function findNpmRoot(extDir) {
-  let dir = dirname12(extDir);
+  let dir = dirname11(extDir);
   for (; ; ) {
-    if (dir.endsWith("node_modules")) return dirname12(dir);
-    const parent = dirname12(dir);
+    if (dir.endsWith("node_modules")) return dirname11(dir);
+    const parent = dirname11(dir);
     if (parent === dir) return void 0;
     dir = parent;
   }
 }
 async function findExtensionDir() {
-  let dir = dirname12(fileURLToPath3(import.meta.url));
+  let dir = dirname11(fileURLToPath3(import.meta.url));
   for (; ; ) {
-    const pkg = await readPackageJson(join12(dir, "package.json"));
+    const pkg = await readPackageJson(join10(dir, "package.json"));
     if (pkg?.name === PACKAGE_NAME) return dir;
-    const parent = dirname12(dir);
+    const parent = dirname11(dir);
     if (parent === dir) return void 0;
     dir = parent;
   }
@@ -24073,22 +19912,22 @@ function declaredEntries(pkg) {
   return [.../* @__PURE__ */ new Set([pkg.pi?.extensions?.[0], exportEntry, pkg.main])].filter((v2) => typeof v2 === "string" && v2.length > 0);
 }
 async function verifyInstall(npmDir, latest) {
-  const dir = join12(npmDir, "node_modules", PACKAGE_NAME);
-  const pkg = await readPackageJson(join12(dir, "package.json"));
+  const dir = join10(npmDir, "node_modules", PACKAGE_NAME);
+  const pkg = await readPackageJson(join10(dir, "package.json"));
   if (!pkg?.version) return { ok: false, reason: "package-json-missing" };
   if (pkg.version !== latest) return { ok: false, reason: `version-mismatch:${pkg.version}` };
   const entries = declaredEntries(pkg);
   if (entries.length === 0) return { ok: false, reason: "no-entry-declared" };
   for (const rel of entries) {
     try {
-      await access(join12(dir, rel));
+      await access(join10(dir, rel));
     } catch {
       return { ok: false, reason: `entry-missing:${rel}` };
     }
   }
   const smokeEntry = pkg.pi?.extensions?.[0] ?? entries[0];
   if (!smokeEntry) return { ok: false, reason: "no-entry-declared" };
-  const entry = join12(dir, smokeEntry);
+  const entry = join10(dir, smokeEntry);
   const SMOKE = "const{pathToFileURL}=require('node:url');import(pathToFileURL(process.argv[1]).href).then(()=>{},(e)=>{console.error(e&&e.stack||e);process.exit(1)})";
   const { code, stderr } = await runNodeImpl(["-e", SMOKE, entry], { timeout: 15e3 });
   if (code !== 0) return { ok: false, reason: `entry-import-failed:${stderr.trim().slice(-500)}` };
@@ -24115,7 +19954,7 @@ async function autoInstallLatest(latest, extDirOverride) {
       "--no-fund",
       "--no-save"
     ];
-    const prevVersion = (await readPackageJson(join12(extDir, "package.json")))?.version ?? "0.1.83-lean.6";
+    const prevVersion = (await readPackageJson(join10(extDir, "package.json")))?.version ?? "0.1.83-lean.7";
     const { code, stderr } = await runNpmImpl(installArgs(latest), { cwd: npmDir, timeout: 6e4 });
     if (code !== 0) {
       logWarn("update", {
@@ -24133,7 +19972,7 @@ async function autoInstallLatest(latest, extDirOverride) {
     }
     const verify = await verifyInstall(npmDir, latest);
     if (!verify.ok) {
-      const rollbackTo = SEMVER_RE.test(prevVersion) ? prevVersion : "0.1.83-lean.6";
+      const rollbackTo = SEMVER_RE.test(prevVersion) ? prevVersion : "0.1.83-lean.7";
       logWarn("update", { event: "auto-install-verify-failed", latest, reason: verify.reason, rollbackTo });
       const rb = await runNpmImpl(installArgs(rollbackTo), { cwd: npmDir, timeout: 6e4 });
       logInfo("update", { event: "rollback", from: latest, to: rollbackTo, ok: rb.code === 0 });
@@ -24208,7 +20047,7 @@ async function checkForUpdate(autoUpdate, notify) {
     }
     const latest = await fetchLatestVersion(tag);
     if (!latest) return;
-    const current = runtimeVersion ?? "0.1.83-lean.6";
+    const current = runtimeVersion ?? "0.1.83-lean.7";
     const hasUpdate = isVersionNewer(latest, current);
     debug.event("update-check", {
       current,
@@ -24253,7 +20092,7 @@ function notifyReadOnly(notify) {
 async function getRuntimeVersion() {
   const extDir = await findExtensionDir();
   if (!extDir) return void 0;
-  const pkg = await readPackageJson(join12(extDir, "package.json"));
+  const pkg = await readPackageJson(join10(extDir, "package.json"));
   return pkg?.version;
 }
 async function getInstalledSpec() {
@@ -24262,7 +20101,7 @@ async function getInstalledSpec() {
   if (!extDir) return void 0;
   const npmRoot = findNpmRoot(extDir);
   if (!npmRoot) return void 0;
-  const hostPkg = await readPackageJson(join12(npmRoot, "package.json"));
+  const hostPkg = await readPackageJson(join10(npmRoot, "package.json"));
   return hostPkg?.dependencies?.[PACKAGE_NAME];
 }
 
@@ -24323,7 +20162,6 @@ function createAcpExtension(adapter = {}) {
       return true;
     };
     wireCompactionDisable(pi, runtime);
-    wireDelegateReadTracking(pi);
     wireSessionLifecycle(pi, runtime, standDownIfProxied);
     wireContextTransform(pi, runtime, standDownIfProxied);
     wireBeforeProviderRequest(pi, runtime, standDownIfProxied);
@@ -24349,7 +20187,7 @@ function userConfigDisabled(cwd) {
   for (const file of acpJsonFiles(cwd)) {
     let text;
     try {
-      text = readFileSync6(file, "utf8");
+      text = readFileSync5(file, "utf8");
     } catch {
       continue;
     }
@@ -24377,22 +20215,9 @@ function wireCompactionDisable(pi, runtime) {
     return { cancel: true };
   });
 }
-function wireDelegateReadTracking(pi) {
-  pi.on("tool_result", (event) => {
-    if (event.isError) return;
-    if (event.toolName === "read") {
-      const p = event.input.path;
-      if (typeof p === "string") markDelegateResultRead(p);
-    } else if (event.toolName === "bash") {
-      const cmd = event.input.command;
-      if (typeof cmd === "string") markDelegateRunReadByCommand(cmd);
-    }
-  });
-}
 function wireSessionLifecycle(pi, runtime, standDownIfProxied) {
   let ompWarned = false;
   let forkWarned = false;
-  let subagentStandDownWarned = false;
   pi.on("session_start", async (_event, ctx) => {
     if (isUnsupportedHost(ctx.sessionManager)) {
       runtime.refused = true;
@@ -24426,57 +20251,19 @@ function wireSessionLifecycle(pi, runtime, standDownIfProxied) {
     runtime.dropSentViewCount(ctx.sessionManager.getSessionId());
     runtime.dropProjectionCache(ctx.sessionManager.getSessionId());
     dropLiveOnlyTailCache(ctx.sessionManager.getSessionId());
-    resetDelegateUsage();
-    setDelegateDisplayUsage("separate");
-    setDelegatePolicy(DEFAULT_DELEGATE_POLICY);
     const sid = ctx.sessionManager.getSessionId();
     const modelInfo = ctx.model;
-    logInfo("session", { event: "start", sid, cwd: ctx.cwd, debug: runtime.adapter.debug ?? null, version: true ? "0.1.83-lean.6" : null, model: modelInfo?.id ?? null, modelApi: modelInfo?.api ?? null, contextWindow: modelInfo?.contextWindow ?? null });
-    let delegateStoodDown = false;
+    logInfo("session", { event: "start", sid, cwd: ctx.cwd, debug: runtime.adapter.debug ?? null, version: true ? "0.1.83-lean.7" : null, model: modelInfo?.id ?? null, modelApi: modelInfo?.api ?? null, contextWindow: modelInfo?.contextWindow ?? null });
     try {
       await runtime.reloadConfig(ctx.cwd);
-      const delegateCfg = resolveDelegate(runtime.adapter);
-      setDelegateDisplayUsage(delegateCfg.displayUsage);
-      setDelegatePolicy(delegateCfg);
-      setDelegateDefaults({ thinkingLevel: delegateCfg.thinkingLevel, agents: delegateCfg.agents });
-      setDelegateNotifyIfRead(delegateCfg.notifyIfRead);
-      if (delegateCfg.enabled && !delegateCfg.forceEnable) {
-        const scopes = findPiSubagentsInstalls(resolveAgentDir(), ctx.cwd ?? process.cwd());
-        if (scopes.project[0] !== void 0) {
-          delegateStoodDown = true;
-          logWarn("delegate", { event: "delegate-auto-disabled", sid, install: scopes.project[0], scope: "project", hint: "run /acp-subagents to give its agents ACP compression tools; delegate.forceEnable=true keeps acp_delegate" });
-          if (!subagentStandDownWarned) {
-            subagentStandDownWarned = true;
-            if (ctx.hasUI) ctx.ui.notify(DELEGATE_STAND_DOWN_MESSAGE, "warning");
-            else console.error(DELEGATE_STAND_DOWN_MESSAGE);
-          }
-        } else if (scopes.user[0] !== void 0) {
-          logWarn("delegate", { event: "delegate-user-scope-detected", sid, install: scopes.user[0], action: "warn-only", hint: "user-level pi-subagents does not disable acp_delegate; run /acp-subagents to give its agents ACP compression tools" });
-        }
-      }
     } catch (e) {
       logThrow("config", e, { sid, phase: "session_start" });
     }
-    runtime.delegateStoodDown = delegateStoodDown;
     try {
       runtime.setPrompts(resolvePrompts(runtime.adapter.prompts, { acknowledgeRisk: runtime.adapter.acknowledgePromptsRisk === true }));
     } catch (e) {
       logWarn("config", { event: "prompts-resolve-failed", error: e instanceof Error ? e.message : String(e) });
       runtime.setPrompts(defaultPrompts);
-    }
-    const delegatePolicy2 = resolveDelegate(runtime.adapter);
-    if (delegatePolicy2.enabled && !runtime.delegateStoodDown) {
-      pi.registerTool(makeDelegateTool(pi));
-      pi.registerTool(makeDelegateWaitTool(pi));
-      pi.registerTool(makeDelegateCancelTool(pi));
-      if (typeof pi.registerShortcut === "function" && delegatePolicy2.fleetShortcut !== "") {
-        pi.registerShortcut(delegatePolicy2.fleetShortcut, {
-          description: "Inspect acp_delegate runs (live list + transcript)",
-          handler: (ctx2) => {
-            void openFleetInspector(ctx2);
-          }
-        });
-      }
     }
     if (runtime.adapter.rules === true) {
       pi.registerTool(makeRuleTool(runtime));
@@ -24485,7 +20272,6 @@ function wireSessionLifecycle(pi, runtime, standDownIfProxied) {
       if (ctx.hasUI) ctx.ui.notify(msg);
     });
     if (!ctx.hasUI) await updateCheck;
-    delegateStatusWidget.setContext(ctx, runningRunsSnapshot, delegatePolicy2.fleetShortcut);
   });
   pi.on("session_shutdown", (_event, ctx) => {
     const sid = ctx.sessionManager.getSessionId();
@@ -24501,7 +20287,6 @@ function wireSessionLifecycle(pi, runtime, standDownIfProxied) {
     runtime.dropSentViewCount(sid);
     runtime.dropProjectionCache(sid);
     dropLiveOnlyTailCache(sid);
-    delegateStatusWidget.dispose();
     closeLogStream();
   });
 }
@@ -24851,8 +20636,7 @@ function wireSystemPrompt(pi, runtime) {
       const ignored = [
         // Only keys the user wrote: built-in packs (lean) ship promptSections
         // of their own, and warning about those would fire on every start.
-        ...Object.keys(runtime.adapter.promptSections ?? {}).map((k) => `promptSections.${k}`),
-        ...runtime.adapter.delegatePrompt !== void 0 ? ["delegatePrompt"] : []
+        ...Object.keys(runtime.adapter.promptSections ?? {}).map((k) => `promptSections.${k}`)
       ].sort();
       const key = ignored.join(",");
       if (ignored.length > 0 && key !== lastIgnoredPromptKeys) {
@@ -24862,11 +20646,7 @@ function wireSystemPrompt(pi, runtime) {
       }
       lastIgnoredPromptKeys = key;
     }
-    const delegate = resolveDelegate(runtime.adapter).enabled && !runtime.delegateStoodDown;
-    const acp = buildAcpSystemPrompt(runtime.prompts, merged.promptSections);
-    const delegateText = merged.delegatePrompt !== void 0 ? merged.delegatePrompt : ACP_DELEGATE_PROMPT;
-    const prompt = delegate && delegateText !== null ? `${acp}
-${delegateText}` : acp;
+    const prompt = buildAcpSystemPrompt(runtime.prompts, merged.promptSections);
     return { systemPrompt: formatSystemPromptForEvent(event.systemPrompt, prompt) };
   });
 }

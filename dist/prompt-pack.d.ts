@@ -30,7 +30,6 @@ export type PiToolExtrasConfig = Partial<Record<AcpToolName, PiToolExtras>>;
 export interface PiAdapterSurface {
     promptSections: Partial<PiPromptSections>;
     toolExtras: PiToolExtrasConfig;
-    delegatePrompt?: string | null;
 }
 /**
  * Pi-specific part of a pack. `surface.adapters.pi` is opaque to the kernel,
@@ -43,14 +42,12 @@ export interface InlineSurface {
     promptSections?: Partial<PiPromptSections>;
     nudgeSections?: NudgeSectionsConfig;
     toolPrompts?: ToolPromptsConfig;
-    delegatePrompt?: string | null;
 }
 export interface MergedSurface {
     prompts: Partial<Prompts>;
     promptSections: Partial<PiPromptSections>;
     nudgeSections: NudgeSectionsConfig;
     toolPrompts: ToolPromptsConfig;
-    delegatePrompt?: string | null;
 }
 export declare function mergeSurface(pack: Pack | null, inline: InlineSurface): MergedSurface;
 export declare function readToolSurfaceWithPacks(cwd: string): ToolPromptsConfig;

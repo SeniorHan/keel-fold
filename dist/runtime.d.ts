@@ -37,11 +37,6 @@ export interface AcpRuntime {
     /** User-facing reason shown when a refused ACP tool is invoked; null means
      *  the default OMP refusal text applies. Set together with `refused`. */
     refusalMessage: string | null;
-    /** True when acp_delegate stood down this session because a third-party
-     *  subagent extension (pi-subagents) is installed and delegate.forceEnable
-     *  is not set (#415). Gates delegate tool registration and the system-prompt
-     *  delegate section. Reset on every session_start. */
-    delegateStoodDown: boolean;
     /** Per-session provider-throttle retry episode (attempt budget + kick
      *  pacing), keyed by session id so concurrent sessions in one extension
      *  instance cannot share an episode. Reset on session_start and on any

@@ -40,7 +40,6 @@ const LEAN_SYSTEM_PROMPT = `ACP context management
 
 const LOW_FREQUENCY_TOOLS = ["decompress", "search_context", "acp_status", "acp_cache"] as const;
 const LOW_FREQUENCY_SET = new Set<string>(LOW_FREQUENCY_TOOLS);
-const DELEGATE_TOOLS = new Set(["acp_delegate", "acp_delegate_wait", "acp_delegate_cancel"]);
 
 type Operation = (typeof LOW_FREQUENCY_TOOLS)[number];
 type FacadeOperation = Operation | "help";
@@ -285,7 +284,7 @@ function facadeTool(tools: Map<string, CapturedTool>): ToolDefinition<typeof FAC
 }
 
 export function createLeanAcpExtension(
-  upstream: UpstreamExtension = createAcpExtension({ delegate: false, autoUpdate: false, externalSystemPrompt: true }),
+  upstream: UpstreamExtension = createAcpExtension({ autoUpdate: false, externalSystemPrompt: true }),
 ): (pi: ExtensionAPI) => void {
   return (pi: ExtensionAPI): void => {
     const tools = new Map<string, CapturedTool>();
@@ -294,7 +293,6 @@ export function createLeanAcpExtension(
       get(target, property, receiver) {
         if (property === "registerTool") {
           return (tool: CapturedTool) => {
-            if (DELEGATE_TOOLS.has(tool.name)) return;
             if (LOW_FREQUENCY_SET.has(tool.name)) {
               tools.set(tool.name, tool);
               return;

@@ -17,7 +17,8 @@
 | 模型可见工具 | `compress`、`decompress`、`search_context`、`acp_status`、`acp_cache` | `compress` + 一个 `acp_context` |
 | 常驻提示 | 约 5,800 tokens | 约 700 tokens |
 | 系统提示 | 替换 Pi 的提示，其它扩展追加的提示会丢 | 作为独立段落注入，其它扩展的提示保留 |
-| Delegation、自动更新 | 默认开启 | 关闭 |
+| 子代理（`acp_delegate`、fleet 面板） | 内置 | 已移除——这是上下文管理扩展，子代理请用专门的扩展 |
+| 自动更新 | 默认开启 | 关闭 |
 
 另外修复了：紧急截断没有真正作用到发出的请求、紧急截断会截掉最近一条用户消息、token 计量忽略新消息、`compress` 的 thinking 没计入、合并后的工具绕过“最近内容”策略、测试会写进真实的 `~/.pi`。细节和原因见 [MAINTENANCE.md](MAINTENANCE.md)。
 
@@ -26,7 +27,7 @@
 ## 安装
 
 ```bash
-pi install git:github.com/kunkun9527/billion-context-pi-lean@v0.1.83-lean.6
+pi install git:github.com/kunkun9527/billion-context-pi-lean@v0.1.83-lean.7
 ```
 
 专用摘要模型需要 Pi >= 1.x。不要与 `billion-context-pi` 或 `billion-context` 同时启用，否则工具和钩子会注册两次。启用后 Pi 自带的 compaction 会被取消。
@@ -46,7 +47,7 @@ pi install git:github.com/kunkun9527/billion-context-pi-lean@v0.1.83-lean.6
 
 ## 配置
 
-`~/.pi/acp.json` 和 `<项目>/.pi/acp.json`。[CONFIGURATION.md](CONFIGURATION.zh-CN.md) 里的上游选项都适用，除了：`delegate.*`、`delegatePrompt`、`autoUpdate` 强制关闭；`promptSections.*` 不生效，因为本仓库注入自己的提示（会提示一次）。压缩时机可以按 provider 和模型单独调：
+`~/.pi/acp.json` 和 `<项目>/.pi/acp.json`。[CONFIGURATION.md](CONFIGURATION.zh-CN.md) 里的上游选项都适用，除了：`autoUpdate` 强制关闭；已移除的子代理配置（`delegate.*`、`displayUsage`、`delegatePrompt`）会被忽略；`promptSections.*` 不生效，因为本仓库注入自己的提示（会提示一次）。压缩时机可以按 provider 和模型单独调：
 
 ```json
 {

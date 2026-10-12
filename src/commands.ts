@@ -10,10 +10,6 @@ import { usageAnchorPredatesCompression } from "./floor-stale.js";
 import { applyOutputHeadroom, resolveOutputHeadroomCap } from "./overflow-selfheal.js";
 import { buildStatusPanel } from "acp-kernel/panel";
 import { resolveSurfaceMeta } from "./prompt-pack.js";
-import { getDelegateUsage } from "./delegate-tool.js";
-import { openFleetInspector } from "./fleet-inspector.js";
-import { resolveDelegate } from "./config.js";
-import { ensureSubagentAcpTools } from "./setup-subagent-tools.js";
 import { cacheReportText } from "./cache-tool.js";
 import { listModels, resolveModel, SESSION_MODEL_REF } from "./compress-model.js";
 
@@ -97,7 +93,7 @@ export function makeCommands(runtime: AcpRuntime, pi?: ExtensionAPI): Array<{ na
     {
       name: "acp-status",
       options: {
-        description: "Detailed ACP status (block tiers, token breakdown, delegate usage).",
+        description: "Detailed ACP status (block tiers, token breakdown).",
         handler: statusHandler,
       },
     },
@@ -263,41 +259,6 @@ export function makeCommands(runtime: AcpRuntime, pi?: ExtensionAPI): Array<{ na
         },
       },
     },
-    {
-      name: "acp-subagents",
-      options: {
-        description:
-          "Add ACP context tools (compress/decompress/search_context/acp_status) to pi-subagents' builtin agents. " +
-          "One-time setup — re-run after upgrading pi-subagents. Usage: /acp-subagents [installDir]",
-        handler: async (args, ctx) => {
-          const installDir = args.trim();
-          const result = ensureSubagentAcpTools(undefined, installDir ? { installDir } : undefined);
-          if (result.action === "updated") {
-            ctx.ui.notify(`ACP tools enabled for pi-subagents agents in ${result.path}`);
-          } else if (result.action === "skipped") {
-            ctx.ui.notify(
-              `Nothing to do: ${result.reason ?? ""}. ` +
-                "Install pi-subagents (pi install npm:pi-subagents) or pass its directory: /acp-subagents <installDir>",
-            );
-          } else {
-            ctx.ui.notify(`Failed to update ${result.path}: ${result.reason ?? "unknown"}`);
-          }
-        },
-      },
-    },
-    {
-      name: "acp-fleet",
-      options: {
-        description: "Inspect acp_delegate sub-agent runs: live list + transcript overlay (TUI), text snapshot elsewhere.",
-        handler: async (_args, ctx) => {
-          if (!resolveDelegate(runtime.adapter).enabled) {
-            ctx.ui.notify("acp_delegate is not enabled in this session's config.");
-            return;
-          }
-          await openFleetInspector(ctx);
-        },
-      },
-    },
   ];
 }
 
@@ -389,7 +350,7 @@ async function statusReport(runtime: AcpRuntime, ctx: ExtensionCommandContext): 
   const versionStr = CURRENT_VERSION
     ? `billion-context-pi@${CURRENT_VERSION} · pack: ${resolveSurfaceMeta(runtime.adapter, ctx?.cwd ?? process.cwd(), (ctx?.model as { provider?: string; id?: string } | undefined)?.provider, (ctx?.model as { provider?: string; id?: string } | undefined)?.id).pack}`
     : undefined;
-  let text = buildStatusPanel({
+  const text = buildStatusPanel({
     version: versionStr,
     tokenCount: sessionTokens,
     systemPromptTokens,
@@ -399,14 +360,5 @@ async function statusReport(runtime: AcpRuntime, ctx: ExtensionCommandContext): 
     unprunedTokens: coreMessages.reduce((sum, m) => sum + defaultCountTokens(m.text ?? "") + (m.thinkingTokens ?? 0) + (imageTokens.get(m.id) ?? 0), 0),
     cacheUsages: cacheUsageSamples(entries ?? []),
   });
-
-  // pi-specific footer: delegate usage is tracked outside the main totals.
-  const delegateUsage = getDelegateUsage();
-  if (delegateUsage && delegateUsage.totalTokens > 0) {
-    const cost = delegateUsage.cost.total;
-    const costStr = cost > 0 ? ` ($${cost.toFixed(4)})` : "";
-    text += "\n\n── Session delegate usage (excluded from main totals) ──\n";
-    text += `Tokens: ${delegateUsage.input.toLocaleString()} in, ${delegateUsage.output.toLocaleString()} out (${delegateUsage.totalTokens.toLocaleString()} total)${costStr}`;
-  }
   return text;
 }

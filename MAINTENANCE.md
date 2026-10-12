@@ -41,15 +41,19 @@
 
 ### 系统提示
 
-- `externalSystemPrompt`（`AdapterConfig`，只由宿主设置，`applyUserConfig` 不读 acp.json 里的同名键）：外壳仍运行上游 `before_agent_start` handler（active pack 戳、`setPrompts` 等副作用），只替换它返回的提示词；上游返回 undefined（宿主被拒）时外壳也不注入。用户在 acp.json 里写了 `promptSections.*` 或 `delegatePrompt` 时，记 `prompt-config-ignored` 并提示一次；内置 lean pack 自带的 promptSections 不提示。测试在 `tests/prompt-pack.test.ts`。
+- `externalSystemPrompt`（`AdapterConfig`，只由宿主设置，`applyUserConfig` 不读 acp.json 里的同名键）：外壳仍运行上游 `before_agent_start` handler（active pack 戳、`setPrompts` 等副作用），只替换它返回的提示词；上游返回 undefined（宿主被拒）时外壳也不注入。用户在 acp.json 里写了 `promptSections.*` 时，记 `prompt-config-ignored` 并提示一次；内置 lean pack 自带的 promptSections 不提示。测试在 `tests/prompt-pack.test.ts`。
 
 ### 测试隔离
 
 `npm test` 预加载 `tests/support/isolate-env.ts`，把 `HOME`、`USERPROFILE`、`ACP_LOG_FILE` 指向临时目录，跑完删除。上游原本没有隔离，大部分测试会写进真实的 `~/.pi/acp.log`。`tests/e2e-compress-config.test.ts` 的 `withConfigDir` 同时改 `HOME` 和 `USERPROFILE`（Windows 上 `os.homedir()` 读后者）。symlink 逃逸用例的目标改为临时目录所在盘的根目录，不再依赖 `HOME`。
 
+### 移除子代理（Delegation）
+
+子代理不属于上下文管理，整套删除：`acp_delegate`/`acp_delegate_wait`/`acp_delegate_cancel` 工具、fleet 面板和 `/acp-fleet`、`/acp-subagents` 与 pi-subagents 检测、`ACP_DELEGATE NOTIFICATIONS` 系统提示附录、`acp_status` 里的 delegate 用量，以及配置键 `delegate.*`、顶层 `displayUsage`、`delegatePrompt` 和 `PI_ACP_DELEGATE_*` 环境变量。旧 acp.json 里的这些键按未知键忽略，不报错。需要子代理时用独立的子代理扩展；它的会话照常由 ACP 管理（`deriveChildState`/`hostSession` 保留，属于会话状态而不是子代理功能）。
+
 ### Lean 外壳
 
-- 工具面：直接暴露 `compress`（以 `model-only` exposure 注册，codemode 下也直接声明给模型；ACP 按工具名在会话里识别 compress 结果），把 `decompress`、`search_context`、`acp_status`、`acp_cache` 合并到 `acp_context`。关闭 Delegation 和自动更新。
+- 工具面：直接暴露 `compress`（以 `model-only` exposure 注册，codemode 下也直接声明给模型；ACP 按工具名在会话里识别 compress 结果），把 `decompress`、`search_context`、`acp_status`、`acp_cache` 合并到 `acp_context`。关闭自动更新。
 - Pi 1.x 上把 ACP 规则写进 `systemPromptOptions.sections.acp_context`，不返回 `systemPrompt`。返回 `systemPrompt` 会变成 `forceSystemPrompt`，导致其它扩展的 `appendSystemPrompt` 被丢弃（上游 #630/#631）。其它扩展已经 force 过时，退回拼接的旧行为。
 - 去掉 “Refs may be renumbered” 的错误说法（上游 #541）。
 - 改写规则：覆盖 `acp_cache(...)` 和 “call/run acp_status …”；调用改写用非贪婪匹配（避免同一行两个调用被合并）。召回结果不改写（`rewriteRecallResult`）：decompress 的输出原样返回；search_context 只改写每条结果末尾的提示行——必须完全符合上游格式 `  → decompress({ blockId: "bN" })`（可带 `  (block containing message <原始 entry id>)`，id 形如 `088aaedb` 或 `4d9e965e#toolu_…|fc_…`，不是 mNNNNN），且后面是空行或文末（`SEARCH_HINT_LINE`）。预览是召回原文，一律不动。上游改 `src/search-tool.ts` 的 `formatResult` 或给这两个工具新增提示文字时，要同步这里的正则。
@@ -67,7 +71,7 @@
 
 ## 挑上游修复
 
-`git fetch upstream`，看 `upstream/master` 和 [billion-context](https://github.com/ranxianglei/billion-context) 的 `fix` 提交，只挑和本仓库行为相关的，`git cherry-pick -x` 或手工移植，按上面的流程验证。冲突主要集中在 `src/compress-tool.ts` 的 `handleCompress` 和 `src/messages.ts`。上游新增工具时，在 `lean/index.ts` 把低频工具加入 `LOW_FREQUENCY_TOOLS`，并检查新的模型可见文本是否需要补改写规则。
+`git fetch upstream`，看 `upstream/master` 和 [billion-context](https://github.com/ranxianglei/billion-context) 的 `fix` 提交，只挑和本仓库行为相关的，`git cherry-pick -x` 或手工移植，按上面的流程验证。冲突主要集中在 `src/compress-tool.ts` 的 `handleCompress` 和 `src/messages.ts`。只涉及 delegate/fleet/subagent 的上游提交直接跳过；混在一起的提交只移植非子代理部分。上游新增工具时，在 `lean/index.ts` 把低频工具加入 `LOW_FREQUENCY_TOOLS`，并检查新的模型可见文本是否需要补改写规则。
 
 ## 已知事项
 

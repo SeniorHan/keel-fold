@@ -196,19 +196,12 @@ test("pi-web: /acp-export lists ACP sessions as an acp-export custom message", a
   }
 });
 
-test("pi-web: /acp-search and /acp-subagents deliver results via transient notify", async () => {
+test("pi-web: /acp-search delivers results via transient notify", async () => {
   const env = await createPiWebSession();
   try {
     await env.session.prompt("/acp-search context");
     assert.equal(env.notifications.length, 1, "acp-search should notify a result");
     assert.match(env.notifications[0]!.msg, /No matching blocks\.|^\[b\d+\]/);
-
-    env.notifications.length = 0;
-    await env.session.prompt("/acp-subagents");
-    assert.equal(env.notifications.length, 1, "acp-subagents should notify a result");
-    // Outcome depends on whether this machine has pi-subagents installed; the
-    // contract under test is that exactly one toast arrives on the notify channel.
-    assert.match(env.notifications[0]!.msg, /^(Nothing to do: |ACP tools enabled for pi-subagents agents in |Failed to update )/);
   } finally {
     await env.cleanup();
   }

@@ -1,6 +1,6 @@
 {
 	"name": "billion-context-pi",
-	"version": "0.1.83-lean.6",
+	"version": "0.1.83-lean.7",
 	"private": true,
 	"description": "Long-term fork of billion-context-pi 0.1.83 for Pi: cheap dedicated summary model, lean tool surface, request-rewrite fixes.",
 	"main": "dist/index.js",

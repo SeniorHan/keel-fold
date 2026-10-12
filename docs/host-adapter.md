@@ -186,20 +186,16 @@ the live-message merge and reintroduce the branch-lag bug.
 
 ### Entry-source semantics
 
-| Host | Entry source | Live-message merge | Delegate CLI flags |
-|---|---|---|---|
-| Pi | `buildContextEntries()` — the effective context, always current including the in-flight message | not needed | pi flags (`--mode json`, `--session`) |
-| Declared fork (Prime…) | `getBranch()` — raw branch chronology, **lags one message** (the current user message persists only after transform) | adapter merges each context event's `event.messages` into state building (`runtime.stateFor` live merge) | disabled — spawned children get no pi-only flags |
+| Host | Entry source | Live-message merge |
+|---|---|---|
+| Pi | `buildContextEntries()` — the effective context, always current including the in-flight message | not needed |
+| Declared fork (Prime…) | `getBranch()` — raw branch chronology, **lags one message** (the current user message persists only after transform) | adapter merges each context event's `event.messages` into state building (`runtime.stateFor` live merge) |
 
 Consequences for hosts:
 
 - Under a declared fork, refs injected during turn N become visible to branch reads from
   turn N+1 onward; the live merge compensates for exactly this lag. This merge fires for
   *any* non-Pi-shaped session manager (`!isPiHost`), which is what makes declared forks work.
-- Delegation (`acp_delegate`) spawns real pi CLI processes. On non-Pi hosts the delegate
-  tool refuses to spawn with pi-only flags, regardless of the declaration. Hosts that run
-  sub-agents natively (e.g. Prime RLM) should set `"delegate": false` in acp.json so the
-  model is not offered a tool whose children cannot run.
 
 Fixtures: `tests/host-detection.test.ts` (Prime-shaped host = `{ getBranch }` only) and
 `tests/omp-refuse.test.ts` (refusal behavior + the opt-in test).
@@ -235,10 +231,6 @@ counterpart while the fork's own path does not exist (`userConfigPath()` in
 `src/config-dir.ts`). Creating `~/.prime/acp.json` — even `{}` — stops Prime from reading
 `~/.pi/acp.json`. Files the adapter writes itself (the log, update-check and read-only
 markers under the agent dir) move without a fallback.
-
-Known limit: the pi-subagents install probe (`src/setup-subagent-tools.ts`) still assumes
-Pi's project layout (`<cwd>/<name>/extensions`); Prime keeps project resources under
-`<cwd>/.prime/agent`.
 
 Responsibility boundary: the *directory layout* belongs to the host (only it knows it) and
 is read from its exports; the *fallback* belongs to the adapter (it must not crash at

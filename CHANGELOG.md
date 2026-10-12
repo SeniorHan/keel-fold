@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.1.83-lean.7 (2026-10-12)
+
+- Removed sub-agent delegation entirely: the `acp_delegate` / `acp_delegate_wait` / `acp_delegate_cancel` tools, the fleet inspector (`/acp-fleet`, `fleetShortcut`), `/acp-subagents` and pi-subagents detection, the `ACP_DELEGATE NOTIFICATIONS` prompt appendix, and delegate usage in `acp_status` (no more "Delegate usage: none this session." line). Config keys `delegate.*`, top-level `displayUsage`, `delegatePrompt` and the `PI_ACP_DELEGATE_*` env vars are now ignored. This is a context manager; use a dedicated sub-agent extension for sub-agents — their sessions are still managed by ACP.
+
 ## v0.1.83-lean.6 (2026-10-12)
 
 First release of this fork on GitHub. Based on upstream `billion-context-pi` v0.1.83; earlier local builds were called Lean2 (`0.1.83-pr241-lean2.2`–`lean2.5`).
