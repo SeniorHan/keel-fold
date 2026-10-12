@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { rm, readFile, mkdtemp, symlink } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
-import { join } from "node:path";
+import { join, parse } from "node:path";
 import { createAcpExtension } from "../src/index.js";
 import { tmpPath } from "./tmp-path.js";
 
@@ -152,7 +152,9 @@ test("decompress toFile rejects a dangling symlink whose target escapes the allo
   const { decompressTool, ctx } = await setupWithCompressedBlock();
   const jail = await mkdtemp(join(tmpdir(), "pai-acp-jail-dangling-"));
   const link = join(jail, "dangling-link");
-  const escapedTarget = join(homedir(), `acp-dangling-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  // Filesystem root of the temp dir: outside every allowed root regardless of
+  // HOME (npm test points HOME into tmpdir, which is itself an allowed root).
+  const escapedTarget = join(parse(tmpdir()).root, `acp-dangling-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   await symlink(escapedTarget, link);
   const target = join(link, "out.txt");
   const res = await decompressTool.execute("tc-sym2", { blockId: "b1", toFile: target }, undefined, undefined, ctx);
