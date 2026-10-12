@@ -130,7 +130,7 @@ async function setup(name: string, registry: any, opts: { acpJson?: object; sess
     const out = await compress.execute("tc1", { content: [{ startId: "m00001", endId: "m00001", summary }] }, undefined, undefined, ctx);
     return out.content?.[0]?.text ?? String(out);
   };
-  return { api, ctx, stateFile, compress, run };
+  return { api, handlers, ctx, stateFile, compress, run };
 }
 
 test("resolveModel: provider/id, unique bare id, ambiguous bare id, unknown", () => {
@@ -173,7 +173,8 @@ test("compress: refolding over an active block sends its summary, not the raw me
   const prompt = JSON.stringify(calls[1]!.context.messages);
   assert.ok(prompt.includes("[earlier summary b1"), prompt.slice(0, 400));
   assert.ok(prompt.includes("DEDICATED-SUMMARY"), "the block summary stands in for its messages");
-  assert.ok(!prompt.includes("lorem ipsum"), "raw messages already folded into b1 are not resent");
+  // "lorem ipsum dolor" is b1's raw text; FALLBACK (now sent as the caller note) says "lorem ipsum exploration".
+  assert.ok(!prompt.includes("lorem ipsum dolor"), "raw messages already folded into b1 are not resent");
   assert.ok(prompt.includes("filler text"), "new messages in the range are sent raw");
   assert.match(calls[1]!.context.systemPrompt, /CARRY FORWARD/);
 });
@@ -194,6 +195,48 @@ test("compress: an earlier block in the middle of the range is sent as a pinned 
   assert.ok(prompt.includes("[earlier summary b1"), prompt.replace(/(lorem ipsum dolor sit amet )+/g, "<LOREM>").replace(/(filler text for padding purposes )+/g, "<FILLER>"));
   assert.ok(!prompt.includes("[Compressed conversation section]"), "the kernel's summary message is not sent as raw text");
   assert.equal(prompt.split("DEDICATED-SUMMARY").length - 1, 1, "the block summary is sent once");
+});
+
+test("compress: a range naming only a tool result sends its paired call too (what the kernel folds) plus the caller note", async () => {
+  const calls: Call[] = [];
+  const registry = fakeRegistry([model("cheap", "summarizer")], textReply(DEDICATED), calls);
+  const call = { type: "message", id: "e2", parentId: null, timestamp: "", message: { role: "assistant", content: [{ type: "toolCall", name: "bash", id: "callX", arguments: { command: "python read_other_session.py --session PMIC" } }], timestamp: Date.now() } };
+  const result = { type: "message", id: "e3", parentId: null, timestamp: "", message: { role: "toolResult", toolCallId: "callX", toolName: "bash", content: [{ type: "text", text: `USER: consider only 1.8 V output\n${LONG}` }], timestamp: Date.now() } };
+  const { ctx, compress, stateFile } = await setup("pair", registry, {
+    acpJson: { compressionModelId: "cheap/summarizer" },
+    entries: [userMsg("e1", FILLER), call, result, ...Array.from({ length: 6 }, (_, i) => userMsg(`e${i + 4}`, FILLER))],
+  });
+  const note = "Read another session's history to audit its compressions.";
+  const text = (await compress.execute("tc1", { content: [{ startId: "m00003", endId: "m00003", summary: note }] }, undefined, undefined, ctx)).content?.[0]?.text;
+  assert.match(String(text), /summaries written by cheap\/summarizer \(1\/1\)/, String(text));
+  const state = JSON.parse(await fs.readFile(`${stateFile}.acp.json`, "utf8"));
+  const folded: string[] = state.blocks[0].directMessageIds;
+  assert.ok(folded.some((id) => id.startsWith("e2")), `kernel folds the call: ${folded}`);
+  const prompt = String(calls[0]!.context.messages[0]!.content);
+  assert.ok(prompt.includes("read_other_session.py"), "the summary model sees the call the kernel folds");
+  assert.ok(prompt.includes("USER: consider only 1.8 V output"), "and its result");
+  assert.ok(!prompt.includes("filler text"), "nothing outside the fold");
+  assert.ok(prompt.includes(`<caller_note>\n${note}\n</caller_note>`), "caller fallback is passed as a note");
+  assert.match(calls[0]!.context.systemPrompt, /SOURCE ATTRIBUTION/);
+  assert.match(calls[0]!.context.systemPrompt, /CALLER NOTE/);
+});
+
+test("compress: fold planning does not depend on the caller fallback's length", async () => {
+  const calls: Call[] = [];
+  const registry = fakeRegistry([model("cheap", "summarizer")], textReply(DEDICATED), calls);
+  const call = { type: "message", id: "e2", parentId: null, timestamp: "", message: { role: "assistant", content: [{ type: "toolCall", name: "bash", id: "callY", arguments: { command: "python count_hits.py" } }], timestamp: Date.now() } };
+  const result = { type: "message", id: "e3", parentId: null, timestamp: "", message: { role: "toolResult", toolCallId: "callY", toolName: "bash", content: [{ type: "text", text: `hits=31\n${LONG}` }], timestamp: Date.now() } };
+  const { ctx, compress, stateFile } = await setup("pair-short", registry, {
+    acpJson: { compressionModelId: "cheap/summarizer" },
+    entries: [userMsg("e1", FILLER), call, result, ...Array.from({ length: 6 }, (_, i) => userMsg(`e${i + 4}`, FILLER))],
+  });
+  // Shorter than the kernel's minSummaryLength (50): a dry run with this
+  // fallback would be rejected, while the real apply uses the model's summary.
+  const text = (await compress.execute("tc1", { content: [{ startId: "m00003", endId: "m00003", summary: "hit counts" }] }, undefined, undefined, ctx)).content?.[0]?.text;
+  assert.match(String(text), /summaries written by cheap\/summarizer \(1\/1\)/, String(text));
+  const state = JSON.parse(await fs.readFile(`${stateFile}.acp.json`, "utf8"));
+  assert.ok(state.blocks[0].directMessageIds.some((id: string) => id.startsWith("e2")), "kernel folds the call");
+  assert.ok(String(calls[0]!.context.messages[0]!.content).includes("count_hits.py"), "the summary model sees the call");
 });
 
 test("fitToModel: fits the summary model window, falls back to 120K chars when unknown", () => {
@@ -272,6 +315,23 @@ test("compress: session mode reuses the captured prefix, system prompt and activ
   const msgs = JSON.stringify(context.messages);
   assert.ok(msgs.includes("lorem ipsum") && msgs.includes("filler text"), "whole captured prefix is sent");
   assert.match(String(context.messages.at(-1).content), /Write the single detailed summary replacing m00001 through m00001/);
+  assert.ok((await readBlockSummaries(stateFile)).includes(DEDICATED));
+});
+
+test("compress: session mode without a captured prefix takes the extracted-content path (planned fold + caller note)", async () => {
+  const calls: Call[] = [];
+  const session = model("mainprov", "main-model");
+  const registry = fakeRegistry([session], textReply(DEDICATED), calls);
+  const { handlers, ctx, run, stateFile } = await setup("session-noprefix", registry, { acpJson: { compressionModelId: "session" }, sessionModel: session });
+  // session_shutdown drops the captured provider-bound prefix.
+  const shutdown = handlers.get("session_shutdown") ?? [];
+  assert.ok(shutdown.length > 0, "session_shutdown handler registered");
+  for (const h of shutdown) await h({ type: "session_shutdown" }, ctx);
+  const text = await run(FALLBACK);
+  assert.match(text, /summaries written by session model mainprov\/main-model \(1\/1, extracted content\)/, text);
+  const { context } = calls[0]!;
+  assert.match(context.systemPrompt, /SOURCE ATTRIBUTION/);
+  assert.ok(String(context.messages[0]!.content).includes("<caller_note>"), "caller fallback is passed as a note");
   assert.ok((await readBlockSummaries(stateFile)).includes(DEDICATED));
 });
 

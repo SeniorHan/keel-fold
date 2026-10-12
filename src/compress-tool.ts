@@ -574,7 +574,7 @@ async function handleCompress(args: CompressArgs, runtime: AcpRuntime, ctx: Exte
   // Failures keep the caller's fallback summary; re-sanitize model output.
   const dedicated = allDead
     ? { ranges: sanitizedRanges, note: null, warn: false }
-    : await writeDedicatedSummaries({ ranges: sanitizedRanges, runtime, ctx, messages, state, tools, summaryMaxChars, topLevelTopic, signal });
+    : await writeDedicatedSummaries({ ranges: sanitizedRanges, runtime, ctx, messages, state, config, tools, summaryMaxChars, topLevelTopic, signal });
   assertNotAborted(signal);
   const finalRanges = dedicated.ranges.map((r) => {
     const s = sanitizeSummary(r.summary);
@@ -736,6 +736,7 @@ interface DedicatedSummaryInput {
   tools: Tool[];
   summaryMaxChars?: number;
   topLevelTopic?: string;
+  config: ReturnType<AcpRuntime["configFor"]>;
   signal?: AbortSignal;
 }
 
@@ -785,18 +786,26 @@ async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<De
   }
   const sessionSystemPrompt = isSession ? getSystemPromptText(input.ctx) : "";
 
+  // Extracted-content path (registry model, and session mode when no prefix
+  // was captured — it always shared this path): summarize exactly what the kernel will fold. A dry run of
+  // applyCompression (it clones state) yields each range's block after pair
+  // expansion, protected-zone exclusion and integrity withdrawals — a bare
+  // ref slice would hand the model a tool result without the call that says
+  // what it is, while the kernel still folds that call.
+  const planned = prefix ? new Map<number, CompressionBlock>() : plannedFolds(input, ranges);
   let used = 0;
-  for (const range of ranges) {
+  for (const [index, range] of ranges.entries()) {
     if (input.signal?.aborted) break;
     const topic = range.topic ?? input.topLevelTopic;
-    const instruction = buildRangeInstruction(range, topic);
     try {
       let context: Context;
       if (prefix) {
-        context = { systemPrompt: sessionSystemPrompt, messages: [...prefix, { role: "user", content: instruction, timestamp: Date.now() }], tools: input.tools };
+        context = { systemPrompt: sessionSystemPrompt, messages: [...prefix, { role: "user", content: buildRangeInstruction(range, topic), timestamp: Date.now() }], tools: input.tools };
       } else {
-        const extracted = extractRangeContent(input.messages, input.state, range.startId, range.endId);
+        const block = planned.get(index);
+        const extracted = block ? foldedContent(input.messages, input.state, block) : extractRangeContent(input.messages, input.state, range.startId, range.endId);
         if (!extracted) continue;
+        const instruction = buildRangeInstruction(range, topic, range.summary);
         context = {
           systemPrompt: buildSummarizeSystemPrompt(input.runtime.prompts, topic),
           messages: [{ role: "user", content: `${instruction}\n\n<content>\n${fitToModel(extracted, model, maxTokens)}\n</content>`, timestamp: Date.now() }],
@@ -821,12 +830,70 @@ async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<De
   };
 }
 
-function buildRangeInstruction(range: RangeEntry, topic: string | undefined): string {
+function buildRangeInstruction(range: RangeEntry, topic: string | undefined, callerNote?: string): string {
   return (
     `Write the single detailed summary replacing ${range.startId} through ${range.endId}.` +
     (topic ? ` Topic: ${topic}.` : "") +
-    " Follow the compression rules in the system prompt. Output only the summary text."
+    " Follow the compression rules in the system prompt. Output only the summary text." +
+    (callerNote?.trim() ? `\n\n<caller_note>\n${callerNote.trim()}\n</caller_note>` : "")
   );
+}
+
+/** Dry-run the kernel fold for every range at once (same messages, state and
+ *  config as the real apply, so the same protected zone and pairing) and map
+ *  each range to the NEW block it would create. Refolds and failed ranges map
+ *  to nothing; their callers fall back to the ref-slice extraction. */
+function plannedFolds(input: DedicatedSummaryInput, ranges: RangeEntry[]): Map<number, CompressionBlock> {
+  const planned = new Map<number, CompressionBlock>();
+  try {
+    const existing = new Set(input.state.blocks.map((b) => b.blockId));
+    const dry = input.runtime.core.applyCompression({
+      // Placeholder summary of exactly the minimum length: the fold must not
+      // depend on the caller's fallback length (the real apply uses the
+      // dedicated model's summary, which a short fallback would not predict).
+      ranges: ranges.map((r) => ({ startRef: r.startId, endRef: r.endId, summary: "p".repeat(Math.max(1, input.config.compress.minSummaryLength)), topic: r.topic ?? input.topLevelTopic })),
+      messages: input.messages,
+      state: input.state,
+      config: input.config,
+    });
+    const created = dry.state.blocks.filter((b) => !existing.has(b.blockId));
+    ranges.forEach((r, i) => {
+      const block = created.find((b) => b.startRef === r.startId && b.endRef === r.endId);
+      if (block) planned.set(i, block);
+    });
+  } catch {
+    // Planning is advisory: the real apply reports its own errors.
+  }
+  return planned;
+}
+
+/** Transcript of exactly what `block` folds, in message order: its direct
+ *  messages raw, each consumed block once as a pinned earlier summary. */
+function foldedContent(messages: CoreMessage[], state: CompressionState, block: CompressionBlock): ContentPart[] | null {
+  const direct = new Set(block.directMessageIds);
+  const owner = new Map<string, CompressionBlock>();
+  for (const id of block.directBlockIds) {
+    const consumed = state.blocks.find((b) => b.blockId === id);
+    if (!consumed) continue;
+    for (const mid of consumed.effectiveMessageIds) owner.set(mid, consumed);
+    owner.set(`acp_summary_${consumed.blockId}`, consumed);
+  }
+  const emitted = new Set<string>();
+  const parts: ContentPart[] = [];
+  const pin = (b: CompressionBlock) => {
+    if (emitted.has(b.blockId)) return;
+    emitted.add(b.blockId);
+    parts.push({ text: `[earlier summary ${b.blockId}${b.topic ? ` \u2014 ${b.topic}` : ""}]\n${b.summary}`, pinned: true });
+  };
+  for (const message of messages) {
+    if (direct.has(message.id)) parts.push({ text: formatCoreMessage(message) });
+    else {
+      const consumed = owner.get(message.id);
+      if (consumed) pin(consumed);
+    }
+  }
+  for (const b of new Set(owner.values())) pin(b);
+  return parts.length ? parts : null;
 }
 
 function formatCoreMessage(message: CoreMessage): string {
