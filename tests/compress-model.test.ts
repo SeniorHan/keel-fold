@@ -6,7 +6,7 @@ import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createAcpExtension } from "../src/index.js";
-import { resolveModel } from "../src/compress-model.js";
+import { fitToModel, resolveModel } from "../src/compress-model.js";
 
 function captureApi() {
   const handlers = new Map<string, ((event: any, ctx: any) => any)[]>();
@@ -160,6 +160,30 @@ test("compress: registry model writes the summary from the extracted range", asy
   const summaries = await readBlockSummaries(stateFile);
   assert.ok(summaries.includes(DEDICATED), JSON.stringify(summaries));
   assert.ok(!summaries.includes(FALLBACK));
+});
+
+test("compress: refolding over an active block sends its summary, not the raw messages", async () => {
+  const calls: Call[] = [];
+  const registry = fakeRegistry([model("cheap", "summarizer")], textReply(DEDICATED), calls);
+  const { ctx, compress, run } = await setup("refold", registry, { acpJson: { compressionModelId: "cheap/summarizer" } });
+  await run(FALLBACK);
+  const text = (await compress.execute("tc2", { content: [{ startId: "b1", endId: "m00002", summary: FALLBACK }] }, undefined, undefined, ctx)).content?.[0]?.text;
+  assert.match(String(text), /summaries written by cheap\/summarizer \(1\/1\)/);
+  assert.equal(calls.length, 2);
+  const prompt = JSON.stringify(calls[1]!.context.messages);
+  assert.ok(prompt.includes("[earlier summary b1"), prompt.slice(0, 400));
+  assert.ok(prompt.includes("DEDICATED-SUMMARY"), "the block summary stands in for its messages");
+  assert.ok(!prompt.includes("lorem ipsum"), "raw messages already folded into b1 are not resent");
+  assert.ok(prompt.includes("filler text"), "new messages in the range are sent raw");
+  assert.match(calls[1]!.context.systemPrompt, /CARRY FORWARD/);
+});
+
+test("fitToModel: fits the summary model window, falls back to 120K chars when unknown", () => {
+  const text = "x".repeat(400_000); // ~100K tokens
+  assert.equal(fitToModel(text, { contextWindow: 400_000 }, 8000), text);
+  const small = fitToModel(text, { contextWindow: 50_000 }, 8000);
+  assert.ok(small.length < 150_000 && small.includes("[... truncated ...]"), String(small.length));
+  assert.equal(fitToModel(text, {}, 8000).length, 120_000);
 });
 
 test("compress: dedicated failure keeps the caller fallback summary", async () => {

@@ -20,7 +20,7 @@ import { countUnicodeEscapes, findUnverifiableUserQuote, sanitizeSummary } from 
 import { assertNotAborted } from "./abort.js";
 import { getSystemPromptText } from "./compat.js";
 import { UNSUPPORTED_HOST_MESSAGE } from "./omp.js";
-import { buildSummarizeSystemPrompt, resolveModel, summarizeWithModel, truncateContent, SESSION_MODEL_REF } from "./compress-model.js";
+import { buildSummarizeSystemPrompt, fitToModel, resolveModel, summarizeWithModel, SESSION_MODEL_REF } from "./compress-model.js";
 
 function formatK(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
@@ -797,7 +797,7 @@ async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<De
       if (!extracted) continue;
       context = {
         systemPrompt: buildSummarizeSystemPrompt(input.runtime.prompts, topic),
-        messages: [{ role: "user", content: `${instruction}\n\n<content>\n${truncateContent(extracted, 120000)}\n</content>`, timestamp: Date.now() }],
+        messages: [{ role: "user", content: `${instruction}\n\n<content>\n${fitToModel(extracted, model, maxTokens)}\n</content>`, timestamp: Date.now() }],
       };
     }
     try {
@@ -835,12 +835,33 @@ function formatCoreMessage(message: CoreMessage): string {
   return `[${message.role}] ${text}`;
 }
 
-/** Plain transcript of [startId, endId]; null when the range cannot resolve. */
+/** Transcript of [startId, endId] as the main model sees it; null when the
+ *  range cannot resolve. Messages already folded into an active block are
+ *  rendered as that block's summary once — `messages` is the raw log, and
+ *  re-folding a range over existing blocks (m00195..m01254 over b19+b20)
+ *  would otherwise ship 1M+ raw chars that only survive head/tail truncation. */
 function extractRangeContent(messages: CoreMessage[], state: CompressionState, startId: string, endId: string): string | null {
   try {
     const range = resolveBoundaries({ startRef: startId, endRef: endId, messages, state });
     const slice = messages.slice(range.startIndex, range.endIndex + 1);
-    return slice.length ? slice.map(formatCoreMessage).join("\n\n") : null;
+    const owner = new Map<string, CompressionBlock>();
+    for (const block of state.blocks) {
+      if (!block.active) continue;
+      for (const id of block.effectiveMessageIds) owner.set(id, block);
+    }
+    const emitted = new Set<string>();
+    const parts: string[] = [];
+    for (const message of slice) {
+      const block = owner.get(message.id);
+      if (!block) {
+        parts.push(formatCoreMessage(message));
+        continue;
+      }
+      if (emitted.has(block.blockId)) continue;
+      emitted.add(block.blockId);
+      parts.push(`[earlier summary ${block.blockId}${block.topic ? ` \u2014 ${block.topic}` : ""}]\n${block.summary}`);
+    }
+    return parts.length ? parts.join("\n\n") : null;
   } catch {
     return null;
   }

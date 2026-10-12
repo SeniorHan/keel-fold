@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { defaultCountTokens } from "acp-kernel";
 import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 
 /** Sentinel compressionModelId value meaning "use the session's own model".
@@ -83,6 +84,10 @@ export function buildSummarizeSystemPrompt(prompts: { compressPhilosophy: string
     `${topicLine}\n` +
     `${prompts.compressPhilosophy}\n\n` +
     `${prompts.howToCompressRules}\n\n` +
+    "CARRY FORWARD: the content may include `[earlier summary bN]` sections — summaries already written for parts of this range. " +
+    "They are the only record of those messages. Re-carry every decision with its rationale, exact value, path, constraint, " +
+    "open objective, and message ref from them unless a later message in the range explicitly supersedes it " +
+    "(then keep one line: what changed and why). Never drop a fact just because it is old.\n\n" +
     "Output ONLY the summary text (no preamble, no code fences)."
   );
 }
@@ -95,4 +100,22 @@ export function truncateContent(content: string, maxChars: number): string {
   const budget = maxChars - marker.length;
   const head = Math.ceil(budget / 2);
   return content.slice(0, head) + marker + content.slice(content.length - (budget - head));
+}
+
+/** Tokens kept free for the system prompt, instruction and wrapper. */
+const PROMPT_RESERVE_TOKENS = 8000;
+/** defaultCountTokens is a heuristic (CJK char = 1, else 4 chars/token); leave slack for code-heavy text. */
+const TOKEN_ESTIMATE_SLACK = 0.85;
+const UNKNOWN_WINDOW_MAX_CHARS = 120000;
+
+/** Fit extracted range content into the summary model's context window
+ *  instead of a fixed 120K-char cap; truncate only what cannot fit. */
+export function fitToModel(content: string, model: { contextWindow?: number }, maxTokens: number): string {
+  const window = model.contextWindow;
+  if (typeof window !== "number" || !Number.isFinite(window) || window <= 0) return truncateContent(content, UNKNOWN_WINDOW_MAX_CHARS);
+  const budget = Math.floor((window - maxTokens - PROMPT_RESERVE_TOKENS) * TOKEN_ESTIMATE_SLACK);
+  if (budget <= 0) return truncateContent(content, UNKNOWN_WINDOW_MAX_CHARS);
+  const tokens = defaultCountTokens(content);
+  if (tokens <= budget) return content;
+  return truncateContent(content, Math.floor((content.length * budget) / tokens));
 }

@@ -13,6 +13,7 @@ import { renderNudgeText, resolvePrompts, defaultPrompts, viableRanges } from "a
 import { type AdapterConfig, resolveDelegate, resolveHostSession, DEFAULT_DELEGATE_POLICY } from "./config.js";
 import { createRuntime, isPiHost, retryBreakerKey, type AcpRuntime } from "./runtime.js";
 import { makeCompressTool, isCompressSuccessText, isCompressNoopText } from "./compress-tool.js";
+import { SESSION_MODEL_REF } from "./compress-model.js";
 import { makeDecompressTool } from "./decompress-tool.js";
 import { makeSearchTool } from "./search-tool.js";
 import { makeStatusTool } from "./status-tool.js";
@@ -804,8 +805,9 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
       const reInjectReady = shownAt === undefined || tokenCount - shownAt >= reInjectFloor;
       const alreadyShown = retryCapped || (!emergency && runtime.nudgeShownFor(sid, turnKey) && !reInjectReady);
       if (!alreadyShown) {
-        rebuilt.push(nudgeMessage(turn.nudge, turn.state.blocks.filter((b) => b.active), runtime.prompts, activeNudgeSections(runtime, ctx)));
-        const rendered = renderNudgeText(turn.nudge, runtime.prompts, activeNudgeSections(runtime, ctx));
+        const prompts = nudgePrompts(runtime);
+        rebuilt.push(nudgeMessage(turn.nudge, turn.state.blocks.filter((b) => b.active), prompts, activeNudgeSections(runtime, ctx)));
+        const rendered = renderNudgeText(turn.nudge, prompts, activeNudgeSections(runtime, ctx));
         const top = [...turn.nudge.compressibleRanges].sort((a, b) => b.tokens - a.tokens)[0];
         const example = top ? `\n\nExample: compress({ content: [{ startId: "${top.startRef}", endId: "${top.endRef}", summary: "..." }] })` : "";
         if (emergency) {
@@ -939,6 +941,21 @@ function wireSystemPrompt(pi: ExtensionAPI, runtime: AcpRuntime): void {
     const prompt = delegate && delegateText !== null ? `${acp}\n${delegateText}` : acp;
     return { systemPrompt: formatSystemPromptForEvent(event.systemPrompt, prompt) };
   });
+}
+
+// With a registry summary model the caller only picks ranges: the full
+// summary-writing rules go to that model (buildSummarizeSystemPrompt), not into
+// every nudge. `session` mode keeps them — its summary call reuses this prefix.
+const DEDICATED_CALLER_RULES = `HOW TO COMPRESS (dedicated summary model active)
+A separate model reads the original messages of each range and writes the real summary; your job is choosing ranges.
+- Pick consumed content: finished tool outputs, dead ends, resolved threads, completed phases. Leave active work and anything the next step needs.
+- Prefer ranges of uncompressed messages. Fold existing blocks into a new range only to merge closely related ones; it rewrites their summaries again.
+- summary: a 1-2 sentence fallback naming the range's purpose and outcome, used only if the summary model fails. Do not write a detailed summary.
+- Give each range a short topic. Do not decompress a block you just created.`;
+
+function nudgePrompts(runtime: AcpRuntime): Prompts {
+  const ref = runtime.getCompressionModelRef();
+  return ref && ref !== SESSION_MODEL_REF ? { ...runtime.prompts, howToCompressRules: DEDICATED_CALLER_RULES } : runtime.prompts;
 }
 
 function activeNudgeSections(runtime: AcpRuntime, ctx?: ExtensionContext): NudgeSectionsConfig {
