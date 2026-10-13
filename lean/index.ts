@@ -108,11 +108,19 @@ const PROMPT_SECTION = "acp_context";
 // every later extension's appendSystemPrompt/sections (load-order dependent;
 // upstream #630). Add a named section instead. Fall back to returning the
 // composed prompt on older hosts or when another extension already forced it.
+// Older hosts (e.g. Pi 0.83) accept systemPromptOptions but never render
+// sections; their event.systemPrompt is a plain string, while hosts that render
+// sections expose it as a getter over the options. Keep the section only if the
+// rendered prompt picks it up.
 function injectSystemPrompt(event: PromptEvent): { systemPrompt: string } | undefined {
   const options = event.systemPromptOptions;
   if (options && typeof options === "object" && options.forceSystemPrompt === undefined) {
-    options.sections = { ...(options.sections ?? {}), [PROMPT_SECTION]: LEAN_SYSTEM_PROMPT };
-    return undefined;
+    const before = options.sections;
+    options.sections = { ...(before ?? {}), [PROMPT_SECTION]: LEAN_SYSTEM_PROMPT };
+    const rendered = event.systemPrompt;
+    if (typeof rendered === "string" && rendered.includes(LEAN_SYSTEM_PROMPT)) return undefined;
+    if (before === undefined) delete options.sections;
+    else options.sections = before;
   }
   const base = event.systemPrompt;
   const text = Array.isArray(base) ? base.join("\n") : typeof base === "string" ? base : "";

@@ -75,6 +75,7 @@
 
 1. 改 `src/` 或 `lean/`。
 2. 在仓库根目录运行 `npm run check`（typecheck + 全量测试 + build + 外壳 typecheck + 外壳测试）。单独用 `npx tsx --test` 跑某个文件时，加上 `--import ./tests/support/isolate-env.ts`，否则会写进真实的 `~/.pi/acp.log`。
+   改了工具描述或注入的提示词后，运行 `npm run measure` 重测占用，并同步 README 对比表里的数字。它借用同级目录 `my-lean-pi-setup` 的 `measure-extension-worker.mjs`，在隔离的空白 Pi 会话里测量；设置 `PI_CODING_AGENT_MODULE` 可指定要测的 Pi 版本。
 3. 把 `dist/` 的变化和源码一起提交。
 4. 端到端验证：在临时目录里用 `pi --no-session --mode json -p ...` 读几个文件，再让模型 compress，确认结果里出现 `summaries written by ...`，`~/.pi/acp.log` 里没有 `compression-model-failed`。
 5. 发版：`npm version 0.1.83-lean.<n> --no-git-tag-version --ignore-scripts`，`npm run build`，提交后打 tag `v0.1.83-lean.<n>` 并推送。

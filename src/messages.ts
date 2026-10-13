@@ -15,7 +15,9 @@ type AnyMessage = {
   summary?: string;
 };
 
-const REF_TAG_SOURCE = "(?:\x3cacp\\s[^>]*\x3em\\d{5}\x3c/acp\x3e|\\[m\\d{1,5}\\])";
+// Refs are zero-padded to 5 digits below 100,000 and widen naturally above
+// (acp-kernel >= 0.0.101, up to m9999999).
+const REF_TAG_SOURCE = "(?:\x3cacp\\s[^>]*\x3em\\d{5,7}\x3c/acp\x3e|\\[m\\d{1,7}\\])";
 const REF_TAG = new RegExp(`^${REF_TAG_SOURCE}\\s?\\n?`);
 const TRAILING_REF_TAG = new RegExp(`\\n*${REF_TAG_SOURCE}\\s*$`);
 
@@ -309,7 +311,7 @@ export function messageRef(message: unknown): string | undefined {
       : [];
   for (const text of texts) {
     const tag = text.match(REF_TAG)?.[0] ?? text.match(TRAILING_REF_TAG)?.[0];
-    const ref = tag?.match(/m\d{1,5}/)?.[0];
+    const ref = tag?.match(/m\d{1,7}/)?.[0];
     if (ref) return ref;
   }
   return undefined;

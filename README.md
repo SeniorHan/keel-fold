@@ -4,20 +4,20 @@
 
 Context management for the [Pi coding agent](https://github.com/earendil-works/pi-coding-agent) that lets long sessions keep going: as context fills up, the model folds finished work into summary blocks, and the originals stay recoverable on demand.
 
-This is a long-term maintained fork of [`billion-context-pi`](https://github.com/ranxianglei/billion-context-pi) **v0.1.83**. It keeps upstream's compression engine (ACP) and adds two things: **a cheap model can write the summaries**, and **fewer tokens are spent on context management itself**. Upstream has moved on to [`billion-context`](https://github.com/ranxianglei/billion-context); this fork stays on 0.1.83 and picks upstream fixes by hand. It is not affiliated with upstream.
+This is a fork of [`billion-context-pi`](https://github.com/ranxianglei/billion-context-pi) **v0.1.83** that focuses on runtime stability and on spending fewer tokens. It keeps upstream's compression engine (ACP); the main additions are that **a cheap model can write the summaries** and that **context management itself costs fewer tokens**. Upstream has moved on to [`billion-context`](https://github.com/ranxianglei/billion-context); this fork stays on 0.1.83 and picks upstream fixes by hand. It is not affiliated with upstream.
 
 ## Main differences from upstream 0.1.83
 
 | | Upstream 0.1.83 | This fork |
 |---|---|---|
 | Who writes summaries | The main model, usually the expensive one | A **dedicated summary model** of your choice, e.g. a cheap one; the main model only picks the ranges |
-| Compression rules | Sent to the main model in every compression nudge | Sent only to the summary model |
+| Compression rules | Sent to the main model in every compression nudge (about 1,460 tokens; 720 with `promptPack: "lean"`) | Sent only to the summary model, so they no longer take up the main model's context; its nudge carries only a short range-picking note (about 220 tokens)\* |
 | Summary quality | General compression rules; only length is checked | Also: user requests are kept apart from what tools showed; open items are split into user objectives, suggestions and unverified risks. A failed or malformed summary is not folded; the range waits for a later attempt |
-| Tools and resident prompt | 5 context tools, about 5,800 tokens | `compress` + `acp_context`, about 700 tokens\* |
+| Tools and resident prompt | 5 context tools + 3 delegation tools, about 8,700 tokens (4,900 with `promptPack: "lean"`) | `compress` + `acp_context`, about 800 tokens\* |
 | System prompt | Returns a whole system prompt, which on Pi 1.x drops prompt additions from extensions loaded after it | Added as its own section; other extensions keep theirs |
 | Sub-agent delegation, auto-update | Built in | Removed. Use a dedicated sub-agent extension; ACP still manages their sessions |
 
-\* Measured on 0.1.69 with a `ceil(chars / 4)` estimate in a blank Pi process (tools and injected prompt only); not re-measured on 0.1.83.
+\* Estimated as `ceil(chars / 4)`, not billed tokens. Tools and resident prompt: `npm run measure` in a blank Pi 1.1 session (upstream 0.1.83 vs this fork). Compression rules: length of the rule text in the nudge.
 
 <details>
 <summary>Smaller upstream issues fixed in this fork</summary>
@@ -98,6 +98,7 @@ Compression timing can be tuned per provider and model:
 ```bash
 npm ci
 npm run check   # typecheck, tests, build and facade checks
+npm run measure # tool + prompt footprint vs upstream (needs ../my-lean-pi-setup)
 ```
 
 `dist/` is committed because Pi installs git packages without building them; commit it together with source changes. Maintenance notes: [MAINTENANCE.md](MAINTENANCE.md).

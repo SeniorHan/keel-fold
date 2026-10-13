@@ -369,7 +369,11 @@ test("pi 1.x: injects a named prompt section instead of forcing the whole prompt
   createLeanAcpExtension(fakeUpstream())(pi);
   const [hook] = pi.handlers.get("before_agent_start");
   const options = { sections: { other: "kept" } };
-  const event = { systemPrompt: "base prompt", systemPromptOptions: options };
+  // Pi >= 0.86 exposes systemPrompt as a getter that renders the options' sections.
+  const event = {
+    get systemPrompt() { return ["base prompt", ...Object.values(options.sections ?? {})].join("\n\n"); },
+    systemPromptOptions: options,
+  };
   assert.equal(await hook(event), undefined, "must not return systemPrompt (would set forceSystemPrompt)");
   assert.equal(options.sections.other, "kept");
   assert.match(options.sections.acp_context, /Compress consumed history with compress/);
@@ -380,6 +384,18 @@ test("pi 1.x: injects a named prompt section instead of forcing the whole prompt
   const result = await hook(forced);
   assert.match(result.systemPrompt, /^forced by another extension\n\nACP context management/);
   assert.deepEqual(forced.systemPromptOptions.sections, {});
+});
+
+test("pi 0.83-0.85: options are passed but sections are never rendered, so compose the prompt", async () => {
+  const pi = createPi();
+  createLeanAcpExtension(fakeUpstream())(pi);
+  const [hook] = pi.handlers.get("before_agent_start");
+  for (const options of [{}, { sections: { other: "kept" } }]) {
+    const before = structuredClone(options);
+    const result = await hook({ systemPrompt: "base prompt", systemPromptOptions: options });
+    assert.match(result.systemPrompt, /^base prompt\n\nACP context management/);
+    assert.deepEqual(options, before, "no dead section left behind");
+  }
 });
 
 test("runs the upstream prompt hook for its side effects; a refused host gets no prompt", async () => {

@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { entriesToCoreMessages, coreOutToAgentMessages, isCustomMessageEntry, matchesStoredText, messageIdentity, ACP_STATUS_CUSTOM_TYPE, ACP_EXPORT_CUSTOM_TYPE, ACP_RULE_CUSTOM_TYPE } from "../src/messages.js";
+import { entriesToCoreMessages, coreOutToAgentMessages, isCustomMessageEntry, matchesStoredText, messageIdentity, messageRef, ACP_STATUS_CUSTOM_TYPE, ACP_EXPORT_CUSTOM_TYPE, ACP_RULE_CUSTOM_TYPE } from "../src/messages.js";
 import { isTurnBoundary } from "../src/turn-boundary.js";
-import type { CoreMessage } from "acp-kernel";
+import { indexToRef, type CoreMessage } from "acp-kernel";
 import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 
 const LT = "\x3c";
@@ -461,4 +461,17 @@ test("message identity ignores tag-only text blocks but preserves original empty
   const emptyText = { role: "user", content: [image, { type: "text", text: "" }], timestamp: 3 };
   assert.equal(messageIdentity(taggedImage), messageIdentity(imageOnly));
   assert.notEqual(messageIdentity(emptyText), messageIdentity(imageOnly));
+});
+
+test("Lean: widened refs (kernel >= 0.0.101: m100000 … m9999999) are recognized like 5-digit ones", () => {
+  for (const index of [99_999, 100_000, 9_999_999]) {
+    const ref = indexToRef(index);
+    const leading = { role: "user", content: [{ type: "text", text: `${acpRef(ref)}\nhello` }], timestamp: 1 };
+    const trailing = { role: "user", content: [{ type: "text", text: `hello\n\n${acpRef(ref)}` }], timestamp: 1 };
+    const plain = { role: "user", content: [{ type: "text", text: "hello" }], timestamp: 1 };
+    assert.equal(messageRef(leading), ref, `leading ${ref}`);
+    assert.equal(messageRef(trailing), ref, `trailing ${ref}`);
+    assert.equal(messageIdentity(leading), messageIdentity(plain), `tag stripped from identity (${ref})`);
+    assert.equal(messageIdentity(trailing), messageIdentity(plain), `trailing tag stripped from identity (${ref})`);
+  }
 });

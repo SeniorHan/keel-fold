@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.1.83-lean.8 (2026-10-13)
 
 - Dedicated summary model (`compressionModelId: provider/id`, and `session` without a captured prefix) now summarizes exactly what the kernel folds: a dry run of `applyCompression` on a cloned state gives each range's real block (paired tool calls, protected-zone exclusions), so a range naming only a tool result no longer hides the call that says what it was.
 - The caller's fallback summary is passed to the summary model as a `<caller_note>` — purpose and axis only, never a source of facts.
@@ -16,6 +16,9 @@
 - Stability: the compress toolResult records what was folded (`details.acpFolded`, never sent to the model); state rebuild from the session log prefers it, so a lost sidecar no longer rebuilds blocks from the short fallbacks or folds ranges that failed. The Lean facade passes `details` through unrewritten.
 - Stability: a block whose covered messages are partly on another branch of the session tree (after `/tree` into its range) stays inactive for that turn, so its summary cannot show decisions from messages that branch has not reached; returning to the full branch reactivates it. Pi host only.
 - Stability: decompressing a message to an auto file uses a filesystem-safe name (raw entry refs can contain `|`, which Windows rejects).
+- Kernel `acp-kernel` 0.0.98 → 0.0.101 (nudge re-anchoring when the count drops, linear-time compress parsing, case-insensitive protected tool names, one prune/recommend index per turn). Its refs widen past five digits after `m99999` (up to `m9999999`); message-ref parsing now accepts them, so long sessions keep ref identity and outgoing rewrites. A session that reached six-digit refs should not go back to an older build.
+- Lean facade on Pi 0.83–0.85: those hosts pass `systemPromptOptions` but never render `sections`, so the ACP prompt was silently missing. The facade now keeps the named section only when the rendered prompt picks it up, and otherwise returns the composed prompt as before.
+- `npm run measure`: tool + resident-prompt footprint vs upstream 0.1.83 in a blank Pi session (needs the sibling `my-lean-pi-setup` worker). README numbers re-measured on Pi 1.1: about 800 tokens vs 8,700 upstream (4,900 with `promptPack: "lean"`).
 
 ## v0.1.83-lean.7 (2026-10-12)
 

@@ -4,20 +4,20 @@
 
 给 [Pi coding agent](https://github.com/earendil-works/pi-coding-agent) 用的上下文管理扩展，让长会话能一直做下去：上下文快满时，模型把做完的部分折叠成摘要块，原文随时可以取回。
 
-本仓库是 [`billion-context-pi`](https://github.com/ranxianglei/billion-context-pi) **v0.1.83** 的长期维护分支。它保留上游的压缩引擎（ACP），重点做两件事：**摘要可以交给便宜模型写**，**上下文管理本身少花 token**。上游已转向 [`billion-context`](https://github.com/ranxianglei/billion-context)；本分支停在 0.1.83，按需手工挑选上游修复，与上游没有隶属关系。
+本仓库是 [`billion-context-pi`](https://github.com/ranxianglei/billion-context-pi) **v0.1.83** 的分支，专注于运行稳定性和降低 token 消耗。它保留上游的压缩引擎（ACP），主要改动是：**摘要可以交给便宜模型写**，**上下文管理本身少花 token**。上游已转向 [`billion-context`](https://github.com/ranxianglei/billion-context)；本分支停在 0.1.83，按需手工挑选上游修复，与上游没有隶属关系。
 
 ## 与上游 0.1.83 的主要区别
 
 | | 上游 0.1.83 | 本分支 |
 |---|---|---|
 | 谁写摘要 | 主模型，通常是贵的那个 | 可指定**专用摘要模型**，比如便宜模型；主模型只负责选范围 |
-| 压缩规则 | 每次压缩提示都发给主模型 | 只发给摘要模型 |
+| 压缩规则 | 每次压缩提示都发给主模型（约 1,460 token；`promptPack: "lean"` 时约 720） | 只发给摘要模型，不再占用主模型的上下文；主模型的压缩提示里只有一段约 220 token 的选范围说明\* |
 | 摘要质量 | 通用压缩规则，只检查长度 | 另外：用户的要求和工具显示的内容分开记；待办分成用户目标、建议、未核实风险三类。调用失败或不合格的摘要不会折叠，这段留待下次再压缩 |
-| 工具和常驻提示词 | 5 个上下文工具，约 5,800 token | `compress` + `acp_context`，约 700 token\* |
+| 工具和常驻提示词 | 5 个上下文工具 + 3 个子代理工具，约 8,700 token（`promptPack: "lean"` 时约 4,900） | `compress` + `acp_context`，约 800 token\* |
 | 系统提示词 | 返回整份系统提示词，在 Pi 1.x 上会丢掉之后加载的扩展追加的提示词 | 作为独立段落注入，其他扩展的内容保留 |
 | 子代理委派、自动更新 | 内置 | 已移除。子代理请用专门的扩展，它们的会话仍由 ACP 管理 |
 
-\* 在 0.1.69 上测得：空白 Pi 进程，只算工具和注入的提示词，按 `ceil(字符数 / 4)` 估算；0.1.83 上没有重测。
+\* 按 `ceil(字符数 / 4)` 估算，不是计费 token。工具和常驻提示词：在空白 Pi 1.1 会话中运行 `npm run measure`（上游 0.1.83 对比本分支）；压缩规则：压缩提示中规则文本的长度。
 
 <details>
 <summary>本分支修好的上游小问题</summary>
@@ -98,6 +98,7 @@ pi install git:github.com/kunkun9527/billion-context-pi-lean
 ```bash
 npm ci
 npm run check   # 类型检查、测试、构建和外壳检查
+npm run measure # 对比上游的工具和提示词占用（需要同级目录 ../my-lean-pi-setup）
 ```
 
 Pi 安装 git 包时不会构建，所以 `dist/` 要提交，并和源码改动放在同一个提交里。维护说明见 [MAINTENANCE.md](MAINTENANCE.md)。

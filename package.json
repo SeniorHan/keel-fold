@@ -1,6 +1,6 @@
 {
 	"name": "billion-context-pi",
-	"version": "0.1.83-lean.7",
+	"version": "0.1.83-lean.8",
 	"private": true,
 	"description": "Long-term fork of billion-context-pi 0.1.83 for Pi: cheap dedicated summary model, lean tool surface, request-rewrite fixes.",
 	"main": "dist/index.js",
@@ -49,7 +49,8 @@
 		"test:lean": "node --import tsx --import ./tests/support/isolate-env.ts --test lean/tests/*.test.mjs",
 		"check": "npm run typecheck && npm test && npm run build && npm run typecheck:lean && npm run test:lean",
 		"build": "tsup && tsc --emitDeclarationOnly",
-		"e2e": "node scripts/e2e/run-e2e.mjs"
+		"e2e": "node scripts/e2e/run-e2e.mjs",
+		"measure": "node scripts/measure.mjs"
 	},
 	"keywords": [
 		"pi",
@@ -72,7 +73,7 @@
 		"@earendil-works/pi-coding-agent": "0.83.0",
 		"@earendil-works/pi-tui": "0.83.0",
 		"@types/node": "^26.1.2",
-		"acp-kernel": "0.0.98",
+		"acp-kernel": "0.0.101",
 		"tsup": "^8.5.1",
 		"tsx": "^4.23.1",
 		"typescript": "^7.0.2"
