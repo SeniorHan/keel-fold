@@ -11,11 +11,7 @@ This is a long-term maintained fork of [`billion-context-pi`](https://github.com
 | | Upstream 0.1.83 | This fork |
 |---|---|---|
 | Who writes summaries | The main model, usually the expensive one | A **dedicated summary model** of your choice, e.g. a cheap one; the main model only picks the ranges |
-| Compression rules | Sent to the main model in every compression nudge | Sent only to the summary model |
-| What the summary model sees | — | Exactly the messages that get folded; when old blocks are folded again, their summaries are passed in whole and carried forward |
-| Summary rules | General compression rules | Also: user requests are kept apart from what tools showed; open items are split into user objectives, suggestions and unverified risks; each summary ends with the state at that point |
-| Bad summaries | Only length limits are checked | A failed or cut-off summary call leaves the range uncompressed for a later attempt; a summary with leaked planning text or copied transcript is retried once first |
-| Summaries visible to the main model | No, so it often decompresses right after compressing | Yes |
+| Summary quality | General compression rules; only length is checked | Also: user requests are kept apart from what tools showed; open items are split into user objectives, suggestions and unverified risks. A failed or malformed summary is not folded; the range waits for a later attempt |
 | Tools and resident prompt | 5 context tools, about 5,800 tokens | `compress` + `acp_context`, about 700 tokens\* |
 | System prompt | Returns a whole system prompt, which on Pi 1.x drops prompt additions from extensions loaded after it | Added as its own section; other extensions keep theirs |
 | Sub-agent delegation, auto-update | Built in | Removed. Use a dedicated sub-agent extension; ACP still manages their sessions |
