@@ -30,10 +30,14 @@ export declare function resolveModel(registry: ModelRegistryLike, ref: string): 
 export declare function summarizeWithModel(ctx: ExtensionContext, model: Model<Api>, context: Context, maxTokens: number, signal?: AbortSignal): Promise<string>;
 /** The leaked text (trimmed) when the opening of `summary` is planning, else null. */
 export declare function detectPlanningLeak(summary: string): string | null;
+/** The echoed text when `summary` contains copied transcript entries, else null. */
+export declare function detectTranscriptEcho(summary: string): string | null;
+export type SummaryDefect = "planning" | "transcript-echo";
 /** summarizeWithModel, plus one retry when the output opens with planning
- *  text. A second leaky output throws, so the range is not folded (the
- *  caller retries later) — never stored, never silently stripped. */
-export declare function summarizeChecked(ctx: ExtensionContext, model: Model<Api>, context: Context, maxTokens: number, signal?: AbortSignal, onLeak?: (leak: string) => void): Promise<string>;
+ *  text or copies transcript entries. A second defective output throws, so
+ *  the range is not folded (the caller retries later) — never stored, never
+ *  silently stripped. */
+export declare function summarizeChecked(ctx: ExtensionContext, model: Model<Api>, context: Context, maxTokens: number, signal?: AbortSignal, onDefect?: (text: string, kind: SummaryDefect) => void): Promise<string>;
 /** System prompt for a dedicated model: reuse the kernel's tier-1 rules so
  *  its output matches what the main model would produce. */
 export declare function buildSummarizeSystemPrompt(prompts: {

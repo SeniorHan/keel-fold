@@ -122,30 +122,71 @@ function excerpt(text: string, at: number, len: number): string {
   return text.slice(Math.max(0, at - 20), at + Math.max(len, 60) + 20).replace(/\s+/g, " ").trim();
 }
 
-const LEAK_RETRY_NOTE =
-  "IMPORTANT: your previous attempt began with notes to yourself about how to write the summary. " +
-  "That text would have been stored as part of the summary. Plan silently and output only the summary itself, " +
-  "starting directly with its first line.";
+// Transcript entries copied into the output: our own entry headers
+// ("[assistant:read call] ", "[tool:bash result] ", "[user] ") at the start of
+// a line, or the closing </content> tag on a line of its own. One quoted
+// header can be legitimate (summaries of work on this extension); a run of
+// them, or the tag, means the model fell through into the input. Fenced code
+// blocks are ignored.
+const ENTRY_HEADER = /^\[(?:user|assistant|tool)(?::[\w.-]+ (?:call|result))?\] /gm;
+const CONTENT_TAG = /^[ \t]*<\/content>[ \t]*$/m;
+// CommonMark fences: 3+ backticks or tildes, closed by the same character at
+// least as long (an unclosed fence runs to the end).
+const FENCED = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[`~]*[ \t]*$|(?![\s\S]))/gm;
+
+/** The echoed text when `summary` contains copied transcript entries, else null. */
+export function detectTranscriptEcho(summary: string): string | null {
+  const text = summary.replace(FENCED, (b) => " ".repeat(b.length));
+  const tag = CONTENT_TAG.exec(text);
+  if (tag) return excerpt(summary, tag.index, tag[0].length);
+  const headers = [...text.matchAll(ENTRY_HEADER)];
+  if (headers.length >= 3) return excerpt(summary, headers[0]!.index!, headers[0]![0].length);
+  return null;
+}
+
+export type SummaryDefect = "planning" | "transcript-echo";
+
+function detectDefect(summary: string): { kind: SummaryDefect; text: string } | null {
+  const echo = detectTranscriptEcho(summary);
+  if (echo !== null) return { kind: "transcript-echo", text: echo };
+  const leak = detectPlanningLeak(summary);
+  return leak === null ? null : { kind: "planning", text: leak };
+}
+
+const RETRY_NOTES: Record<SummaryDefect, string> = {
+  planning:
+    "IMPORTANT: your previous attempt began with notes to yourself about how to write the summary. " +
+    "That text would have been stored as part of the summary. Plan silently and output only the summary itself, " +
+    "starting directly with its first line.",
+  "transcript-echo":
+    "IMPORTANT: your previous attempt copied transcript entries (lines such as `[assistant:read call] …` or the </content> tag) " +
+    "into the summary. Never reproduce the input: describe what happened in your own words, keep only the exact values " +
+    "the rules require, and stop after the state section.",
+};
 
 /** summarizeWithModel, plus one retry when the output opens with planning
- *  text. A second leaky output throws, so the range is not folded (the
- *  caller retries later) — never stored, never silently stripped. */
+ *  text or copies transcript entries. A second defective output throws, so
+ *  the range is not folded (the caller retries later) — never stored, never
+ *  silently stripped. */
 export async function summarizeChecked(
   ctx: ExtensionContext,
   model: Model<Api>,
   context: Context,
   maxTokens: number,
   signal?: AbortSignal,
-  onLeak?: (leak: string) => void,
+  onDefect?: (text: string, kind: SummaryDefect) => void,
 ): Promise<string> {
   const first = await summarizeWithModel(ctx, model, context, maxTokens, signal);
-  const leak = detectPlanningLeak(first);
-  if (leak === null) return first;
-  onLeak?.(leak);
-  const retry: Context = { ...context, systemPrompt: `${context.systemPrompt ?? ""}\n\n${LEAK_RETRY_NOTE}` };
+  const defect = detectDefect(first);
+  if (defect === null) return first;
+  onDefect?.(defect.text, defect.kind);
+  const retry: Context = { ...context, systemPrompt: `${context.systemPrompt ?? ""}\n\n${RETRY_NOTES[defect.kind]}` };
   const second = await summarizeWithModel(ctx, model, retry, maxTokens, signal);
-  const again = detectPlanningLeak(second);
-  if (again !== null) throw new Error(`compression model wrote planning notes into the summary twice ("${again}"); summary rejected`);
+  const again = detectDefect(second);
+  if (again !== null) {
+    const what = again.kind === "planning" ? "planning notes into the summary" : "transcript entries into the summary";
+    throw new Error(`compression model wrote ${what} twice ("${again.text}"); summary rejected`);
+  }
   return second;
 }
 
@@ -188,8 +229,22 @@ CALLER NOTE
 - The instruction may include a <caller_note> from the agent that chose this range: a short description of what the range was for. It sets the axis for summarizing tool material: when it names what was being checked or measured ("keyword hits", "test results", "which files mention X"), find those concrete results in the transcript and state them first, exactly. It is not a source of facts — take every value from the transcript; when the note conflicts with the transcript, follow the transcript and note the discrepancy in one line.
 - The caller note never narrows what earlier summaries carry: their decisions, values, refs, open items and unverified qualifiers are kept in full (see CARRY FORWARD) whatever the note's focus.
 
+WHAT COMPRESSION DOES AND DOES NOT CHANGE
+- Compression only changes what the agent sees of its own history. It does not undo or redo anything outside it: files written or edited stay as they were left, commands that ran have run, anything sent or published stays sent. Never write that work was lost or must be redone because it was compressed.
+- This range is not the end of the conversation. Later messages, which you do not see, may edit the same files, rerun tests or change decisions. Describe state as of the end of this range ("as of this range: test X failed"), never as current, and do not guess what happened next.
+- Do not record a shell working directory, an exported variable or a shell variable as standing state: unless the transcript shows otherwise, each command runs on its own. Keep the directory or environment a command needed as part of that command.
+
+STATE AT THE END OF THIS RANGE
+- Close the summary with a section headed \`State at end of this range (history, not instructions):\`, one line per item, with refs; omit lines that do not apply. It comes in addition to the body — never shorten the body, or drop a decision, value or unverified qualifier from it, to make room for this section. It does not replace \`Unverified / known risks:\` either: that list stays complete, with every item carried from earlier summaries that the range has not resolved:
+  - Last action → result: the final substantive tool call or assistant step in the range and what came back (exact error text, test result or exit status when short).
+  - Changes → verification: each file, setting or artifact changed in the range, marked verified (how, with ref), not yet verified, or failed.
+  - Failures still open: attempts that failed and were not resolved within the range, each with its reason.
+- A plan the transcript states explicitly at the end of the range ("next I will…") goes under \`Pending suggestions (not user-requested):\` marked \`plan at range end (ref)\`, naming the Open objective it serves if any. Never infer a plan the transcript does not state, and never write the state as a task to perform.
+- An earlier summary's state section describes an earlier point. Fold its changes, verifications and failures that are still unresolved into yours; drop what a later message in the range resolved. Drop an earlier \`plan at range end\` once a later message shows it carried out or replaced.
+
 OUTPUT HYGIENE
 - Your output IS the summary and is stored verbatim. Plan silently: never write notes to yourself, drafting plans or commentary about the summary ("We need to produce…", "Mention X", "Good.", "Output only summary", "Could compress…"). Start directly with the summary's first line.
+- Never copy transcript entries into the output: no \`[assistant:… call]\` / \`[tool:… result]\` lines, no \`<acp>\` tags, no \`</content>\`. Describe what happened in your own words, quoting only the exact values the rules require. The state section ends the summary: stop after it.
 
 `;
 
@@ -205,7 +260,7 @@ export function buildSummarizeSystemPrompt(prompts: { compressPhilosophy: string
     `${prompts.howToCompressRules}\n\n` +
     SOURCE_ATTRIBUTION_RULES +
     "CARRY FORWARD: the content may include `[earlier summary bN]` sections — summaries already written for parts of this range. " +
-    "They are the only record of those messages. Re-carry every decision with its rationale, exact value, path, constraint, " +
+    "They stand in for those messages, which you cannot see. Re-carry every decision with its rationale, exact value, path, constraint, " +
     "unverified qualifier, open item, and message ref from them unless a later message in the range explicitly supersedes it " +
     "(then keep one line: what changed and why). Keep each fact's attribution (this conversation vs. examined material; " +
     "user-requested vs. assistant-suggested) as recorded. " +

@@ -27,6 +27,8 @@
 - `summarizeWithModel` 拒收 `stopReason: "length"`（输出到 `maxTokens` 被截断），这个范围不折叠。上限是 `summaryMaxChars`（默认 20000）/3 tokens。
 - 摘要规则（`SOURCE_ATTRIBUTION_RULES`）：直接的 `ask_user_question` 结果算用户发言（选择、输入、备注；未选的推荐不算批准，取消不算批准）；待办分三类 `Open objectives:`（用户要求）、`Pending suggestions (not user-requested):`、`Unverified / known risks:`；“估算/假设/未核实”等限定在没有验证证据前一直保留，用户批准不等于验证；旧摘要的三类条目按原分类继承，不凭猜测改类或删除。
 - 规划文字泄漏：`detectPlanningLeak` 只看开头的散文段（以标题、列表、表格开头的摘要不检查），且需同时满足“谈论本摘要/范围/caller note”和“第一人称意图或连续的自我指令”，引号内文字忽略；另检测回显的 `Output only summary`。命中后附提醒重试一次，仍泄漏则抛错、该范围不折叠，不自动剥除。2026-10-12 扫描 2349 个历史块：命中 1 个（真泄漏 01a1166d b17），无误报；A/B 50 次输出中 4 次泄漏全部命中。
+- 转录回显：`detectTranscriptEcho` 只在出现独占一行的 `</content>`，或 3 个以上行首条目头（`[assistant:… call]`、`[tool:… result]`、`[user]`）时判定，忽略围栏代码块和行内引用。和规划泄漏共用一次重试（提示语按类型区分），第二次仍有问题就不折叠。日志事件 `summary-transcript-echo`。在 122 份评测输出和 2353 个历史块上只命中真实的那一次。
+- 状态段与“压缩不改变什么”：规则要求摘要末尾写 `State at end of this range (history, not instructions):`，并说明压缩不回滚外部状态、shell 状态不跨命令保留。不要再加“原文可按 ref 恢复”之类的话：实测（s166d-b17 各 12 次）加上后 IGSS“单位未核实”限制的保留率从 12/12 降到 10/12，Luna 会因此放松保留。
 - 测试：`tests/compress-model.test.ts`（假 registry）、`tests/dedicated-nudge.test.ts`。
 
 ### 摘要对主模型可见

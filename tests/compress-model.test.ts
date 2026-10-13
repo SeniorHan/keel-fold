@@ -6,7 +6,7 @@ import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createAcpExtension } from "../src/index.js";
-import { detectPlanningLeak, fitToModel, resolveModel } from "../src/compress-model.js";
+import { detectPlanningLeak, detectTranscriptEcho, fitToModel, resolveModel } from "../src/compress-model.js";
 
 function captureApi() {
   const handlers = new Map<string, ((event: any, ctx: any) => any)[]>();
@@ -463,6 +463,11 @@ test("Lean: an ask_user_question result reaches the summary model tagged as such
   assert.match(system, /A user's approval to proceed verifies nothing/);
   assert.match(system, /never reclassify or drop an item on a guess/);
   assert.match(system, /OUTPUT HYGIENE/);
+  assert.match(system, /WHAT COMPRESSION DOES AND DOES NOT CHANGE/);
+  assert.match(system, /each command runs on its own/, "no promise of persistent shell state");
+  assert.match(system, /`State at end of this range \(history, not instructions\):`/);
+  assert.match(system, /marked `plan at range end \(ref\)`/);
+  assert.doesNotMatch(system, /They are the only record of those messages/);
 });
 
 test("Lean: a declined ask_user_question result also reaches the summary model tagged, next to the rule that it is no approval", async () => {
@@ -536,4 +541,44 @@ test("Lean: a leak that survives the retry is not folded; a quoted mention is no
   await b.run(FALLBACK);
   assert.equal(quotedCalls.length, 1);
   assert.ok((await readBlockSummaries(b.stateFile))[0]!.includes("planning text (m00770)"));
+});
+
+// Real Luna output (cur-b23 v4 r1): after its state section it fell through
+// into the input, copying `</content>` and dozens of transcript entries.
+const ECHO = `${CLEAN}\n\nState at end of this range (history, not instructions):\n- Last action → result: read src/config.ts (m01707).\n</content> \n[assistant:todo call] <acp type="todo">m01711</acp>\n{"action":"update"}\n[assistant:read call] <acp type="read">m01712</acp>\n{"path":"src/config.ts"}\n[tool:read result] <acp type="read">m01715</acp>\nTTDR│`;
+
+test("Lean: detectTranscriptEcho catches copied transcript entries, not a quoted header or fenced block", () => {
+  assert.ok(detectTranscriptEcho(ECHO));
+  assert.ok(detectTranscriptEcho("- x\n[assistant:read call] a\n[tool:read result] b\n[assistant] c\n"), "a run of entry headers");
+  assert.equal(detectTranscriptEcho(CLEAN), null);
+  assert.equal(detectTranscriptEcho("- The formatter writes `[tool:bash result] ` before each result (m00012)."), null, "inline-quoted");
+  assert.equal(detectTranscriptEcho("- Format:\n[tool:bash result] <output>\n- done"), null, "a single header line");
+  assert.equal(detectTranscriptEcho("```\n[user] a\n[assistant] b\n[tool:x result] c\n</content>\n```\n- ok"), null, "fenced example");
+  assert.equal(detectTranscriptEcho("~~~text\n</content>\n~~~\n- ok"), null, "tilde fence");
+  assert.equal(detectTranscriptEcho("````md\n```\n</content>\n```\n````\n- ok"), null, "four-backtick fence containing a three-backtick one");
+  assert.ok(detectTranscriptEcho("```\nx\n```\n- ok\n</content>\n"), "a tag after a closed fence still counts");
+  assert.equal(detectTranscriptEcho("- Chapter layout:\n<content>\n- body goes here"), null, "an opening tag alone is not an echo");
+  assert.equal(detectTranscriptEcho("- Output format: `<content>正文</content>` per chapter."), null, "inline tag");
+});
+
+test("Lean: a transcript echo is retried once with its own reminder; a second echo is not folded", async () => {
+  const calls: Call[] = [];
+  let n = 0;
+  const registry = fakeRegistry([model("cheap", "summarizer")], async () => {
+    n += 1;
+    return { role: "assistant", content: [{ type: "text", text: n === 1 ? ECHO : CLEAN }], stopReason: "stop" };
+  }, calls);
+  const a = await setup("echo-retry", registry, { acpJson: { compressionModelId: "cheap/summarizer" } });
+  await a.run(FALLBACK);
+  assert.equal(calls.length, 2);
+  assert.match(String(calls[1]!.context.systemPrompt), /your previous attempt copied transcript entries/);
+  const kept = await readBlockSummaries(a.stateFile);
+  assert.equal(kept.length, 1);
+  assert.ok(!kept[0]!.includes("</content>"));
+
+  const twice: Call[] = [];
+  const b = await setup("echo-twice", fakeRegistry([model("cheap", "summarizer")], textReply(ECHO), twice), { acpJson: { compressionModelId: "cheap/summarizer" } });
+  await assert.rejects(b.run(FALLBACK), /wrote transcript entries into the summary twice/);
+  assert.equal(twice.length, 2);
+  assert.deepEqual(await readBlockSummaries(b.stateFile), []);
 });

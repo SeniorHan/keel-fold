@@ -863,8 +863,8 @@ async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<De
         };
       }
       const span = `${range.startId}..${range.endId}`;
-      range.summary = await summarizeChecked(input.ctx, model, context, maxTokens, input.signal, (leak) =>
-        logWarn("compress", { sid, event: "summary-planning-leak", ref, span, leak, action: "retry" }));
+      range.summary = await summarizeChecked(input.ctx, model, context, maxTokens, input.signal, (text, kind) =>
+        logWarn("compress", { sid, event: kind === "planning" ? "summary-planning-leak" : "summary-transcript-echo", ref, span, text, action: "retry" }));
       used += 1;
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
