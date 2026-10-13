@@ -2,52 +2,78 @@
 
 [中文](README.zh-CN.md)
 
-A long-term maintained fork of [`billion-context-pi`](https://github.com/ranxianglei/billion-context-pi) **v0.1.83** for the [Pi coding agent](https://github.com/earendil-works/pi-coding-agent). It keeps upstream's model-driven context compression (ACP) and focuses on two things: **staying stable for daily long sessions** and **spending as few tokens as possible**, including letting a cheap model write the summaries.
+Context management for the [Pi coding agent](https://github.com/earendil-works/pi-coding-agent) that lets long sessions keep going: as context fills up, the model folds finished work into summary blocks, and the originals stay recoverable on demand.
 
-Upstream now recommends its successor [`billion-context`](https://github.com/ranxianglei/billion-context). This fork stays on the 0.1.83 runtime and cherry-picks upstream fixes when they matter; it is not affiliated with upstream.
+This is a long-term maintained fork of [`billion-context-pi`](https://github.com/ranxianglei/billion-context-pi) **v0.1.83**. It keeps upstream's compression engine (ACP) and adds two things: **a cheap model can write the summaries**, and **fewer tokens are spent on context management itself**. Upstream has moved on to [`billion-context`](https://github.com/ranxianglei/billion-context); this fork stays on 0.1.83 and picks upstream fixes by hand. It is not affiliated with upstream.
 
-## Differences from upstream 0.1.83
+## Main differences from upstream 0.1.83
 
 | | Upstream 0.1.83 | This fork |
 |---|---|---|
-| Who writes summaries | The main (usually expensive) model | Optional **dedicated summary model**, e.g. a cheap one; the main model only picks ranges and writes a 1–2 sentence fallback |
-| Summary rules in every nudge | Full rules sent to the main model | Only to the summary model when one is configured |
-| Re-compressing old blocks | Raw history re-sent, then cut to 120K chars head/tail | Earlier block summaries are passed in whole and carried forward; raw text is sized to the summary model's window |
-| Summary visible to the main model | No (Pi adapter drops the summary messages), so models often decompress right after compressing | Yes, the full summary sits in the `compress` call |
-| Model-facing tools | `compress`, `decompress`, `search_context`, `acp_status`, `acp_cache` | `compress` + one `acp_context` tool |
-| Resident prompt | ~5,800 tokens | ~700 tokens |
-| System prompt | Replaces Pi's prompt, so other extensions' prompt additions are dropped | Injected as its own section; other extensions keep theirs |
-| Sub-agent delegation (`acp_delegate`, fleet panel) | Built in | Removed — this is a context manager; use a dedicated sub-agent extension |
-| Auto-update | On | Off |
+| Who writes summaries | The main model, usually the expensive one | A **dedicated summary model** of your choice, e.g. a cheap one; the main model only picks the ranges |
+| Compression rules | Sent to the main model in every compression nudge | Sent only to the summary model |
+| What the summary model sees | — | Exactly the messages that get folded; when old blocks are folded again, their summaries are passed in whole and carried forward |
+| Summary rules | General compression rules | Also: user requests are kept apart from what tools showed; open items are split into user objectives, suggestions and unverified risks; each summary ends with the state at that point |
+| Bad summaries | Only length limits are checked | A failed or cut-off summary call leaves the range uncompressed for a later attempt; a summary with leaked planning text or copied transcript is retried once first |
+| Summaries visible to the main model | No, so it often decompresses right after compressing | Yes |
+| Tools and resident prompt | 5 context tools, about 5,800 tokens | `compress` + `acp_context`, about 700 tokens\* |
+| System prompt | Returns a whole system prompt, which on Pi 1.x drops prompt additions from extensions loaded after it | Added as its own section; other extensions keep theirs |
+| Sub-agent delegation, auto-update | Built in | Removed. Use a dedicated sub-agent extension; ACP still manages their sessions |
 
-Also fixed: emergency truncation that never reached the wire, emergency truncation cutting the latest user message, a token meter that ignored new messages, uncounted `compress` thinking, facade tools escaping recency policies, and tests writing into the real `~/.pi`. Details and reasons are in [MAINTENANCE.md](MAINTENANCE.md) (Chinese).
+\* Measured on 0.1.69 with a `ceil(chars / 4)` estimate in a blank Pi process (tools and injected prompt only); not re-measured on 0.1.83.
 
-Token figures above were measured on 0.1.69 with a `ceil(chars / 4)` proxy in a blank Pi 0.85 process (tools and injected prompt only); they have not been re-measured on 0.1.83.
+<details>
+<summary>Smaller upstream issues fixed in this fork</summary>
+
+- Emergency truncation was computed but never reached the request.
+- Emergency truncation could cut the latest user message.
+- The token meter reused an old count and ignored newly added messages.
+- Reasoning inside `compress` calls was not counted.
+- Concurrent state saves could fail (`ENOENT` on a shared temp file), and releasing the session lock could let a later caller jump the queue.
+- After `/tree` into the middle of a block, its summary could show decisions from messages the current branch never reached.
+- Decompressing to a file failed on Windows when the message ref contained `|`.
+- The test suite wrote into the real `~/.pi`.
+
+Details: [CHANGELOG.md](CHANGELOG.md), [MAINTENANCE.md](MAINTENANCE.md) (Chinese).
+
+</details>
 
 ## Install
 
 ```bash
-pi install git:github.com/kunkun9527/billion-context-pi-lean@v0.1.83-lean.7
+pi install git:github.com/kunkun9527/billion-context-pi-lean
 ```
 
-Requires Pi >= 1.x for the dedicated summary model. Do not enable it together with `billion-context-pi` or `billion-context`: tools and hooks would register twice. Pi's built-in compaction is cancelled while this extension is active.
+Append `@<tag>` to pin a version from [Releases](https://github.com/kunkun9527/billion-context-pi-lean/releases).
 
-## Cheap summary model
+- The dedicated summary model needs Pi 1.x or later.
+- Do not enable it together with `billion-context-pi` or `billion-context`: tools and hooks would register twice.
+- Pi's built-in compaction is turned off while this extension is active.
+
+## Use a cheap model for summaries
 
 ```text
 /acp compact                    # show the current setting
-/acp compact <provider/model>   # any model in Pi's model registry, e.g. a cheap one
-/acp compact session            # same model as the session, separate call
-/acp compact reset              # main model writes summaries again
+/acp compact <provider/model>   # any model in Pi's model registry
+/acp compact session            # the session's own model, in a separate call
+/acp compact reset              # the main model writes summaries again
 ```
 
-The choice is saved as `compressionModelId` in `~/.pi/acp.json` (a project's `.pi/acp.json` wins). Use `provider/id`: a bare id shared by several providers is ambiguous. Models come from Pi's live registry, so providers registered by extensions work too. A model being listed does not mean the provider can serve it: when the call fails for a range, that range is not compressed (retry later), and `~/.pi/acp.log` records `compression-model-failed`. If the model cannot be resolved at all, or the host lacks nested completion, blocks fall back to the main model's short summary with a warning.
+The choice is saved as `compressionModelId` in `~/.pi/acp.json` (a project's `.pi/acp.json` takes precedence).
 
-Summaries are written by the summary model with rules that keep paths, numbers, decisions and open objectives verbatim. Its output is rejected when it hits the output limit, and that range is not compressed.
+- Write `provider/id`. A bare id shared by several providers is rejected as ambiguous.
+- Models come from Pi's live registry, so providers registered by other extensions work too.
+- A model being listed does not mean its provider can serve it. If the call fails, that range stays uncompressed and is retried next time; `~/.pi/acp.log` records `compression-model-failed`. Only when the model cannot be resolved at all, or the host cannot make nested calls, does the main model's short summary get used, with a warning.
 
 ## Configuration
 
-`~/.pi/acp.json` and `<project>/.pi/acp.json`. All upstream options in [CONFIGURATION.md](CONFIGURATION.md) apply, except: `autoUpdate` is forced off, the removed delegate keys (`delegate.*`, `displayUsage`, `delegatePrompt`) are ignored, and `promptSections.*` is ignored because the fork injects its own prompt (a one-time warning tells you). Compression timing can be tuned per provider and model:
+Config files are `~/.pi/acp.json` and `<project>/.pi/acp.json`. Upstream options in [CONFIGURATION.md](CONFIGURATION.md) still apply, except:
+
+- `autoUpdate` is always off.
+- The removed delegation keys (`delegate.*`, `displayUsage`, `delegatePrompt`) are ignored.
+- `promptSections.*` is ignored because the fork injects its own prompt; you get a one-time warning.
+
+Compression timing can be tuned per provider and model:
 
 ```json
 {
@@ -65,24 +91,19 @@ Summaries are written by the summary model with rules that keep paths, numbers, 
 }
 ```
 
-## Model-facing tools
+## Tools the model sees
 
-- `compress`: fold consumed message ranges into summary blocks.
+- `compress`: fold finished message ranges into summary blocks.
 - `acp_context`: `decompress`, `search_context`, `acp_status`, `acp_cache` and `help`, e.g. `{ "op": "search_context", "args": { "query": "authentication" } }`.
-
-## Known limitations
-
-- The summary model occasionally prefixes a summary with its own reasoning text (about 1 in 60 blocks observed).
-- Kernel (`acp-kernel@0.0.98`) bugs are worked around in the adapter; the kernel source is not vendored yet.
 
 ## Development
 
 ```bash
 npm ci
-npm run check   # typecheck + tests + build + facade checks
+npm run check   # typecheck, tests, build and facade checks
 ```
 
-`dist/` is committed because Pi installs git packages without building; commit it together with source changes. See [MAINTENANCE.md](MAINTENANCE.md).
+`dist/` is committed because Pi installs git packages without building them; commit it together with source changes. Maintenance notes: [MAINTENANCE.md](MAINTENANCE.md).
 
 ## License
 

@@ -88,6 +88,6 @@
 - `compressionModelId` 填 `provider/id`。裸 id 在多个 provider 下重名时判为歧义。
 - 注册表里有某个模型，不代表 provider 真能服务它。调用失败时该范围不压缩；在 `~/.pi/acp.log` 中搜 `compression-model-failed`。
 - 不做“强制继承旧块 Open objectives”：2026-10-12 核查全部 15 个 refold、40 条旧目标，确认丢失 0 条，另有 8 条本来就不是用户目标（助手建议、读到的资料），强制继承会把它们一直传下去；b24 “漏掉”的 3 条属于这类。改为摘要规则：问卷答案归用户、三类待办分开、未核实限定保留（见上）。注意：样本小，原文中段被截断或内核紧急截断时，新目标仍可能到不了专用模型。
-- 新规则下摘要变长：A/B 中 b17（并入 3 个旧块）平均从约 9.3K 字符增到 15K 字符，输出最多用到上限（≈6.7K tokens）的 75%。若频繁出现 `hit its output limit`，调大 `summaryMaxChars`。
+- 新规则下摘要变长：A/B 中 b17（并入 3 个旧块）平均从约 9.3K 字符增到 15K 字符，输出最多用到上限（≈6.7K tokens）的 75%。上限由 `compress` 调用参数 `summaryMaxChars`（默认 20000）/3 决定，不是 `acp.json` 配置项；若频繁出现 `hit its output limit`，需要在规则里引导主模型传更大的 `summaryMaxChars`，或改 `src/compress-tool.ts` 的默认值。
 - 不要和原版 `billion-context-pi` 同时启用（工具和钩子会注册两次）。
 - 命名：2026-10-12 之前叫 Lean2（子目录 `lean2/`、版本 `0.1.83-pr241-lean2.N`），之后改名为 Lean，版本从 `0.1.83-lean.6` 续。更早的 Lean v1（`0.1.69-lean.1`，基于 npm 包的外壳）保留在 `legacy-v1` 分支。
