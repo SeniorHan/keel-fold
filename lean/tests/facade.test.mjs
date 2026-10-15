@@ -257,6 +257,45 @@ test("compress description keeps a meaningful fallback contract when a dedicated
   assert.match(prompt, /dedicated model writes compress summaries: give each range only a 1-2 sentence fallback/);
 });
 
+test("per-turn dedicated-model rule follows the live upstream description, not a registration snapshot", async () => {
+  const serviceKey = Symbol.for("@local/pi-collapsed-tools.display-service.v1");
+  const previous = globalThis[serviceKey];
+  // Mirrors pi-collapsed-tools: the decorated tool is a spread snapshot.
+  globalThis[serviceKey] = { version: 1, decorate: (tool) => ({ ...tool }) };
+  let dedicated = false;
+  try {
+    const pi = createPi();
+    const upstream = (target) => {
+      target.registerTool({
+        name: "compress",
+        label: "compress",
+        get description() {
+          return dedicated ? "Dedicated summary model example/cheap-model normally replaces each summary." : "Replace ranges.";
+        },
+        parameters: structuredClone(schemas.compress),
+        async execute() { return { content: [{ type: "text", text: "ok" }] }; },
+      });
+      for (const name of ["decompress", "search_context", "acp_status"]) {
+        target.registerTool({ name, description: name, parameters: structuredClone(schemas[name]), async execute() {} });
+      }
+      target.on("before_agent_start", () => ({ systemPrompt: "upstream prompt must be suppressed" }));
+    };
+    createLeanAcpExtension(upstream)(pi);
+    const [hook] = pi.handlers.get("before_agent_start");
+    const turn = async () => (await hook({ systemPrompt: "base prompt" })).systemPrompt;
+    const rule = /dedicated model writes compress summaries/;
+
+    assert.doesNotMatch(await turn(), rule, "off at registration");
+    dedicated = true; // acp.json loads after registration (session_start)
+    assert.match(await turn(), rule, "enabled after registration");
+    dedicated = false;
+    assert.doesNotMatch(await turn(), rule, "disabled again mid-session");
+  } finally {
+    if (previous === undefined) delete globalThis[serviceKey];
+    else globalThis[serviceKey] = previous;
+  }
+});
+
 test("routes all four low-frequency operations with original args and execution context", async () => {
   const cases = [
     ["search_context", { query: "architecture", limit: 8 }],
