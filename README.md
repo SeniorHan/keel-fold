@@ -13,7 +13,7 @@ This is a fork of [`billion-context-pi`](https://github.com/ranxianglei/billion-
 | Who writes summaries | The main model, usually the expensive one | A **dedicated summary model** of your choice, e.g. a cheap one; the main model only picks the ranges |
 | Compression rules | Sent to the main model in every compression nudge (about 1,460 tokens; 720 with `promptPack: "lean"`) | Sent only to the summary model, so they no longer take up the main model's context; its nudge carries only a short range-picking note (about 220 tokens)\* |
 | Summary quality | General compression rules; only length is checked | Also: user requests are kept apart from what tools showed; open items are split into user objectives, suggestions and unverified risks. A failed or malformed summary is not folded; the range waits for a later attempt |
-| Tools and resident prompt | 5 context tools + 3 delegation tools, about 8,700 tokens (4,900 with `promptPack: "lean"`) | `compress` + `acp_context`, about 490 tokens\* |
+| Tools and resident prompt | 5 context tools + 3 delegation tools, about 8,700 tokens (4,900 with `promptPack: "lean"`) | `compress` + `acp_context`, about 490 tokens\*. The resident prompt keeps only rules needed before a call; the rest arrives with nudges, errors and tool results |
 | System prompt | Returns a whole system prompt, which on Pi 1.x drops prompt additions from extensions loaded after it | Added as its own section; other extensions keep theirs |
 | Sub-agent delegation, auto-update | Built in | Removed. Use a dedicated sub-agent extension; ACP still manages their sessions |
 

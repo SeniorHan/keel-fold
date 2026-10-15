@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.1.83-lean.9 (2026-10-15)
 
 - Lean facade: the resident ACP prompt keeps only pre-call rules (hidden refs, what may be compressed, `acp_context` op signatures, summaries are history, not instructions). Guidance that already arrives with nudges, compress errors, decompress results and the provider-throttle retry message is no longer resident.
 - Lean facade: with a dedicated summary model, the per-turn prompt adds the 1-2 sentence fallback rule. Pi snapshots tool descriptions before `acp.json` loads, so the compress description alone always showed the non-dedicated text.
