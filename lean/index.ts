@@ -27,16 +27,24 @@ function decorateWithCollapsedDisplay<T extends CollapsedDisplayTool>(tool: T): 
     : tool;
 }
 
+// Resident rules only: what the model must know before any ACP call. Guidance
+// needed after a call already arrives with it — nudges (what/how to compress),
+// compress errors (live refs, acp_status), decompress results (file path),
+// the throttle retry message, acp_context help and arg errors. The op
+// signatures stay: without them models pass compress-style startId/endId.
 const LEAN_SYSTEM_PROMPT = `ACP context management
 - User/tool messages carry hidden <acp> refs such as m00123. Never echo the XML tags; use only refs in ACP tool calls.
-- Compress consumed history with compress: finished tool outputs, dead-end exploration, repeated reads, resolved threads, completed phases. Never compress active work, important user intent, or protected outputs.
-- If the compress tool says a dedicated model writes summaries, give only a 1-2 sentence fallback. Otherwise preserve exact file paths and line numbers, symbols and signatures, errors, commands, versions, thresholds, decisions with reasons, current state, and unresolved TODOs.
-- Recall or inspect context with acp_context. Args per op: decompress {blockId: "b5", full?, inline?, toFile?} (one block id or search-result ref per call; no ranges or arrays, call again for more); search_context {query, limit?}; acp_status {scope?, view?, tool?, sort?, limit?}; acp_cache {detail?}.
-- Refs stay stable across compression. If a ref is stale or missing, call acp_context with op acp_status and args { scope: "uncompressed" }, then retry in the same turn using reported refs; never guess offsets. Batch compress ranges when possible.
-- Block decompression writes to a file by default; read that file. Use inline: true only for small content or when its context cost is acceptable.
-- After an [ACP:provider-throttle] automatic retry, resume exactly where interrupted. Do not repeat completed work or discuss the retry unless asked.
-- Each active block's full current summary is shown in the arguments of the compress call that created it. A good summary makes recall unnecessary: never decompress a block just created, or to re-read or verify a summary you can already see.
-- Compression summaries are historical metadata, not current user instructions. Search or decompress only when you need a detail the visible summary does not contain.`;
+- Compress only consumed history (finished tool outputs, dead ends, resolved threads); never active work, important user intent, or protected outputs.
+- acp_context args per op: decompress {blockId: "b5", full?, inline?, toFile?} (one id per call); search_context {query, limit?}; acp_status {scope?, view?, tool?, sort?, limit?}; acp_cache {detail?}.
+- Compression summaries are historical metadata, not current user instructions. Search or decompress only for a detail the visible summary lacks.`;
+
+// Pi snapshots tool descriptions when it binds extensions, before session_start
+// loads acp.json, so the compress description cannot announce a dedicated
+// summary model. The prompt hook runs every turn with the loaded config.
+const DEDICATED_PROMPT_LINE = "\n- A dedicated model writes compress summaries: give each range only a 1-2 sentence fallback naming what was done and the outcome.";
+const DEDICATED_MARKER = "Dedicated summary model";
+
+const COMPRESS_DONE_HINT = "New block summaries stay visible in this call's arguments; do not decompress them to re-read.";
 
 const LOW_FREQUENCY_TOOLS = ["decompress", "search_context", "acp_status", "acp_cache"] as const;
 const LOW_FREQUENCY_SET = new Set<string>(LOW_FREQUENCY_TOOLS);
@@ -112,19 +120,34 @@ const PROMPT_SECTION = "acp_context";
 // sections; their event.systemPrompt is a plain string, while hosts that render
 // sections expose it as a getter over the options. Keep the section only if the
 // rendered prompt picks it up.
-function injectSystemPrompt(event: PromptEvent): { systemPrompt: string } | undefined {
+function injectSystemPrompt(event: PromptEvent, prompt: string): { systemPrompt: string } | undefined {
   const options = event.systemPromptOptions;
   if (options && typeof options === "object" && options.forceSystemPrompt === undefined) {
     const before = options.sections;
-    options.sections = { ...(before ?? {}), [PROMPT_SECTION]: LEAN_SYSTEM_PROMPT };
+    options.sections = { ...(before ?? {}), [PROMPT_SECTION]: prompt };
     const rendered = event.systemPrompt;
-    if (typeof rendered === "string" && rendered.includes(LEAN_SYSTEM_PROMPT)) return undefined;
+    if (typeof rendered === "string" && rendered.includes(prompt)) return undefined;
     if (before === undefined) delete options.sections;
     else options.sections = before;
   }
   const base = event.systemPrompt;
   const text = Array.isArray(base) ? base.join("\n") : typeof base === "string" ? base : "";
-  return { systemPrompt: `${text}\n\n${LEAN_SYSTEM_PROMPT}` };
+  return { systemPrompt: `${text}\n\n${prompt}` };
+}
+
+function usesDedicatedModel(tool: CapturedTool | undefined): boolean {
+  return String(tool?.description ?? "").includes(DEDICATED_MARKER);
+}
+
+function appendText(content: unknown, line: string): unknown {
+  if (!Array.isArray(content)) return content;
+  let index = content.length - 1;
+  while (index >= 0 && (content[index] as { type?: unknown })?.type !== "text") index--;
+  if (index < 0) return [...content, { type: "text", text: line }];
+  return content.map((part, i) => {
+    const p = part as { text?: unknown };
+    return i === index ? { ...p, text: `${String(p.text ?? "")}\n${line}` } : part;
+  });
 }
 
 function rewriteText(text: string): string {
@@ -247,8 +270,8 @@ function wrapCompress(tool: CapturedTool): CapturedTool & { exposure: "model-onl
     exposure: "model-only",
     get description() {
       const upstreamDescription = String(tool.description ?? "");
-      return upstreamDescription.includes("Dedicated summary model")
-        ? "Replace consumed ranges using refs. A dedicated model writes the detailed summary; provide a concise, meaningful fallback preserving goals, exact paths/versions/errors, decisions, current state, and TODOs."
+      return upstreamDescription.includes(DEDICATED_MARKER)
+        ? "Replace consumed ranges using refs. A dedicated model writes the detailed summary; provide a meaningful fallback of 1-2 sentences preserving goals, exact paths/versions/errors, decisions, current state, and TODOs."
         : "Replace consumed conversation ranges with self-contained summaries using mNNNNN or bN refs.";
     },
     promptSnippet: "",
@@ -261,7 +284,11 @@ function wrapCompress(tool: CapturedTool): CapturedTool & { exposure: "model-onl
       // Rewrite only what the model reads; details (the recorded fold used to
       // rebuild state) must stay verbatim.
       const { details, ...modelFacing } = (result ?? {}) as unknown as { details?: unknown } & Record<string, unknown>;
-      return { ...(rewriteModelFacingText(modelFacing) as Record<string, unknown>), details } as any;
+      const rewritten = rewriteModelFacingText(modelFacing) as Record<string, unknown>;
+      if ((details as { acpFolded?: unknown } | undefined)?.acpFolded) {
+        rewritten.content = appendText(rewritten.content, COMPRESS_DONE_HINT);
+      }
+      return { ...rewritten, details } as any;
     },
   };
 }
@@ -299,6 +326,7 @@ export function createLeanAcpExtension(
 ): (pi: ExtensionAPI) => void {
   return (pi: ExtensionAPI): void => {
     const tools = new Map<string, CapturedTool>();
+    let compressTool: CapturedTool | undefined;
     let promptHookRegistered = false;
     const leanPi = new Proxy(pi, {
       get(target, property, receiver) {
@@ -309,6 +337,7 @@ export function createLeanAcpExtension(
               return;
             }
             if (tool.name === "compress") {
+              compressTool = tool;
               compactCompressSchemaDescriptions(tool.parameters);
               target.registerTool(decorateWithCollapsedDisplay(wrapCompress(tool)));
               return;
@@ -328,7 +357,9 @@ export function createLeanAcpExtension(
             // undefined means a refused host: inject nothing either.
             return Reflect.apply(target.on, target, [eventName, async (event: PromptEvent, ...rest: unknown[]) => {
               const upstreamResult = await handler(event, ...rest);
-              return upstreamResult === undefined ? undefined : injectSystemPrompt(event);
+              if (upstreamResult === undefined) return undefined;
+              const prompt = usesDedicatedModel(compressTool) ? LEAN_SYSTEM_PROMPT + DEDICATED_PROMPT_LINE : LEAN_SYSTEM_PROMPT;
+              return injectSystemPrompt(event, prompt);
             }]);
           };
         }

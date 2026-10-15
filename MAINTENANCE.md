@@ -68,7 +68,9 @@
 - 去掉 “Refs may be renumbered” 的错误说法（上游 #541）。
 - 改写规则：覆盖 `acp_cache(...)` 和 “call/run acp_status …”；调用改写用非贪婪匹配（避免同一行两个调用被合并）。召回结果不改写（`rewriteRecallResult`）：decompress 的输出原样返回；search_context 只改写每条结果末尾的提示行——必须完全符合上游格式 `  → decompress({ blockId: "bN" })`（可带 `  (block containing message <原始 entry id>)`，id 形如 `088aaedb` 或 `4d9e965e#toolu_…|fc_…`，不是 mNNNNN），且后面是空行或文末（`SEARCH_HINT_LINE`）。预览是召回原文，一律不动。上游改 `src/search-tool.ts` 的 `formatResult` 或给这两个工具新增提示文字时，要同步这里的正则。
 - 系统提示列出每个 op 的参数签名（`OPERATION_SIGNATURES`）。只写 “original args object” 时，模型常照搬 compress 的写法传 `startId/endId`、`ids/refs`，缺 `blockId`。参数校验失败时，报错里也给出正确签名。
-- 系统提示保留“不要把解压当成压缩后的例行步骤”：块摘要显示在 compress 调用参数里，只在需要摘要里没有的细节时才 search/decompress。
+- 系统提示保留“不要把解压当成压缩后的例行步骤”：块摘要显示在 compress 调用参数里，只在需要摘要里没有的细节时才 search/decompress。compress 折叠成功后，结果末尾再提示一次（`COMPRESS_DONE_HINT`，只在 `details.acpFolded` 存在时加）。
+- 常驻提示只放调用前必须知道的规则：隐藏 ref、压缩边界、op 签名、摘要是历史元数据。调用后才用得上的说明已由对应消息给出，不再常驻：压缩时机和写法（nudge）、失效 ref 的恢复（compress 拒绝信息附当前可压缩范围并提示 acp_status）、解压写文件（decompress 结果带路径和 read 提示）、限流恢复（`THROTTLE_KICK_TEXT`）。
+- 专用摘要模型的“只写 1-2 句 fallback”规则由提示钩子每轮按 compress 描述 getter 追加（`DEDICATED_PROMPT_LINE`）。不能只靠 compress 描述：Pi 1.3 在绑定扩展时（`_refreshToolRegistry` → `wrapToolDefinition`）就快照工具描述，pi-collapsed-tools 的 `{...base}` 也会快照 getter，而 `compressionModelId` 要到 session_start 的 `reloadConfig` 才载入，所以模型看到的始终是非专用描述。
 - 测试：`lean/tests/facade.test.mjs`，含工具面和 1450 字符提示预算。
 
 ## 修改流程

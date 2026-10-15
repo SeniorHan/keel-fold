@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Lean facade: the resident ACP prompt keeps only pre-call rules (hidden refs, what may be compressed, `acp_context` op signatures, summaries are history, not instructions). Guidance that already arrives with nudges, compress errors, decompress results and the provider-throttle retry message is no longer resident.
+- Lean facade: with a dedicated summary model, the per-turn prompt adds the 1-2 sentence fallback rule. Pi snapshots tool descriptions before `acp.json` loads, so the compress description alone always showed the non-dedicated text.
+- Lean facade: a compress call that folded ranges ends with a reminder that the new summaries are visible in the call's arguments, so they need no decompress.
+- README: tools + resident prompt re-measured on Pi 1.3: about 490 tokens (was about 800).
+
 ## v0.1.83-lean.8 (2026-10-13)
 
 - Dedicated summary model (`compressionModelId: provider/id`, and `session` without a captured prefix) now summarizes exactly what the kernel folds: a dry run of `applyCompression` on a cloned state gives each range's real block (paired tool calls, protected-zone exclusions), so a range naming only a tool result no longer hides the call that says what it was.

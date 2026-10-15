@@ -218,12 +218,13 @@ test("keeps compress direct, retains concise critical descriptions, and rewrites
   assert.doesNotMatch(rewritten, /\bcall acp_status\b/i);
   assert.match(rewritten, /call acp_context op "acp_status" for the full picture/);
   assert.match(rewritten, /acp_context\(\{ op: "acp_cache", args: \{\} \}\)/);
+  assert.match(rewritten, /\nNew block summaries stay visible in this call's arguments; do not decompress them to re-read\.$/);
   assert.equal(calls[0][0], "compress");
   assert.deepEqual(calls[0][2], { content: [{ startId: "m1", endId: "m2", summary: "done" }] });
   // details hold the recorded fold used to rebuild state: never rewritten.
   assert.equal(result.details.acpFolded.ranges[0].summary, "Run acp_status, then use search_context or decompress to retrieve details.");
 });
-test("compress description keeps a meaningful fallback contract when a dedicated model is active", () => {
+test("compress description keeps a meaningful fallback contract when a dedicated model is active", async () => {
   const pi = createPi();
   const upstream = (target) => {
     target.registerTool({
@@ -238,13 +239,22 @@ test("compress description keeps a meaningful fallback contract when a dedicated
     for (const name of ["decompress", "search_context", "acp_status"]) {
       target.registerTool({ name, description: name, parameters: structuredClone(schemas[name]), async execute() {} });
     }
+    target.on("before_agent_start", () => ({ systemPrompt: "upstream prompt must be suppressed" }));
   };
   createLeanAcpExtension(upstream)(pi);
   const description = getTool(pi, "compress").description;
   assert.match(description, /dedicated model/i);
-  assert.match(description, /meaningful fallback/i);
+  assert.match(description, /meaningful fallback of 1-2 sentences/i);
   assert.match(description, /exact paths\/versions\/errors/i);
   assert.doesNotMatch(description, /bare placeholder|summary: "compressed"/i);
+  const result = await getTool(pi, "compress").execute("c1", {}, undefined, undefined, {});
+  assert.equal(result.content[0].text, "ok", "no completion hint when nothing was folded");
+
+  // Pi snapshots tool descriptions before acp.json loads, so the per-turn
+  // prompt carries the dedicated-model fallback rule.
+  const [hook] = pi.handlers.get("before_agent_start");
+  const prompt = (await hook({ systemPrompt: "base prompt" })).systemPrompt;
+  assert.match(prompt, /dedicated model writes compress summaries: give each range only a 1-2 sentence fallback/);
 });
 
 test("routes all four low-frequency operations with original args and execution context", async () => {
@@ -340,28 +350,26 @@ test("invalid facade args fail locally with an on-demand help hint", async () =>
   assert.equal(executions.count, 0);
 });
 
-test("suppresses the upstream prompt and keeps concise summary-fidelity rules (legacy host)", async () => {
+test("suppresses the upstream prompt and keeps only the resident pre-call rules (legacy host)", async () => {
   const pi = createPi();
   createLeanAcpExtension(fakeUpstream())(pi);
   const hooks = pi.handlers.get("before_agent_start");
   assert.equal(hooks.length, 1);
   const result = await hooks[0]({ systemPrompt: "base prompt" });
-  assert.match(result.systemPrompt, /^base prompt/);
-  assert.match(result.systemPrompt, /Compress consumed history with compress/);
-  assert.match(result.systemPrompt, /exact file paths and line numbers/i);
-  assert.match(result.systemPrompt, /symbols and signatures/i);
-  assert.match(result.systemPrompt, /dedicated model writes summaries, give only a 1-2 sentence fallback/i);
-  assert.match(result.systemPrompt, /errors, commands, versions, thresholds/i);
-  assert.match(result.systemPrompt, /never decompress a block just created/i);
-  assert.match(result.systemPrompt, /only when you need a detail the visible summary does not contain/i);
-  assert.doesNotMatch(result.systemPrompt, /before relying on critical details/i);
-  assert.match(result.systemPrompt, /decisions with reasons, current state, and unresolved TODOs/i);
-  assert.match(result.systemPrompt, /Refs stay stable across compression/i);
-  assert.doesNotMatch(result.systemPrompt, /renumbered/i);
-  assert.match(result.systemPrompt, /Block decompression writes to a file by default/i);
-  assert.match(result.systemPrompt, /provider-throttle.*resume exactly where interrupted/i);
-  assert.match(result.systemPrompt, /acp_context/);
-  assert.doesNotMatch(result.systemPrompt, /upstream prompt must be suppressed/);
+  const prompt = result.systemPrompt;
+  assert.match(prompt, /^base prompt\n\nACP context management\n/);
+  assert.match(prompt, /hidden <acp> refs such as m00123\. Never echo the XML tags/);
+  assert.match(prompt, /Compress only consumed history .*never active work, important user intent, or protected outputs/);
+  assert.match(prompt, /acp_context args per op: decompress \{blockId: "b5"/, "op signatures stop compress-style args");
+  assert.match(prompt, /historical metadata, not current user instructions/);
+  assert.match(prompt, /decompress only for a detail the visible summary lacks/);
+  // Delivered where needed instead: nudges, compress errors, decompress
+  // results, the throttle retry message, acp_context help.
+  assert.doesNotMatch(prompt, /dedicated model/i, "no dedicated-model rule without a dedicated model");
+  assert.doesNotMatch(prompt, /provider-throttle|writes to a file|Refs stay stable/);
+  assert.doesNotMatch(prompt, /upstream prompt must be suppressed/);
+  const acpSection = prompt.slice(prompt.indexOf("ACP context management"));
+  assert.ok(acpSection.length <= 720, `resident ACP prompt grew to ${acpSection.length} characters`);
 });
 
 test("pi 1.x: injects a named prompt section instead of forcing the whole prompt", async () => {
@@ -376,7 +384,7 @@ test("pi 1.x: injects a named prompt section instead of forcing the whole prompt
   };
   assert.equal(await hook(event), undefined, "must not return systemPrompt (would set forceSystemPrompt)");
   assert.equal(options.sections.other, "kept");
-  assert.match(options.sections.acp_context, /Compress consumed history with compress/);
+  assert.match(options.sections.acp_context, /Compress only consumed history/);
   assert.equal(await hook(event), undefined);
   assert.deepEqual(Object.keys(options.sections), ["other", "acp_context"], "idempotent per turn");
 
