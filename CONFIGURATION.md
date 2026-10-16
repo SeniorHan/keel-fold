@@ -2,7 +2,7 @@
 
 [English](./CONFIGURATION.md) | [中文](./CONFIGURATION.zh-CN.md)
 
-**billion-context-pi** works out of the box with no configuration — it reads your model's context window automatically and applies sensible defaults. This document is the complete reference for the optional JSON configuration file (`acp.json`) and the environment variables that let you tune behavior.
+**billion-context-pi-lean** works out of the box with no configuration — it reads your model's context window automatically and applies sensible defaults. This document is the complete reference for the optional JSON configuration file (`acp.json`) and the environment variables that let you tune behavior.
 
 Configuration is layered: environment variables take the highest precedence, followed by the project config file, then the global config file, and finally the built-in defaults.
 
@@ -19,7 +19,7 @@ Settings are read from JSON files named `acp.json`. The global file applies to e
 
 > **Precedence:** Environment variable &gt; Project file &gt; Global file &gt; Built-in default.
 
-On a Pi fork, `.pi` is the fork's own config directory — `~/.prime/acp.json` and `<project>/.prime/acp.json` on Prime. Until that file exists, the `.pi` path above is still read. See [docs/host-adapter.md §4](./docs/host-adapter.md#4-config-directory-config_dir_name).
+On a Pi fork, `.pi` is the fork's own config directory. Until that file exists, the `.pi` path above is still read.
 
 Files are loaded at session start. Missing files, malformed JSON, and unknown keys are silently ignored — the extension never fails to start because of a config issue. Only the documented keys are read; everything else is discarded.
 
@@ -125,13 +125,13 @@ All keys below are currently **ACTIVE**.
 | `protectedTools` | string\[\] | `none` | 🟢 ACTIVE | Tool-name patterns (glob suffix allowed) whose **every** call+result pair is hard-excluded from compression (refs render `BLOCKED`). For low-frequency, high-value tools with independent outputs — see the ⚠ note below. |
 | `protectedLatestTools` | string\[\] | `none` | 🟢 ACTIVE | Tool-name patterns (glob suffix allowed) whose **latest** call+result pair is hard-excluded from compression; older pairs remain compressible. For cumulative-snapshot tools. |
 | `neverPreserveRecentTools` | string\[\] | kernel built-in (`["decompress", "search_context", "read", "bash"]`, acp-kernel >= 0.0.92) | 🟢 ACTIVE | Tool-name patterns **removed from** the soft-protected recent zone so their results fold immediately. Default keeps `read`/`bash` compressible; remove only `read` (keep `decompress`/`search_context`) to stop the batch-read fold→re-read loop. **Empty array `[]` is valid** (max-protection escape hatch). |
-| `preserveRecentTools` | string\[\] | unset (no subtraction; requires `acp-kernel` >= 0.0.93) | 🟢 ACTIVE | The **positive counterpart**: tool-name patterns **kept protected** in the recent zone — removed from the effective exclusion list computed by the kernel. The one-entry #1198/#1277 remedy: `["read"]`, no built-in list restating. **Empty array `[]` is invalid** (pure no-op — typo for `neverPreserveRecentTools: []`). |
+| `preserveRecentTools` | string\[\] | unset (no subtraction; requires `acp-kernel` >= 0.0.93) | 🟢 ACTIVE | The **positive counterpart**: tool-name patterns **kept protected** in the recent zone — removed from the effective exclusion list computed by the kernel. The one-entry remedy for the batch-read fold→re-read loop: `["read"]`, no built-in list restating. **Empty array `[]` is invalid** (pure no-op — typo for `neverPreserveRecentTools: []`). |
 | `throttleRetry` | boolean \| object | `true` | 🟢 ACTIVE | Auto-retry provider token rate-limit errors with progressive backoff. |
 | `repetitionGuard` | boolean \| object | `true` | 🟢 ACTIVE | Break infinite loops of byte-identical tool calls (warn at 3 consecutive, block + abort at 5). |
-| `degenerationGuard` | boolean \| object | `true` | 🟢 ACTIVE | Collapse degenerate single-codepoint runs (e.g. 4655×「【」) in assistant text/thinking of the outgoing view and inject a one-shot recovery notice — breaks the abort loop where pi replays degenerated thinking back to the provider on every request (#351). |
+| `degenerationGuard` | boolean \| object | `true` | 🟢 ACTIVE | Collapse degenerate single-codepoint runs (e.g. 4655×「【」) in assistant text/thinking of the outgoing view and inject a one-shot recovery notice — breaks the abort loop where pi replays degenerated thinking back to the provider on every request. |
 | `hostSession` | boolean \| object | `false` | 🟢 ACTIVE | Turn-boundary policy for multi-session hosts: count injected `custom_message` entries as turn starts. Off by default (pi-native behavior). |
 | `rules` | boolean | `false` | 🟢 ACTIVE | Register the opt-in `acp_rule` record tool: short, principle-level reminders hard-protected from compression. Off by default. |
-| `compressionModelId` | string | _(unset)_ | 🟠 LOCAL FORK | Dedicated summary model (local port of PR #241). `"session"` = the active model in a separate call that reuses the captured prompt prefix (system prompt + active tools + sent messages); `"provider/id"` or a unique bare id = any model in Pi's live model registry (including extension-registered providers), fed the extracted range transcript. The main model still writes a short fallback summary per range: it guides the summary model, and is folded only when the model cannot be resolved or the host lacks nested completion. A range whose side call fails is not folded (retry later). Needs Pi >= 1.x (`ctx.modelRegistry.complete`). Manage with `/acp compact [session\|provider/id\|reset]` (writes the global `acp.json`; a project `acp.json` value still wins). |
+| `compressionModelId` | string | _(unset)_ | 🟠 LOCAL FORK | Dedicated summary model. `"session"` = the active model in a separate call that reuses the captured prompt prefix (system prompt + active tools + sent messages); `"provider/id"` or a unique bare id = any model in Pi's live model registry (including extension-registered providers), fed the extracted range transcript. The main model still writes a short fallback summary per range: it guides the summary model, and is folded only when the model cannot be resolved or the host lacks nested completion. A range whose side call fails is not folded (retry later). Needs Pi >= 1.x (`ctx.modelRegistry.complete`). Manage with `/acp compact [session\|provider/id\|reset]` (writes the global `acp.json`; a project `acp.json` value still wins). |
 
 **Provider throttle retry keys**
 
@@ -161,7 +161,7 @@ All keys below are currently **ACTIVE**.
 | `compress.emergencyThresholdPercent` | number \| string | `"95%"` | 🟢 ACTIVE | Context threshold that triggers emergency truncation. |
 | `compress.nudgeGrowthTokens` | number | `50000` | 🟢 ACTIVE | Token growth step for soft compression nudges. |
 | `compress.reasoning` | object | `{ "drop": true, "threshold": 2048 }` | 🟢 ACTIVE | Drop oversized thinking from historical `compress` calls (request-time; persisted history untouched). |
-| `compress.stripImages` | boolean | `false` | 🟢 ACTIVE | **Opt-in** wire-level strip of historical image payloads (issue #321). When `true`, every message older than the most recent `stripImagesKeepRecent` has its image parts dropped from the outbound provider body; image-only messages collapse to a `"[image]"` text placeholder. Supported wire dialects: anthropic-messages, openai-completions, openai-responses (incl. azure/codex variants). |
+| `compress.stripImages` | boolean | `false` | 🟢 ACTIVE | **Opt-in** wire-level strip of historical image payloads. When `true`, every message older than the most recent `stripImagesKeepRecent` has its image parts dropped from the outbound provider body; image-only messages collapse to a `"[image]"` text placeholder. Supported wire dialects: anthropic-messages, openai-completions, openai-responses (incl. azure/codex variants). |
 | `compress.stripImagesKeepRecent` | number | `5` | 🟢 ACTIVE | How many of the most recent messages keep their image payloads when `stripImages` is on. |
 
 **Prompts keys**
@@ -179,7 +179,7 @@ All keys below are currently **ACTIVE**.
 | `ACP_MODEL_CONTEXT_LIMIT` | Override the context limit (takes highest precedence). |
 | `ACP_DEBUG` | Set to `1` / `true` to enable debug logging. |
 | `ACP_LOG_FILE` | Override the log file path (default `~/.pi/acp.log`). |
-| `PI_ACP_FORK_HOST` | Set to `1` / `true` to declare a Pi-compatible fork host (no `buildContextEntries()`) as supported. OMP stays refused by default. See [docs/host-adapter.md](./docs/host-adapter.md). |
+| `PI_ACP_FORK_HOST` | Set to `1` / `true` to declare a Pi-compatible fork host (no `buildContextEntries()`) as supported. OMP stays refused by default. |
 
 > **Only the documented keys are read from `acp.json`.** Other tuning knobs (`preserveRecentMessages`) are code-level and not user-overridable. The three compression thresholds form a three-tier escalation: growth-driven soft nudges → forced nudges at `compress.maxContextLimit` → emergency truncation at `compress.emergencyThresholdPercent`.
 
@@ -206,7 +206,7 @@ All keys below are currently **ACTIVE**.
 - **Type:** `number`
 - **Default:** *(auto)* — the model's `contextWindow` read live each turn
 - **Status:** 🟢 ACTIVE
-- **Description:** Override the context limit, in tokens. By default the limit is read from the active model's `ctx.model.contextWindow` on every turn, so it stays correct when you switch models. Set an explicit value for deterministic test runs or headless/non-interactive sessions where the model metadata may be unavailable. The `ACP_MODEL_CONTEXT_LIMIT` environment variable takes precedence over this value. Note this value is also the **denominator of all percentage compression thresholds** (`maxContextLimit`, `emergencyThresholdPercent`) — lowering it moves every trigger point down proportionally. To keep day-to-day context small without shrinking this denominator, see [Soft target with elastic headroom](#soft-target-with-elastic-headroom-1122).
+- **Description:** Override the context limit, in tokens. By default the limit is read from the active model's `ctx.model.contextWindow` on every turn, so it stays correct when you switch models. Set an explicit value for deterministic test runs or headless/non-interactive sessions where the model metadata may be unavailable. The `ACP_MODEL_CONTEXT_LIMIT` environment variable takes precedence over this value. Note this value is also the **denominator of all percentage compression thresholds** (`maxContextLimit`, `emergencyThresholdPercent`) — lowering it moves every trigger point down proportionally. To keep day-to-day context small without shrinking this denominator, see [Soft target with elastic headroom](#soft-target-with-elastic-headroom).
 
 ### `outputHeadroomMaxPct`
 
@@ -249,7 +249,7 @@ All keys below are currently **ACTIVE**.
 - **Type:** `string[]` (tool-name patterns, glob suffix allowed)
 - **Default:** unset → kernel built-in `["decompress", "search_context", "read", "bash"]` (requires `acp-kernel` >= 0.0.92)
 - **Status:** 🟢 ACTIVE
-- **Description:** Tool-name patterns **excluded from the soft-protected recent zone** (`preserveRecentMessages` window): matching tool results inside the recent window become compressible immediately instead of aging out first. The kernel built-in keeps `read`/`bash` compressible because they are the largest reclaimable mass — but that same default folds freshly-read files right away in batch-read workflows and can descend into the fold→re-read death loop (upstream billion-context #1198/#1277). **Recommended remedy — remove only `read`:**
+- **Description:** Tool-name patterns **excluded from the soft-protected recent zone** (`preserveRecentMessages` window): matching tool results inside the recent window become compressible immediately instead of aging out first. The kernel built-in keeps `read`/`bash` compressible because they are the largest reclaimable mass — but that same default folds freshly-read files right away in batch-read workflows and can descend into the fold→re-read death loop. **Recommended remedy — remove only `read`:**
 
   ```json
   { "neverPreserveRecentTools": ["decompress", "search_context", "bash"] }
@@ -262,7 +262,7 @@ All keys below are currently **ACTIVE**.
 - **Type:** `string[]` (tool-name patterns, glob suffix allowed)
 - **Default:** unset → no subtraction (the `neverPreserveRecentTools` ?? kernel built-in list governs verbatim; requires `acp-kernel` >= 0.0.93)
 - **Status:** 🟢 ACTIVE
-- **Description:** The **positive counterpart** of `neverPreserveRecentTools`: tool-name patterns **removed from the effective recent-zone exclusion list**. Effective exclusion = `(neverPreserveRecentTools ?? built-in) minus preserveRecentTools`, computed in the kernel — so the #1198/#1277 batch-read fold→re-read remedy is one entry:
+- **Description:** The **positive counterpart** of `neverPreserveRecentTools`: tool-name patterns **removed from the effective recent-zone exclusion list**. Effective exclusion = `(neverPreserveRecentTools ?? built-in) minus preserveRecentTools`, computed in the kernel — so the batch-read fold→re-read remedy is one entry:
 
   ```json
   { "preserveRecentTools": ["read"] }
@@ -408,7 +408,7 @@ Any change to the arguments (or a switch to a different tool) resets the counter
 
 ## Degeneration Guard
 
-The `degenerationGuard` key handles **character-level degeneration**: a model occasionally gets stuck repeating one single codepoint — observed in the wild as a thinking block ending in 4655 consecutive 「【」, escalating over turns until the turn aborts and the session dies (#351). Unlike `repetitionGuard` (byte-identical *tool-call* loops), this is a *token-level* attractor inside generated text/thinking itself.
+The `degenerationGuard` key handles **character-level degeneration**: a model occasionally gets stuck repeating one single codepoint — observed in the wild as a thinking block ending in 4655 consecutive 「【」, escalating over turns until the turn aborts and the session dies. Unlike `repetitionGuard` (byte-identical *tool-call* loops), this is a *token-level* attractor inside generated text/thinking itself.
 
 Why the adapter must act: pi **replays prior assistant thinking back to the provider on every subsequent request** (openai-completions sends it as `reasoning_content`, or as plain text when the model requires thinking-as-text), and an aborted turn's partial message persists in the session log. A degenerated tail therefore rides along on every later prompt, where the model sees its own previous output ending in thousands of repeated characters — a continuation bias that re-triggers the same degeneration, aborts the next turn too, and leaves the session with no recovery path.
 
@@ -454,7 +454,7 @@ Tool-call arguments are never rewritten (rewriting them would desync the model's
 
 ## Host Multi-Session
 
-The `hostSession` key controls **turn-boundary detection** for hosts that run several sessions inside one process (e.g. Prime with inline RLM sub/sibling sessions). The full contract — including child-session state derivation (`deriveChildState`) — is documented in **[docs/host-adapter.md](./docs/host-adapter.md)**.
+The `hostSession` key controls **turn-boundary detection** for hosts that run several sessions inside one process. Hosts can derive child-session state with the exported `deriveChildState`.
 
 **Background.** ACP's per-turn ledgers (nudge-shown tracking, compress retry caps, outcome scoping) are keyed by the start of the current *turn*. Under Pi-native semantics a turn starts only at a genuine user-role message. Inline multi-session hosts additionally inject agent turns into the session log as `custom_message` entries; those are projected into LLM context (Pi-native semantics) but — under the default policy — start no turn, so several real host turns collapse into one turn key: nudge cadence cells misalign and retry-cap/throttle cycle statistics distort. Every turn-boundary decision in the adapter goes through the single predicate `isTurnBoundary(entry, policy)` (`src/turn-boundary.ts`).
 
@@ -488,7 +488,7 @@ The `hostSession` key controls **turn-boundary detection** for hosts that run se
 - **Type:** string[]
 - **Default:** unset (every non-empty injected type counts when opted in)
 - **Status:** 🟢 ACTIVE
-- **Description:** Optional `customType` allowlist refining `countCustomMessages`: when set (with `countCustomMessages: true`), only injected `custom_message` entries whose `customType` is listed start a turn — metadata injections that enter LLM context without being a real host turn (e.g. Prime's `harness_digest`, `ipython_state`) no longer reset nudge/retry accounting (#578). Entries without a `customType` never match; UI-only types (`acp-status`, `acp-export`, `acp-rule`) stay excluded even when listed. Ignored unless `countCustomMessages: true`; malformed values (non-array, non-string or empty-string members) warn and fall back to "all injected types count". An empty array is explicit "count none". Example above is Prime's set of genuine host-turn types.
+- **Description:** Optional `customType` allowlist refining `countCustomMessages`: when set (with `countCustomMessages: true`), only injected `custom_message` entries whose `customType` is listed start a turn — metadata injections that enter LLM context without being a real host turn no longer reset nudge/retry accounting. Entries without a `customType` never match; UI-only types (`acp-status`, `acp-export`, `acp-rule`) stay excluded even when listed. Ignored unless `countCustomMessages: true`; malformed values (non-array, non-string or empty-string members) warn and fall back to "all injected types count". An empty array is explicit "count none".
 
 ---
 
@@ -522,14 +522,14 @@ The flow is:
 - **Default:** `50000`
 - **Status:** 🟢 ACTIVE
 - **Description:** The token-growth threshold that controls the cadence of **soft** compression nudges. A soft nudge fires roughly every time this many tokens of new compressible content accumulate. A lower value means the model is nudged to compress more often; a higher value means less frequent nudges. This only governs *growth-driven* nudges — once usage crosses `compress.maxContextLimit`, forced nudges take over regardless of this setting. Maps to the kernel settings `nudge.growthFloor` and `nudge.growthCap`.
-- **Same-turn re-inject:** within one user turn a nudge injects at most once, but once the context has since grown by a full growth floor (mirroring the kernel's anti-thrashing cadence: `max(minGrowthFloor, minGrowthRatio × adaptiveGrowth)` — 22.5K tokens with defaults) a fresh reminder re-injects in the same turn (issue #269: a model that ignored a 78% nudge used to stay silent until the 95% emergency truncation). After a successful compress the growth baseline re-anchors to the new (smaller) scale, so post-compress regrowth into the pressure band is not held against the pre-compress peak.
+- **Same-turn re-inject:** within one user turn a nudge injects at most once, but once the context has since grown by a full growth floor (mirroring the kernel's anti-thrashing cadence: `max(minGrowthFloor, minGrowthRatio × adaptiveGrowth)` — 22.5K tokens with defaults) a fresh reminder re-injects in the same turn. After a successful compress the growth baseline re-anchors to the new (smaller) scale, so post-compress regrowth into the pressure band is not held against the pre-compress peak.
 
 ### `compress.reasoning`
 
 - **Type:** `object` — `{ "drop": boolean, "threshold": number }`
 - **Default:** `{ "drop": true, "threshold": 2048 }`
 - **Status:** 🟢 ACTIVE
-- **Description:** Config for dropping oversized reasoning (thinking) parts from historical `compress` tool calls — exact semantic alignment with [opencode-acp #377](https://github.com/ranxianglei/opencode-acp/pull/377). `compress` calls are hard-exempt from compression (their tool results anchor the block summaries), so their thinking rides along every request as an unreclaimable context floor. A request-time pass removes `thinking` parts from a message only when **all** gates hold:
+- **Description:** Config for dropping oversized reasoning (thinking) parts from historical `compress` tool calls. `compress` calls are hard-exempt from compression (their tool results anchor the block summaries), so their thinking rides along every request as an unreclaimable context floor. A request-time pass removes `thinking` parts from a message only when **all** gates hold:
   1. **Closed turn** — the message is strictly before the last genuine user message; the active round is never touched (some providers require replaying the active round's thinking).
   2. **Selector** — the message carries a `toolCall` part with name `compress` (only compress; other protected tools would need their own explicit config).
   3. **Size** — the message's total reasoning length (chars, summed across parts of that message, never across messages) **strictly exceeds** `threshold`. `0` drops any non-empty reasoning.
@@ -545,7 +545,7 @@ The flow is:
    { "compress": { "providers": { "openai": { "reasoning": { "drop": false } } } } }
    ```
 
-   **Strict-echo thinking upstreams (auto-disabled).** A few thinking-mode providers reject a rebuilt request with HTTP 400 (`The \`reasoning_content\` ... must be passed back to the API`) once a closed-round assistant message loses its reasoning. The adapter detects **DeepSeek** statically — the model's `baseUrl` or provider name contains `deepseek` (case-insensitive) — and forces `drop: false` for that model automatically, overriding an explicit `drop: true` for safety. This is cost-free for non-thinking DeepSeek models, which emit no `thinking` parts to drop. Strict-echo providers **not** on a `deepseek` host — GLM-thinking, QwQ, self-hosted DeepSeek mirrors — are deliberately not auto-detected (that would disable the pass for their non-thinking models); use the per-provider override above for those. Twin fixes: proxy-side billion-context#690 and kernel-side fold atomicity acp-kernel#245 (shipped in acp-kernel 0.0.63); tracked in [#361](https://github.com/ranxianglei/billion-context-pi/issues/361).
+   **Strict-echo thinking upstreams (auto-disabled).** A few thinking-mode providers reject a rebuilt request with HTTP 400 (`The \`reasoning_content\` ... must be passed back to the API`) once a closed-round assistant message loses its reasoning. The adapter detects **DeepSeek** statically — the model's `baseUrl` or provider name contains `deepseek` (case-insensitive) — and forces `drop: false` for that model automatically, overriding an explicit `drop: true` for safety. This is cost-free for non-thinking DeepSeek models, which emit no `thinking` parts to drop. Strict-echo providers **not** on a `deepseek` host — GLM-thinking, QwQ, self-hosted DeepSeek mirrors — are deliberately not auto-detected (that would disable the pass for their non-thinking models); use the per-provider override above for those.
 
 ### `compress.promptPack`
 
@@ -554,9 +554,9 @@ The flow is:
 - **Status:** 🟢 ACTIVE
 - **Description:** Selects a **prompt pack** — a named bundle of surface overrides (prompt sections, nudge sections, tool prompts, compression rules) applied as the base layer under your inline `acp.json` overrides. Resolved through the same three-level cascade as every other `compress.*` field: `models > providers > global`, per active model, per turn. See [Prompt Packs](#prompt-packs) for the full reference and the built-in `lean` pack.
 
-### Soft target with elastic headroom (#1122)
+### Soft target with elastic headroom
 
-Keeping day-to-day context small is a **cost target**, not a window size. The common misconfiguration behind [billion-context#1122](https://github.com/ranxianglei/billion-context/issues/1122) is setting `modelContextLimit` below the model's native window to express that target — e.g., a 70k limit on a 200k model "to keep things around 40k". Because every percentage threshold is measured against `modelContextLimit`, this anchors *all* triggers to the shrunken value: forced nudges start at 75% of 70k ≈ 52.5k, and lossy emergency truncation fires at ~66.5k — so a legitimate task that genuinely needs 80k of context gets compressed, and eventually truncated, mid-task.
+Keeping day-to-day context small is a **cost target**, not a window size. A common misconfiguration is setting `modelContextLimit` below the model's native window to express that target — e.g., a 70k limit on a 200k model "to keep things around 40k". Because every percentage threshold is measured against `modelContextLimit`, this anchors *all* triggers to the shrunken value: forced nudges start at 75% of 70k ≈ 52.5k, and lossy emergency truncation fires at ~66.5k — so a legitimate task that genuinely needs 80k of context gets compressed, and eventually truncated, mid-task.
 
 The recipe: keep the denominator at the true window and express the cost target through the existing soft threshold instead.
 
@@ -577,8 +577,8 @@ How compression actually gets triggered (three layers):
 
 Notes:
 
-- Setting `maxContextLimit` below 45% works correctly (the layers gate independent paths), but acp-kernel logs one validation warning per turn — log noise only, thresholds unaffected (tracked in acp-kernel#346).
-- Behavior delta vs the old low-limit config: the forced zone moves from 75%×old-limit up to chosen-%×native-window, and emergency truncation moves from ~95%×old-limit back to the true edge (~95%×native). Between the growth anchors and the forced zone, context may drift below your target — that drift is the price of elasticity. A strict ceiling *and* burst headroom simultaneously needs structure-aware compression ([billion-context#344](https://github.com/ranxianglei/billion-context/issues/344)), not a smaller denominator.
+- Setting `maxContextLimit` below 45% works correctly (the layers gate independent paths), but acp-kernel logs one validation warning per turn — log noise only, thresholds unaffected.
+- Behavior delta vs the old low-limit config: the forced zone moves from 75%×old-limit up to chosen-%×native-window, and emergency truncation moves from ~95%×old-limit back to the true edge (~95%×native). Between the growth anchors and the forced zone, context may drift below your target — that drift is the price of elasticity. A strict ceiling *and* burst headroom simultaneously needs structure-aware compression, not a smaller denominator.
 - All of this resolves through the three-level cascade below (`models > providers > global`), so different targets can coexist across models.
 
 ### `compress.providers` — per-provider & per-model overrides
@@ -767,7 +767,7 @@ interface PackSource {
 }
 ```
 
-Built-in packs, directory packs, and any managed registry all flow through one `createPackResolver([...sources])` — first match wins, so a **prepended source shadows everything**. That is the intended integration point for a future `bili-pi install`-style pack manager: write pack files into the user dir (zero code), or register a managed source ahead of the defaults — no core changes either way. Hosts embedding the adapter can build their own resolver and pass it to `resolveActivePack`.
+Built-in packs, directory packs, and any managed registry all flow through one `createPackResolver([...sources])` — first match wins, so a **prepended source shadows everything**. Hosts embedding the adapter can build their own resolver and pass it to `resolveActivePack`.
 
 ### Risk gating
 
@@ -778,7 +778,7 @@ A pack's `prompts` block overrides the compression rule strings, exactly like in
 | Name | Purpose |
 |------|---------|
 | `default` | No overrides — the full built-in surface. |
-| `lean` | Token-lean surface: one compact system-prompt block + one-line tool descriptions, no snippets/guidelines (≈76% smaller surface than `default` — measured 5422→1312 bytes). Compression rules stay kernel defaults, delivered by nudges on demand. Adapted from the community investigation in [#410](https://github.com/ranxianglei/billion-context-pi/issues/410). |
+| `lean` | Token-lean surface: one compact system-prompt block + one-line tool descriptions, no snippets/guidelines (≈76% smaller surface than `default` — measured 5422→1312 bytes). Compression rules stay kernel defaults, delivered by nudges on demand. |
 
 ### `lean` details
 
@@ -809,4 +809,4 @@ Environment variables take precedence over the JSON config files. They are usefu
 - **Type:** string (file path)
 - **Default:** `~/.pi/acp.log`
 - **Status:** 🟢 ACTIVE
-- **Description:** Override the path to the log file. By default, structured logs are written to `~/.pi/acp.log` (the file rotates to `~/.pi/acp.log.old` at 10 MB). Point this at a different location to keep per-project or per-run logs separate. On a Pi fork, `~/.pi` is the fork's own config directory (`~/.prime` on Prime) — see [docs/host-adapter.md §4](./docs/host-adapter.md#4-config-directory-config_dir_name).
+- **Description:** Override the path to the log file. By default, structured logs are written to `~/.pi/acp.log` (the file rotates to `~/.pi/acp.log.old` at 10 MB). Point this at a different location to keep per-project or per-run logs separate. On a Pi fork, `~/.pi` is the fork's own config directory.

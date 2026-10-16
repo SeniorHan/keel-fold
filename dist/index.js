@@ -17785,19 +17785,13 @@ function getSystemPromptText(ctx) {
 
 // src/omp.ts
 var UNSUPPORTED_HOST_MESSAGE = [
-  "[billion-context-pi] Unsupported host: no buildContextEntries() API and no PI_ACP_FORK_HOST declaration \u2014 ACP has been disabled for this session.",
-  "Pi-compatible fork (e.g. Prime) running sessions in-process? Opt in explicitly:",
-  "  PI_ACP_FORK_HOST=1 <your host command>",
-  'Contract: docs/host-adapter.md \u2192 "Supported-host detection".',
-  "OMP (oh-my-pi)? Use the billion-context proxy instead \u2014 it runs compression server-side and works on OMP:",
-  "  npm install -g billion-context",
-  "  bili omp",
-  "Docs: https://github.com/ranxianglei/billion-context"
+  "[billion-context-pi-lean] Unsupported host: no buildContextEntries() API and no PI_ACP_FORK_HOST declaration \u2014 ACP has been disabled for this session.",
+  "This extension is built for Pi. OMP (oh-my-pi) is not supported.",
+  "Pi-compatible fork running sessions in-process? Opt in explicitly:",
+  "  PI_ACP_FORK_HOST=1 <your host command>"
 ].join("\n");
 var FORK_HOST_WARNING_MESSAGE = [
-  '[billion-context-pi] Running on a declared fork host (PI_ACP_FORK_HOST). Live-tail refs are content-stable (#459); if compress ever fails with "does not exist in this session", this host rewrites its in-flight view \u2014 prefer the billion-context proxy for long sessions:',
-  "  npm install -g billion-context",
-  "  bili omp"
+  '[billion-context-pi-lean] Running on a declared fork host (PI_ACP_FORK_HOST). Live-tail refs are content-stable (#459); if compress ever fails with "does not exist in this session", this host rewrites its in-flight view and is not supported.'
 ].join("\n");
 
 // src/compress-model.ts

@@ -70,10 +70,9 @@ describe("isUnsupportedHost", () => {
 });
 
 describe("UNSUPPORTED_HOST_MESSAGE", () => {
-  test("points at both remedies: fork opt-in and OMP proxy", () => {
+  test("points at the fork opt-in and advertises no upstream proxy", () => {
     assert.ok(UNSUPPORTED_HOST_MESSAGE.includes("PI_ACP_FORK_HOST"));
     assert.ok(UNSUPPORTED_HOST_MESSAGE.includes("buildContextEntries"));
-    assert.ok(UNSUPPORTED_HOST_MESSAGE.includes("bili omp"));
-    assert.ok(UNSUPPORTED_HOST_MESSAGE.includes("billion-context"));
+    assert.ok(!UNSUPPORTED_HOST_MESSAGE.includes("bili"), "no upstream proxy advertising");
   });
 });

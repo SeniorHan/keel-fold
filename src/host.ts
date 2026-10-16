@@ -23,7 +23,7 @@ export function entrySourceOf(sm: ExtensionContext["sessionManager"]): EntrySour
  * The SessionManager shape alone cannot distinguish e.g. Prime from OMP — both are
  * Pi forks exposing `getBranch()` but not `buildContextEntries()` — so an
  * unsupported shape requires an explicit declaration before the adapter runs.
- * Read at call time so hosts can set it per-launch. See docs/host-adapter.md.
+ * Read at call time so hosts can set it per-launch.
  */
 export function isDeclaredForkHost(): boolean {
   const v = process.env.PI_ACP_FORK_HOST;

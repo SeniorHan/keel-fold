@@ -2,7 +2,7 @@
 
 [English](./CONFIGURATION.md) | [中文](./CONFIGURATION.zh-CN.md)
 
-**billion-context-pi** 开箱即用，无需任何配置——它会自动读取模型的上下文窗口并应用合理的默认值。本文档是可选 JSON 配置文件（`acp.json`）和环境变量的完整参考，用于调整行为。
+**billion-context-pi-lean** 开箱即用，无需任何配置——它会自动读取模型的上下文窗口并应用合理的默认值。本文档是可选 JSON 配置文件（`acp.json`）和环境变量的完整参考，用于调整行为。
 
 配置是分层的：环境变量优先级最高，其次是项目配置文件，再次是全局配置文件，最后是内置默认值。
 
@@ -19,7 +19,7 @@
 
 > **优先级：** 环境变量 &gt; 项目文件 &gt; 全局文件 &gt; 内置默认值。
 
-在 Pi 的 fork 上，`.pi` 指该 fork 自己的配置目录——Prime 上为 `~/.prime/acp.json` 和 `<项目>/.prime/acp.json`。在该文件存在之前，仍会读取上表的 `.pi` 路径。见 [docs/host-adapter.md §4](./docs/host-adapter.md#4-config-directory-config_dir_name)。
+在 Pi 的 fork 上，`.pi` 指该 fork 自己的配置目录。在该文件存在之前，仍会读取上表的 `.pi` 路径。
 
 文件在会话启动时加载。缺失文件、格式错误的 JSON、未知键都会被静默忽略——扩展绝不会因为配置问题而无法启动。只有文档中列出的键会被读取，其余一律丢弃。
 
@@ -124,10 +124,10 @@
 | `protectedTools` | string\[\] | `无` | 🟢 ACTIVE | 工具名模式（支持 glob 后缀），其**所有** call+result 对都被硬排除在压缩之外（ref 渲染为 `BLOCKED`）。适用于低频高价值、输出为独立内容的工具——见下方 ⚠ 说明。 |
 | `protectedLatestTools` | string\[\] | `无` | 🟢 ACTIVE | 工具名模式（支持 glob 后缀），仅**最近一次** call+result 对被硬排除在压缩之外；更早的对仍可压缩。适用于累积快照型工具。 |
 | `neverPreserveRecentTools` | string\[\] | 内核内置（`["decompress", "search_context", "read", "bash"]`，需 acp-kernel >= 0.0.92） | 🟢 ACTIVE | 从软保护近期区**移除**的工具名模式，让它们的结果立即可压。默认让 `read`/`bash` 保持可压；只移除 `read`（保留 `decompress`/`search_context`）可解批量读文件的「折叠→重读」死循环。**空数组 `[]` 合法**（最大保护逃生门）。 |
-| `preserveRecentTools` | string\[\] | 未设置（不做减法；需 `acp-kernel` >= 0.0.93） | 🟢 ACTIVE | `neverPreserveRecentTools` 的**正向配对**：从内核计算的生效排除表中**移除**的工具名模式 —— 单条 `["read"]` 即 #1198/#1277 的解法，无需重述内置列表。**空数组 `[]` 不合法**（纯无操作，是 `neverPreserveRecentTools: []` 的笔误）。 |
+| `preserveRecentTools` | string\[\] | 未设置（不做减法；需 `acp-kernel` >= 0.0.93） | 🟢 ACTIVE | `neverPreserveRecentTools` 的**正向配对**：从内核计算的生效排除表中**移除**的工具名模式 —— 单条 `["read"]` 即批量读文件「折叠→重读」死循环的解法，无需重述内置列表。**空数组 `[]` 不合法**（纯无操作，是 `neverPreserveRecentTools: []` 的笔误）。 |
 | `throttleRetry` | boolean \| object | `true` | 🟢 ACTIVE | 自动重试 provider 侧 token 限流错误（递进退避）。 |
 | `repetitionGuard` | boolean \| object | `true` | 🟢 ACTIVE | 打断字节级完全相同的工具调用死循环（连续 3 次告警，连续 5 次拦截并中止本轮）。 |
-| `degenerationGuard` | boolean \| object | `true` | 🟢 ACTIVE | 折叠出站视图中 assistant text/thinking 里的单字符退化连击（如 4655×「【」）并注入一次性恢复通知——打破 pi 每轮请求都回传退化 thinking 导致的连环 abort 死循环（#351）。 |
+| `degenerationGuard` | boolean \| object | `true` | 🟢 ACTIVE | 折叠出站视图中 assistant text/thinking 里的单字符退化连击（如 4655×「【」）并注入一次性恢复通知——打破 pi 每轮请求都回传退化 thinking 导致的连环 abort 死循环。 |
 | `hostSession` | boolean \| object | `false` | 🟢 ACTIVE | 多会话宿主的回合边界策略：是否把注入的 `custom_message` 计为回合起点。默认关闭（pi 原生行为）。 |
 | `rules` | boolean | `false` | 🟢 ACTIVE | 注册可选的 `acp_rule` 记录工具：简短、原则性的提醒，硬保护免于压缩。默认关闭。 |
 
@@ -159,7 +159,7 @@
 | `compress.emergencyThresholdPercent` | number \| string | `"95%"` | 🟢 ACTIVE | 触发紧急截断的上下文阈值。 |
 | `compress.nudgeGrowthTokens` | number | `50000` | 🟢 ACTIVE | 软压缩 nudge 的 token 增长步长。 |
 | `compress.reasoning` | object | `{ "drop": true, "threshold": 2048 }` | 🟢 ACTIVE | 请求时丢弃历史 `compress` 调用上的超大思考（不修改持久化历史）。 |
-| `compress.stripImages` | boolean | `false` | 🟢 ACTIVE | **可选开启**：wire 层剥离历史图像载荷（issue #321）。为 `true` 时，除最近 `stripImagesKeepRecent` 条消息外，历史消息的图像部分在上游请求体中被剥离；纯图像消息折叠为 `"[image]"` 文本占位符。支持协议：anthropic-messages、openai-completions、openai-responses（含 azure/codex 变体）。 |
+| `compress.stripImages` | boolean | `false` | 🟢 ACTIVE | **可选开启**：wire 层剥离历史图像载荷。为 `true` 时，除最近 `stripImagesKeepRecent` 条消息外，历史消息的图像部分在上游请求体中被剥离；纯图像消息折叠为 `"[image]"` 文本占位符。支持协议：anthropic-messages、openai-completions、openai-responses（含 azure/codex 变体）。 |
 | `compress.stripImagesKeepRecent` | number | `5` | 🟢 ACTIVE | `stripImages` 开启时保留图像载荷的最近消息条数。 |
 
 **prompts 键**
@@ -180,7 +180,7 @@
 | `ACP_MODEL_CONTEXT_LIMIT` | 覆盖上下文窗口大小（优先级最高）。 |
 | `ACP_DEBUG` | 设为 `1` / `true` 开启调试日志。 |
 | `ACP_LOG_FILE` | 覆盖日志文件路径（默认 `~/.pi/acp.log`）。 |
-| `PI_ACP_FORK_HOST` | 设为 `1` / `true` 声明当前宿主是兼容 Pi 的 fork（无 `buildContextEntries()`），使其被识别为受支持宿主。OMP 默认仍被拒绝。见 [docs/host-adapter.md](./docs/host-adapter.md)。 |
+| `PI_ACP_FORK_HOST` | 设为 `1` / `true` 声明当前宿主是兼容 Pi 的 fork（无 `buildContextEntries()`），使其被识别为受支持宿主。OMP 默认仍被拒绝。 |
 
 > **只有文档中列出的键才会从 `acp.json` 读取。** 其他调优参数（`preserveRecentMessages`）是代码级别的，不开放给用户。三个压缩阈值构成三级递进：基于增长的软 nudge → 越过 `compress.maxContextLimit` 后的强制 nudge → 越过 `compress.emergencyThresholdPercent` 后的紧急截断。
 
@@ -200,7 +200,7 @@
 - **类型：** `number`
 - **默认值：** *(自动)* —— 每轮实时读取模型的 `contextWindow`
 - **状态：** 🟢 ACTIVE
-- **说明：** 覆盖上下文窗口大小（token 数）。默认每轮从活跃模型的 `ctx.model.contextWindow` 读取，切换模型时自动保持正确。在模型元数据可能不可用的测试或无头/非交互会话中，可设置显式值。环境变量 `ACP_MODEL_CONTEXT_LIMIT` 优先于此值。注意该值同时也是**所有百分比压缩阈值的分母**（`maxContextLimit`、`emergencyThresholdPercent`）——调低它会按比例把所有触发点下移。要在不缩小这个分母的前提下保持日常上下文偏小，见[软目标与弹性余量](#软目标与弹性余量-1122)。
+- **说明：** 覆盖上下文窗口大小（token 数）。默认每轮从活跃模型的 `ctx.model.contextWindow` 读取，切换模型时自动保持正确。在模型元数据可能不可用的测试或无头/非交互会话中，可设置显式值。环境变量 `ACP_MODEL_CONTEXT_LIMIT` 优先于此值。注意该值同时也是**所有百分比压缩阈值的分母**（`maxContextLimit`、`emergencyThresholdPercent`）——调低它会按比例把所有触发点下移。要在不缩小这个分母的前提下保持日常上下文偏小，见[软目标与弹性余量](#软目标与弹性余量)。
 
 ### `outputHeadroomMaxPct`
 
@@ -243,7 +243,7 @@
 - **类型：** `string[]`（工具名模式，支持 glob 后缀）
 - **默认值：** 未设置 → 内核内置 `["decompress", "search_context", "read", "bash"]`（需 `acp-kernel` >= 0.0.92）
 - **状态：** 🟢 ACTIVE
-- **说明：** 从软保护近期区（`preserveRecentMessages` 窗口）中**排除**的工具名模式：匹配的工具结果在近期窗口内立即可压缩，不再等待超龄。内核内置让 `read`/`bash` 保持可压（它们是最大的可回收体量）—— 但正是这个默认让批量读文件的工作流把刚读的文件立刻折掉，陷入「折叠→重读」死循环（上游 billion-context #1198/#1277）。**推荐解法 —— 只移除 `read`：**
+- **说明：** 从软保护近期区（`preserveRecentMessages` 窗口）中**排除**的工具名模式：匹配的工具结果在近期窗口内立即可压缩，不再等待超龄。内核内置让 `read`/`bash` 保持可压（它们是最大的可回收体量）—— 但正是这个默认让批量读文件的工作流把刚读的文件立刻折掉，陷入「折叠→重读」死循环。**推荐解法 —— 只移除 `read`：**
 
   ```json
   { "neverPreserveRecentTools": ["decompress", "search_context", "bash"] }
@@ -256,7 +256,7 @@
 - **类型：** `string[]`（工具名模式，支持 glob 后缀）
 - **默认值：** 未设置 → 不做减法（`neverPreserveRecentTools` ?? 内核内置列表逐字生效；需 `acp-kernel` >= 0.0.93）
 - **状态：** 🟢 ACTIVE
-- **说明：** `neverPreserveRecentTools` 的**正向配对旋钮**：从生效的近期区排除列表中**移除**的工具名模式。生效排除表 = `(neverPreserveRecentTools ?? 内置) 减 preserveRecentTools`，由内核计算 —— 因此 #1198/#1277 批量读文件「折叠→重读」死循环的解法只需一条：
+- **说明：** `neverPreserveRecentTools` 的**正向配对旋钮**：从生效的近期区排除列表中**移除**的工具名模式。生效排除表 = `(neverPreserveRecentTools ?? 内置) 减 preserveRecentTools`，由内核计算 —— 因此批量读文件「折叠→重读」死循环的解法只需一条：
 
   ```json
   { "preserveRecentTools": ["read"] }
@@ -402,7 +402,7 @@
 
 ## 单字符退化熔断
 
-`degenerationGuard` 键处理**字符级退化**：模型偶发卡死在重复单个 codepoint 上——实测一例为 thinking 块末尾 4655 个连续「【」，跨轮升级直至 turn abort、会话停死（#351）。与 `repetitionGuard`（字节级相同的*工具调用*循环）不同，这是生成文本/thinking *内部*的 token 级吸引子。
+`degenerationGuard` 键处理**字符级退化**：模型偶发卡死在重复单个 codepoint 上——实测一例为 thinking 块末尾 4655 个连续「【」，跨轮升级直至 turn abort、会话停死。与 `repetitionGuard`（字节级相同的*工具调用*循环）不同，这是生成文本/thinking *内部*的 token 级吸引子。
 
 为什么必须由适配器出手：pi 会把历史 assistant thinking **在每个后续请求中回传给 provider**（openai-completions 以 `reasoning_content` 发送；模型要求 thinking-as-text 时转纯文本），而 aborted turn 的部分消息会持久化在会话日志里。于是退化尾部随每轮 prompt 重放：模型看到自己上一轮以数千个重复字符结尾 → 续写偏置再次触发同样的退化 → 下一轮也 abort → 会话陷入无恢复路径的 abort 死循环。
 
@@ -448,7 +448,7 @@
 
 ## 宿主多会话
 
-`hostSession` 键控制**回合边界判定**，面向在单进程内运行多个会话的宿主（如 Prime 的内联 RLM 子/兄弟会话）。完整契约——包括子会话状态派生（`deriveChildState`）——见 **[docs/host-adapter.md](./docs/host-adapter.md)**。
+`hostSession` 键控制**回合边界判定**，面向在单进程内运行多个会话的宿主。宿主可用导出的 `deriveChildState` 派生子会话状态。
 
 **背景。** ACP 的按回合账本（nudge 已展示追踪、compress 重试上限、结果归口）以"当前回合起点"为键。pi 原生语义下，只有真正的 user-role 消息开启新回合。内联多会话宿主还会把 agent 回合以 `custom_message` 条目注入会话日志；这些条目会进入 LLM 上下文（pi 原生投影），但在默认策略下**不开启回合**——多个真实宿主回合塌缩进同一个 turnKey：nudge 节奏格子错位、按回合 compress 重试上限跨回合失真、节流/溢出周期统计失真。适配器中所有回合边界判定都走同一谓词 `isTurnBoundary(entry, policy)`（`src/turn-boundary.ts`）。
 
@@ -482,7 +482,7 @@
 - **类型：** string[]
 - **默认值：** 未设置（开启 `countCustomMessages` 后，一切非空注入类型都计为回合起点）
 - **状态：** 🟢 ACTIVE
-- **说明：** 可选的 `customType` 白名单，细化 `countCustomMessages`：设置后（且 `countCustomMessages: true`），只有 `customType` 在列表内的注入 `custom_message` 条目才开启回合——进入 LLM 上下文但并非真实宿主回合的元数据注入（如 Prime 的 `harness_digest`、`ipython_state`）不再重置 nudge/重试账本（#578）。无 `customType` 的条目永不匹配；UI-only 类型（`acp-status`、`acp-export`、`acp-rule`）即使列出也保持排除。未开 `countCustomMessages: true` 时忽略；非法值（非数组、非字符串或空字符串成员）告警并回退到「全部注入类型都计数」。空数组表示显式「一个都不计」。上方示例即 Prime 的真实宿主回合类型集合。
+- **说明：** 可选的 `customType` 白名单，细化 `countCustomMessages`：设置后（且 `countCustomMessages: true`），只有 `customType` 在列表内的注入 `custom_message` 条目才开启回合——进入 LLM 上下文但并非真实宿主回合的元数据注入不再重置 nudge/重试账本。无 `customType` 的条目永不匹配；UI-only 类型（`acp-status`、`acp-export`、`acp-rule`）即使列出也保持排除。未开 `countCustomMessages: true` 时忽略；非法值（非数组、非字符串或空字符串成员）告警并回退到「全部注入类型都计数」。空数组表示显式「一个都不计」。
 
 ---
 
@@ -516,14 +516,14 @@
 - **默认值：** `50000`
 - **状态：** 🟢 ACTIVE
 - **说明：** 控制**软**压缩 nudge 频率的 token 增长阈值。每当积累约这么多新可压缩内容时，触发一次软 nudge。值越低模型被 nudge 压缩的频率越高；值越高频率越低。此设置只控制*基于增长的* nudge——用量越过 `compress.maxContextLimit` 后，强制 nudge 接管，不受此设置影响。映射到内核设置 `nudge.growthFloor` 和 `nudge.growthCap`。
-- **同轮重注入：** 同一用户轮内 nudge 至多注入一次，但上下文自上次注入后又增长满一个增长门槛（镜像内核防抖 cadence：`max(minGrowthFloor, minGrowthRatio × adaptiveGrowth)`，默认 22.5K token）时，会在同轮重新注入新提醒（issue #269：模型忽略 78% nudge 后，原来会一直沉默到 95% emergency 机械截断）。成功 compress 后增长基线重锚到新（更小）刻度，压缩后重新长回压力带不会被压缩前峰值压制。
+- **同轮重注入：** 同一用户轮内 nudge 至多注入一次，但上下文自上次注入后又增长满一个增长门槛（镜像内核防抖 cadence：`max(minGrowthFloor, minGrowthRatio × adaptiveGrowth)`，默认 22.5K token）时，会在同轮重新注入新提醒。成功 compress 后增长基线重锚到新（更小）刻度，压缩后重新长回压力带不会被压缩前峰值压制。
 
 ### `compress.reasoning`
 
 - **类型：** `object` —— `{ "drop": boolean, "threshold": number }`
 - **默认值：** `{ "drop": true, "threshold": 2048 }`
 - **状态：** 🟢 ACTIVE
-- **说明：** 控制从历史 `compress` 工具调用中丢弃超大 reasoning（思考）部分，与 [opencode-acp #377](https://github.com/ranxianglei/opencode-acp/pull/377) 完全对齐。`compress` 调用被硬排除在压缩之外（其工具结果是块摘要的锚点），其思考会随每次请求原样重发，形成无法回收的上下文底座。一个请求时 pass 只在**全部**门控满足时移除 `thinking` 部分：
+- **说明：** 控制从历史 `compress` 工具调用中丢弃超大 reasoning（思考）部分。`compress` 调用被硬排除在压缩之外（其工具结果是块摘要的锚点），其思考会随每次请求原样重发，形成无法回收的上下文底座。一个请求时 pass 只在**全部**门控满足时移除 `thinking` 部分：
   1. **已闭合轮次** —— 消息严格位于最后一条真实用户消息之前；活跃轮永不触碰（部分 provider 要求回放活跃轮思考）。
   2. **选择器** —— 消息携带 `toolCall` 部分且 name 为 `compress`（仅 compress；其他保护工具如需支持应单独显式配置）。
   3. **大小** —— 该消息 reasoning 总长（字符数，仅对该消息各部分求和，不跨消息累计）**严格大于** `threshold` 才丢弃；`0` 表示丢弃任何非空 reasoning。
@@ -539,7 +539,7 @@
    { "compress": { "providers": { "openai": { "reasoning": { "drop": false } } } } }
    ```
 
-   **严格回传的思考型上游（自动禁用）。** 少数思考模式 provider 在已闭合轮次的 assistant 消息丢失 reasoning 后，会以 HTTP 400（`The \`reasoning_content\` ... must be passed back to the API`）拒绝重放请求。适配器通过静态检测识别 **DeepSeek**——模型的 `baseUrl` 或 provider 名包含 `deepseek`（不区分大小写）——并对该模型自动强制 `drop: false`，即使显式配置了 `drop: true` 也会为安全起见覆盖。对非思考的 DeepSeek 模型零成本（它们不产生可丢弃的 `thinking` 部分）。**不在** `deepseek` 主机上的严格回传 provider——GLM-thinking、QwQ、自托管 DeepSeek 镜像——刻意不做自动检测（否则会禁用其非思考模型的该 pass），请对它们使用上面的按 provider 覆盖。配套修复：代理侧 billion-context#690、内核侧折叠原子性 acp-kernel#245（随 acp-kernel 0.0.63 发布）；跟踪于 [#361](https://github.com/ranxianglei/billion-context-pi/issues/361)。
+   **严格回传的思考型上游（自动禁用）。** 少数思考模式 provider 在已闭合轮次的 assistant 消息丢失 reasoning 后，会以 HTTP 400（`The \`reasoning_content\` ... must be passed back to the API`）拒绝重放请求。适配器通过静态检测识别 **DeepSeek**——模型的 `baseUrl` 或 provider 名包含 `deepseek`（不区分大小写）——并对该模型自动强制 `drop: false`，即使显式配置了 `drop: true` 也会为安全起见覆盖。对非思考的 DeepSeek 模型零成本（它们不产生可丢弃的 `thinking` 部分）。**不在** `deepseek` 主机上的严格回传 provider——GLM-thinking、QwQ、自托管 DeepSeek 镜像——刻意不做自动检测（否则会禁用其非思考模型的该 pass），请对它们使用上面的按 provider 覆盖。
 
 ### `compress.promptPack`
 
@@ -548,9 +548,9 @@
 - **状态：** 🟢 ACTIVE
 - **描述：** 选择一个**提示词包（prompt pack）**——一组命名的表面覆盖（提示词分段、nudge 分段、工具提示词、四条压缩规则），作为 `acp.json` 内联覆盖之下的基础层生效。与其他 `compress.*` 字段走同一三级级联：`models > providers > global`，逐回合按当前模型解析。完整参考与内置 `lean` 包见[提示词包](#提示词包)。
 
-### 软目标与弹性余量 (#1122)
+### 软目标与弹性余量
 
-「日常保持小上下文」是一个**成本目标**，不是窗口大小。[billion-context#1122](https://github.com/ranxianglei/billion-context/issues/1122) 背后的常见误配，就是把 `modelContextLimit` 设到模型原生窗口以下来表达这个目标——例如在 200k 的模型上设 70k 限制来「保持在 40k 左右」。由于所有百分比阈值都以 `modelContextLimit` 为分母，这会把*所有*触发点锚定到缩小后的值：强制 nudge 从 70k 的 75% ≈ 52.5k 开始，有损的紧急截断在 ~66.5k 就触发——于是真正需要 80k 上下文的合法任务会在中途被反复压缩、最终被截断。
+「日常保持小上下文」是一个**成本目标**，不是窗口大小。常见误配是把 `modelContextLimit` 设到模型原生窗口以下来表达这个目标——例如在 200k 的模型上设 70k 限制来「保持在 40k 左右」。由于所有百分比阈值都以 `modelContextLimit` 为分母，这会把*所有*触发点锚定到缩小后的值：强制 nudge 从 70k 的 75% ≈ 52.5k 开始，有损的紧急截断在 ~66.5k 就触发——于是真正需要 80k 上下文的合法任务会在中途被反复压缩、最终被截断。
 
 配方：**分母保持在真实窗口，成本目标改用现成的软阈值表达。**
 
@@ -571,8 +571,8 @@
 
 注意：
 
-- `maxContextLimit` 设到 45% 以下功能正确（各层门控相互独立），但 acp-kernel 每轮会打一条校验告警——纯日志噪音，阈值不受影响（跟踪于 acp-kernel#346）。
-- 与旧的「低限制」配置相比的行为差异：强制区从 75%×旧限制 上移到 所选%×原生窗口，紧急截断从 ~95%×旧限制 回到真实边缘（~95%×原生）。增长锚点与强制区之间，上下文可能漂移到目标之下——这个漂移就是弹性的代价。若需要同时满足「严格上限 + 突发余量」，需要结构感知压缩（[billion-context#344](https://github.com/ranxianglei/billion-context/issues/344)），而不是缩小分母。
+- `maxContextLimit` 设到 45% 以下功能正确（各层门控相互独立），但 acp-kernel 每轮会打一条校验告警——纯日志噪音，阈值不受影响。
+- 与旧的「低限制」配置相比的行为差异：强制区从 75%×旧限制 上移到 所选%×原生窗口，紧急截断从 ~95%×旧限制 回到真实边缘（~95%×原生）。增长锚点与强制区之间，上下文可能漂移到目标之下——这个漂移就是弹性的代价。若需要同时满足「严格上限 + 突发余量」，需要结构感知压缩，而不是缩小分母。
 - 以上全部通过下文的三级级联（`models > providers > global`）解析，不同模型可以共存不同目标。
 
 ### `compress.providers` —— 按 provider / 按 model 覆盖
@@ -761,7 +761,7 @@ interface PackSource {
 }
 ```
 
-内置包、目录包、任何托管注册表全部走同一个 `createPackResolver([...sources])`——首个命中者胜，**前置的 source 可遮蔽一切**。这就是为将来 `bili-pi install` 式包管理器预留的集成点：把包文件写进用户目录（零代码），或在默认链前面注册一个 managed source——两条路都不改核心。内嵌适配器的宿主也可以自建 resolver 传给 `resolveActivePack`。
+内置包、目录包、任何托管注册表全部走同一个 `createPackResolver([...sources])`——首个命中者胜，**前置的 source 可遮蔽一切**。内嵌适配器的宿主也可以自建 resolver 传给 `resolveActivePack`。
 
 ### 风险门
 
@@ -772,7 +772,7 @@ interface PackSource {
 | 名称 | 用途 |
 |------|------|
 | `default` | 无覆盖——完整内置表面。 |
-| `lean` | Token 精简表面：一个紧凑系统提示词块 + 单行工具描述，无 snippet/guidelines（实测 5422→1312 字节，约省 76%）。压缩规则保持内核默认，由 nudge 按需送达。改编自社区调研 [#410](https://github.com/ranxianglei/billion-context-pi/issues/410)。 |
+| `lean` | Token 精简表面：一个紧凑系统提示词块 + 单行工具描述，无 snippet/guidelines（实测 5422→1312 字节，约省 76%）。压缩规则保持内核默认，由 nudge 按需送达。 |
 
 ### `lean` 细节
 
@@ -803,4 +803,4 @@ interface PackSource {
 - **类型：** 字符串（文件路径）
 - **默认值：** `~/.pi/acp.log`
 - **状态：** 🟢 ACTIVE
-- **说明：** 覆盖日志文件路径。默认情况下，结构化日志写入 `~/.pi/acp.log`（文件在 10MB 时轮转为 `~/.pi/acp.log.old`）。指向不同位置可为每个项目或每次运行保留独立日志。在 Pi 的 fork 上，`~/.pi` 指该 fork 自己的配置目录（Prime 上为 `~/.prime`）——见 [docs/host-adapter.md §4](./docs/host-adapter.md#4-config-directory-config_dir_name)。
+- **说明：** 覆盖日志文件路径。默认情况下，结构化日志写入 `~/.pi/acp.log`（文件在 10MB 时轮转为 `~/.pi/acp.log.old`）。指向不同位置可为每个项目或每次运行保留独立日志。在 Pi 的 fork 上，`~/.pi` 指该 fork 自己的配置目录。

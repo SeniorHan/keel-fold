@@ -1,4 +1,4 @@
-// Host-adapter contract reachability (docs/host-adapter.md, issue #367): every
+// Host-adapter contract reachability (issue #367): every
 // symbol under test is imported ONLY from the package name "billion-context-pi-lean"
 // (Node self-reference → dist/index.js), never from relative src paths. This
 // pins the documented entrypoint surface; acp-kernel is used for fixtures only.

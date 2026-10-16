@@ -41,7 +41,7 @@ function dirNameFromAgentDir(getAgentDir: unknown, home: string): string | undef
  * 3. ".pi".
  * The namespace import is deliberate: a missing named export fails at link time
  * under plain Node ESM→CJS interop and as `undefined` under loader aliasing (#364).
- * It is the ONLY value import from the pi package. See docs/host-adapter.md §4.
+ * It is the ONLY value import from the pi package.
  */
 export function resolveConfigDirName(host: HostConfigSurface, home: string): string {
   if (isDirName(host.CONFIG_DIR_NAME)) return host.CONFIG_DIR_NAME;

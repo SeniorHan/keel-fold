@@ -53,7 +53,7 @@ import { FORK_HOST_WARNING_MESSAGE, UNSUPPORTED_HOST_MESSAGE } from "./omp.js";
 import { isDeclaredForkHost, isUnsupportedHost } from "./host.js";
 import { isBiliProxyBaseUrl, PROXY_STAND_DOWN_MESSAGE, nativeStandDownMessage } from "./proxy-detect.js";
 
-// Host-facing API for multi-session hosts (docs/host-adapter.md, #367): the
+// Host-facing API for multi-session hosts (#367): the
 // extension keeps its own runtime instance private; hosts build their own via
 // createRuntime — derivation works across instances because it only touches
 // on-disk sidecars through session refs.

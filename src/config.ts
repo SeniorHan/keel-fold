@@ -205,7 +205,7 @@ export interface AdapterConfig {
    *  behavior where only genuine user-role messages start a turn, so existing
    *  single-session users' nudge cadence is unchanged. Enable for inline
    *  multi-session hosts (Prime RLM & co.) whose injected agent messages must
-   *  delimit real turns. See docs/host-adapter.md. */
+   *  delimit real turns. */
   hostSession?: boolean | HostSessionConfig;
   /** Persistent-rules feature gate (#526): opt-in `rules: true` in acp.json.
    *  Gates the human `/acp-rule` command (list + record + remove + clear — kernel

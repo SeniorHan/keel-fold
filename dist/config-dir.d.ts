@@ -16,7 +16,7 @@ export declare const PI_CONFIG_DIR_NAME = ".pi";
  * 3. ".pi".
  * The namespace import is deliberate: a missing named export fails at link time
  * under plain Node ESM→CJS interop and as `undefined` under loader aliasing (#364).
- * It is the ONLY value import from the pi package. See docs/host-adapter.md §4.
+ * It is the ONLY value import from the pi package.
  */
 export declare function resolveConfigDirName(host: HostConfigSurface, home: string): string;
 export declare const CONFIG_DIR_NAME: string;
