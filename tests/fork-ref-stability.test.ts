@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { readFile, rm } from "node:fs/promises";
 import { createAcpExtension } from "../src/index.js";
 import { isCompressNoopText } from "../src/compress-tool.js";
-import { setRunNpmForTest } from "../src/update.js";
 import { tmpPath } from "./tmp-path.js";
 
 // Issue #459 (root fix for the #452 loop under declared fork hosts):
@@ -17,8 +16,6 @@ import { tmpPath } from "./tmp-path.js";
 //   3. refs captured on one fire still resolve on the next — a compress
 //      built from nudge-example refs succeeds end-to-end.
 
-setRunNpmForTest(async (args) => ({ code: 0, stdout: args[0] === "view" ? "0.0.1\n" : "", stderr: "" }));
-process.env.ACP_AUTO_UPDATE = "false";
 delete process.env.BILLION_CONTEXT_PROXY;
 
 function captureApi() {

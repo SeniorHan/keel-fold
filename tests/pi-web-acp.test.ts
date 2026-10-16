@@ -81,7 +81,7 @@ async function createPiWebSession(opts: { seedExport?: boolean } = {}): Promise<
   for (const d of [agentDir, cwd, sessionDir]) mkdirSync(d, { recursive: true });
   if (opts.seedExport) seedExportableSession(sessionDir);
 
-  const factory = createAcpExtension({ autoUpdate: false });
+  const factory = createAcpExtension({});
   const resourceLoader = new DefaultResourceLoader({
     cwd,
     agentDir,

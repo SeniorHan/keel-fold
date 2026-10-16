@@ -322,7 +322,7 @@ function facadeTool(tools: Map<string, CapturedTool>): ToolDefinition<typeof FAC
 }
 
 export function createLeanAcpExtension(
-  upstream: UpstreamExtension = createAcpExtension({ autoUpdate: false, externalSystemPrompt: true }),
+  upstream: UpstreamExtension = createAcpExtension({ externalSystemPrompt: true }),
 ): (pi: ExtensionAPI) => void {
   return (pi: ExtensionAPI): void => {
     const tools = new Map<string, CapturedTool>();

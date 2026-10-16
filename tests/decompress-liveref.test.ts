@@ -6,7 +6,6 @@ import { createAcpExtension } from "../src/index.js";
 import { createRuntime } from "../src/runtime.js";
 import { messageIdentity } from "../src/messages.js";
 import { loadLiveRefEntries } from "../src/session-log.js";
-import { setRunNpmForTest } from "../src/update.js";
 import { tmpPath } from "./tmp-path.js";
 
 // Issue #579: fork hosts (PI_ACP_FORK_HOST=1, e.g. Prime Agent) alias the
@@ -18,8 +17,6 @@ import { tmpPath } from "./tmp-path.js";
 // (liveRefOrigins); recovery walks the current/ancestor chain read-only and
 // matches messageIdentity against each level's log entries.
 
-setRunNpmForTest(async (args) => ({ code: 0, stdout: args[0] === "view" ? "0.0.1\n" : "", stderr: "" }));
-process.env.ACP_AUTO_UPDATE = "false";
 delete process.env.BILLION_CONTEXT_PROXY;
 
 function captureApi() {

@@ -149,7 +149,7 @@ async function stripViaHandler(adapter: any, model: Record<string, unknown>, pay
 test("before_provider_request: strips historical images when compress.stripImages is on", async () => {
     const payload = anthropicBody(8);
     const result = await stripViaHandler(
-        { modelContextLimit: 200_000, autoUpdate: false, compress: { stripImages: true } },
+        { modelContextLimit: 200_000, compress: { stripImages: true } },
         { api: "anthropic-messages" },
         payload,
     );
@@ -161,7 +161,7 @@ test("before_provider_request: strips historical images when compress.stripImage
 test("before_provider_request: default off leaves the payload reference untouched", async () => {
     const payload = anthropicBody(8);
     const result = await stripViaHandler(
-        { modelContextLimit: 200_000, autoUpdate: false },
+        { modelContextLimit: 200_000 },
         { api: "anthropic-images" },
         payload,
     );
@@ -171,7 +171,7 @@ test("before_provider_request: default off leaves the payload reference untouche
 test("before_provider_request: bili-proxy baseUrl stands down even when enabled", async () => {
     const payload = anthropicBody(8);
     const result = await stripViaHandler(
-        { modelContextLimit: 200_000, autoUpdate: false, compress: { stripImages: true } },
+        { modelContextLimit: 200_000, compress: { stripImages: true } },
         { api: "anthropic-messages", baseUrl: "http://127.0.0.1:9111/bili/https://api.anthropic.com" },
         payload,
     );

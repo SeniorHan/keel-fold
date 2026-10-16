@@ -2,12 +2,8 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { createAcpExtension } from "../src/index.js";
 import { isBiliProxyBaseUrl, PROXY_STAND_DOWN_MESSAGE, nativeStandDownMessage } from "../src/proxy-detect.js";
-import { setRunNpmForTest } from "../src/update.js";
 
-// Hermetic session_start: the pi path runs the auto-update check, so disable
-// it and stub npm (no network) — mirroring omp-refuse.test.ts.
-setRunNpmForTest(async (args) => ({ code: 0, stdout: args[0] === "view" ? "0.0.1\n" : "", stderr: "" }));
-process.env.ACP_AUTO_UPDATE = "false";
+// Hermetic session_start: clear proxy-detection env the developer may have set.
 delete process.env.BILLION_CONTEXT_PROXY;
 
 function captureApi() {

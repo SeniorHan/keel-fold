@@ -2,12 +2,8 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { createAcpExtension } from "../src/index.js";
 import { UNSUPPORTED_HOST_MESSAGE } from "../src/omp.js";
-import { setRunNpmForTest } from "../src/update.js";
 
-// Hermetic session_start: the pi (non-OMP) path runs the auto-update check, so
-// disable it and stub npm (no network) — mirroring integration.test.ts.
-setRunNpmForTest(async (args) => ({ code: 0, stdout: args[0] === "view" ? "0.0.1\n" : "", stderr: "" }));
-process.env.ACP_AUTO_UPDATE = "false";
+// Hermetic session_start: clear host-detection env the developer may have set.
 delete process.env.BILLION_CONTEXT_PROXY;
 delete process.env.PI_ACP_FORK_HOST;
 

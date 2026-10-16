@@ -167,7 +167,7 @@ ACP 通过 Pi 普通的扩展钩子实现：`tool_call` 给没写超时的 bash 
 
 [CONFIGURATION.zh-CN.md](CONFIGURATION.zh-CN.md) 里的上游选项在 `acp.json` 里照常可用，以下几项除外：
 
-- `autoUpdate` 始终关闭。
+- `autoUpdate` 和 `ACP_AUTO_UPDATE` 已移除：本版本没有自更新代码，用 `pi install` 更新。
 - 已移除的委派配置（`delegate.*`、`displayUsage`、`delegatePrompt`）会被忽略。
 - `promptSections.*` 会被忽略，因为本分支注入自己的提示词；会提示一次。
 

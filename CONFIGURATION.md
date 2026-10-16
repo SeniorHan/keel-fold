@@ -32,7 +32,6 @@ Create `~/.pi/acp.json` (or `<project>/.pi/acp.json`) and drop in whichever keys
 ```json
 {
   "debug": false,
-  "autoUpdate": true,
   "modelContextLimit": 200000,
   "outputHeadroomMaxPct": 0.25,
   "toolBashDefaultTimeout": 60,
@@ -119,7 +118,6 @@ All keys below are currently **ACTIVE**.
 |-----|------|---------|--------|-------------|
 | `enabled` | boolean | `true` | 🟢 ACTIVE | Master switch. `false` turns the whole adapter off (no tools, no system prompt, no context transform) — for models too small to handle ACP. Requires a Pi restart. |
 | `debug` | boolean | `false` | 🟢 ACTIVE | Enable verbose debug-level events in the log. |
-| `autoUpdate` | boolean | `true` | 🟢 ACTIVE | Check npm for a newer version on startup and auto-install it. |
 | `modelContextLimit` | number | *(auto)* | 🟢 ACTIVE | Override the context limit (in tokens). |
 | `outputHeadroomMaxPct` | number \| string | `0.25` | 🟢 ACTIVE | Cap on the output-headroom reservation, as a fraction of the context window. |
 | `toolBashDefaultTimeout` | number | `60` | 🟢 ACTIVE | Default `bash` tool timeout in seconds when the model omits it. |
@@ -178,7 +176,6 @@ All keys below are currently **ACTIVE**.
 
 | Variable | Effect |
 |----------|--------|
-| `ACP_AUTO_UPDATE` | Set to `0` / `false` to disable auto-update (overrides `autoUpdate`). |
 | `ACP_MODEL_CONTEXT_LIMIT` | Override the context limit (takes highest precedence). |
 | `ACP_DEBUG` | Set to `1` / `true` to enable debug logging. |
 | `ACP_LOG_FILE` | Override the log file path (default `~/.pi/acp.log`). |
@@ -203,15 +200,6 @@ All keys below are currently **ACTIVE**.
 - **Default:** `false`
 - **Status:** 🟢 ACTIVE
 - **Description:** Enable verbose **debug-level** events in the log file (default `~/.pi/acp.log`). The always-on log (session/turn/compress lifecycle events, all errors and warnings) is written regardless of this setting; `debug` only adds extra diagnostics such as full field dumps and per-turn internals. Also enabled by the environment variable `ACP_DEBUG=1` (or `ACP_DEBUG=true`).
-
-### `autoUpdate`
-
-- **Type:** `boolean`
-- **Default:** `true`
-- **Status:** 🟢 ACTIVE
-- **Description:** On Pi startup, check the npm registry for a newer version of `billion-context-pi` and auto-install it. Set to `false` to avoid all startup network calls. Can also be disabled via the `ACP_AUTO_UPDATE` environment variable (`ACP_AUTO_UPDATE=0` or `ACP_AUTO_UPDATE=false`), which overrides this setting.
-  - **Read-only install location:** when the copy's install prefix is not writable (e.g. a root-owned `npm i -g` global prefix), auto-update stops retrying that location after the first `EACCES`/permission failure and shows a one-time hint to run `npm i -g billion-context-pi` (or remove the global copy if you rely on pi's bundled install) instead of looping. The check throttle and the stop-retry marker are keyed per install location, so a healthy copy never suppresses a failing one's checks.
-  - **Two parallel mechanisms:** this extension-side auto-update is independent of pi's own core update banner — both can appear, and disabling one does not disable the other.
 
 ### `modelContextLimit`
 
@@ -801,13 +789,6 @@ The `lean` pack nulls every system-prompt section except a single `acpTags` bloc
 ## Environment Variables
 
 Environment variables take precedence over the JSON config files. They are useful for one-off overrides, CI runs, and headless sessions where you want to avoid editing config files.
-
-### `ACP_AUTO_UPDATE`
-
-- **Type:** string flag
-- **Default:** *(unset — auto-update follows the `autoUpdate` config)*
-- **Status:** 🟢 ACTIVE
-- **Description:** Set to `0` or `false` to **disable** auto-update (same effect as `"autoUpdate": false`). Leave unset to honor the config. This is the recommended way to disable startup network calls in locked-down environments without modifying `acp.json`.
 
 ### `ACP_MODEL_CONTEXT_LIMIT`
 

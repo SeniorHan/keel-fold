@@ -15,11 +15,8 @@ import {
 } from "../src/degeneration.js";
 import { createAcpExtension } from "../src/index.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { setRunNpmForTest } from "../src/update.js";
 
 type AgentMessage = SessionMessageEntry["message"];
-
-setRunNpmForTest(async (args) => ({ code: 0, stdout: args[0] === "view" ? "0.0.1\n" : "", stderr: "" }));
 
 // ---------- resolveDegenerationGuard ----------
 

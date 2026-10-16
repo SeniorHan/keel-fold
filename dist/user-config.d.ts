@@ -11,7 +11,6 @@ import type { IdleCompactConfig } from "./idle-compact.js";
 export interface UserAcpConfig {
     enabled?: boolean;
     debug?: boolean;
-    autoUpdate?: boolean;
     modelContextLimit?: number;
     protectedTools?: string[];
     protectedLatestTools?: string[];

@@ -6,12 +6,7 @@ import { join } from "node:path";
 import { createAcpExtension, formatNudgeRecord } from "../src/index.js";
 import type { NudgeDecision } from "acp-kernel";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { setRunNpmForTest } from "../src/update.js";
 import { ACP_NUDGE_CUSTOM_TYPE } from "../src/messages.js";
-
-// Headless handlers await the update check — keep this file hermetic too.
-setRunNpmForTest(async (args) => ({ code: 0, stdout: args[0] === "view" ? "0.0.1\n" : "", stderr: "" }));
-process.env.ACP_UPDATE_THROTTLE_FILE = join(tmpdir(), `acp-test-nudge-record-throttle-${process.pid}`);
 
 function captureApi() {
   const handlers = new Map<string, ((event: any, ctx: any) => any)[]>();

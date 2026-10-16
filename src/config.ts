@@ -146,10 +146,6 @@ export interface AdapterConfig {
    *  protect-everything instead). */
   preserveRecentTools?: string[];
   preserveRecentMessages?: number;
-  /** Check npm for a newer billion-context-pi on startup and auto-install it. Default: true.
-   *  Disable via `autoUpdate: false` or env `ACP_AUTO_UPDATE=0` to avoid all
-   *  network calls on startup. */
-  autoUpdate?: boolean;
   /** Enable debug-level events in the ACP log file (default ~/.pi/acp.log).
    *  Always-on events (session/turn/compress lifecycle, all errors and
    *  warnings) are written regardless; `debug` only adds verbose diagnostics.

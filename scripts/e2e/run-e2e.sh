@@ -100,7 +100,7 @@ write_pi_config() {
 }
 EOF
     cat > "$home/.pi/acp.json" <<'EOF'
-{ "autoUpdate": false, "debug": false }
+{ "debug": false }
 EOF
 }
 

@@ -167,7 +167,7 @@ ACP applies them through Pi's normal extension hooks (`tool_call` fills in the m
 
 Upstream options in [CONFIGURATION.md](CONFIGURATION.md) still apply in `acp.json`, except:
 
-- `autoUpdate` is always off.
+- `autoUpdate` and `ACP_AUTO_UPDATE` are gone: the fork has no self-update code. Update with `pi install`.
 - The removed delegation keys (`delegate.*`, `displayUsage`, `delegatePrompt`) are ignored.
 - `promptSections.*` is ignored because the fork injects its own prompt; you get a one-time warning.
 

@@ -4,7 +4,6 @@ import { rm } from "node:fs/promises";
 import { createAcpExtension } from "../src/index.js";
 import { retryBreakerKey } from "../src/runtime.js";
 import { isCompressNoopText } from "../src/compress-tool.js";
-import { setRunNpmForTest } from "../src/update.js";
 import { tmpPath } from "./tmp-path.js";
 
 // Issue #453 (evidence from the #452 log): under a declared fork host
@@ -24,8 +23,6 @@ import { tmpPath } from "./tmp-path.js";
 // churn and releases only when a genuine new user message reaches the session
 // log (or a compress succeeds).
 
-setRunNpmForTest(async (args) => ({ code: 0, stdout: args[0] === "view" ? "0.0.1\n" : "", stderr: "" }));
-process.env.ACP_AUTO_UPDATE = "false";
 delete process.env.BILLION_CONTEXT_PROXY;
 
 function captureApi() {

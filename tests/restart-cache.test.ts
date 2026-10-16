@@ -45,7 +45,7 @@ function fakeCtx(entries: any[], stateFile: string, sid: string, cwd: string) {
     };
 }
 
-const ADAPTER = { modelContextLimit: 200_000, autoUpdate: false };
+const ADAPTER = { modelContextLimit: 200_000 };
 
 async function boot(handlers: Map<string, ((event: any, ctx: any) => any)[]>, ctx: any): Promise<void> {
     await handlers.get("session_start")![0]!({}, ctx);

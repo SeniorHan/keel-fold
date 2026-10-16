@@ -17,7 +17,6 @@ import { debug } from "./log.js";
 export interface UserAcpConfig {
   enabled?: boolean;
   debug?: boolean;
-  autoUpdate?: boolean;
   modelContextLimit?: number;
   protectedTools?: string[];
   protectedLatestTools?: string[];
@@ -131,7 +130,7 @@ function diagnoseJsonFailure(raw: string, err: unknown): string {
 }
 
 const KNOWN = new Set([
-  "enabled", "debug", "autoUpdate", "modelContextLimit",
+  "enabled", "debug", "modelContextLimit",
   "protectedTools", "protectedLatestTools", "neverPreserveRecentTools", "preserveRecentTools",
   "toolBashDefaultTimeout", "toolOutputMaxBytes",
   "compress", "throttleRetry", "idleCompact",

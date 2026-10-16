@@ -4,7 +4,7 @@ This repository is a long-term fork of `billion-context-pi` v0.1.83. Goals: stab
 
 ## Layout
 
-- `src/` — Pi adapter runtime (TypeScript, ESM). `npm run build` bundles it with `acp-kernel@0.0.98` into `dist/`.
+- `src/` — Pi adapter runtime (TypeScript, ESM). `npm run build` bundles it with `acp-kernel@0.0.101` into `dist/`.
 - `lean/index.ts` — the facade Pi loads (`package.json` → `pi.extensions`). It imports `../dist/index.js`.
 - `dist/` — committed build output. Pi installs git packages without building, so every source change ships with its rebuilt `dist/`; CI fails when they diverge.
 - `tests/` (runtime), `lean/tests/` (facade). Upstream docs, devlog and paper are kept for reference and describe upstream behaviour.

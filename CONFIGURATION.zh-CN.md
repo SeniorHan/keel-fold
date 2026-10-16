@@ -32,7 +32,6 @@
 ```json
 {
   "debug": false,
-  "autoUpdate": true,
   "modelContextLimit": 200000,
   "outputHeadroomMaxPct": 0.25,
   "toolBashDefaultTimeout": 60,
@@ -118,7 +117,6 @@
 | 键 | 类型 | 默认值 | 状态 | 说明 |
 |----|------|--------|------|------|
 | `debug` | boolean | `false` | 🟢 ACTIVE | 开启日志中的详细调试事件。 |
-| `autoUpdate` | boolean | `true` | 🟢 ACTIVE | 启动时检查 npm 并自动安装更新。 |
 | `modelContextLimit` | number | *(自动)* | 🟢 ACTIVE | 覆盖上下文窗口大小（token 数）。 |
 | `outputHeadroomMaxPct` | number \| string | `0.25` | 🟢 ACTIVE | 输出预留（output headroom）占上下文窗口的比例上限。 |
 | `toolBashDefaultTimeout` | number | `60` | 🟢 ACTIVE | 模型省略 `timeout` 时注入 bash 工具的默认超时秒数。 |
@@ -179,7 +177,6 @@
 
 | 变量 | 效果 |
 |------|------|
-| `ACP_AUTO_UPDATE` | 设为 `0` / `false` 禁用自动更新（覆盖 `autoUpdate`）。 |
 | `ACP_MODEL_CONTEXT_LIMIT` | 覆盖上下文窗口大小（优先级最高）。 |
 | `ACP_DEBUG` | 设为 `1` / `true` 开启调试日志。 |
 | `ACP_LOG_FILE` | 覆盖日志文件路径（默认 `~/.pi/acp.log`）。 |
@@ -197,15 +194,6 @@
 - **默认值：** `false`
 - **状态：** 🟢 ACTIVE
 - **说明：** 在日志文件（默认 `~/.pi/acp.log`）中开启详细的**调试级**事件。无论此设置如何，常驻日志（会话/轮次/压缩生命周期事件，所有错误和警告）始终写入；`debug` 只添加额外的诊断信息，如完整字段转储和逐轮内部数据。也可通过环境变量 `ACP_DEBUG=1`（或 `ACP_DEBUG=true`）开启。
-
-### `autoUpdate`
-
-- **类型：** `boolean`
-- **默认值：** `true`
-- **状态：** 🟢 ACTIVE
-- **说明：** Pi 启动时检查 npm 是否有更新版本的 `billion-context-pi` 并自动安装。设为 `false` 可避免启动时的所有网络请求。也可通过 `ACP_AUTO_UPDATE` 环境变量（`ACP_AUTO_UPDATE=0` 或 `ACP_AUTO_UPDATE=false`）禁用，该变量优先于此配置。
-  - **只读安装位置：** 当该副本的安装前缀不可写（如 root 所有的 `npm i -g` 全局前缀）时，自动更新在首次 `EACCES`/权限失败后停止对该位置的重试，并一次性提示运行 `npm i -g billion-context-pi`（或若依赖 pi 自带安装则移除全局副本），而不是无限循环。检查节流与停止重试标记均按安装位置区分，因此健康副本不会压制失败副本的检查。
-  - **两套并行机制：** 此扩展侧自动更新与 pi 核心自身的更新 banner 相互独立——两者可能同时出现，禁用其中一个不影响另一个。
 
 ### `modelContextLimit`
 
@@ -795,13 +783,6 @@ interface PackSource {
 ## 环境变量
 
 环境变量优先于 JSON 配置文件。适用于一次性覆盖、CI 运行，以及不想编辑配置文件的无头会话。
-
-### `ACP_AUTO_UPDATE`
-
-- **类型：** 字符串标志
-- **默认值：** *(未设置——自动更新遵循 `autoUpdate` 配置)*
-- **状态：** 🟢 ACTIVE
-- **说明：** 设为 `0` 或 `false` 可**禁用**自动更新（等效于 `"autoUpdate": false`）。不设置则遵循配置。这是在不修改 `acp.json` 的情况下禁用启动网络请求的推荐方式，适用于受限环境。
 
 ### `ACP_MODEL_CONTEXT_LIMIT`
 

@@ -47,7 +47,7 @@ interface BootOpts {
 
 async function boot({ dir, sessionId, entries = [], adapter }: BootOpts) {
   const { api, handlers } = captureApi();
-  createAcpExtension({ modelContextLimit: 200_000, autoUpdate: false, ...adapter })(api as any);
+  createAcpExtension({ modelContextLimit: 200_000, ...adapter })(api as any);
   const stateFile = join(dir, "session.json");
   const ctx = {
     mode: "rpc",

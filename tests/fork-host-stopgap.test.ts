@@ -5,15 +5,12 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { createAcpExtension } from "../src/index.js";
 import { FORK_HOST_WARNING_MESSAGE, UNSUPPORTED_HOST_MESSAGE } from "../src/omp.js";
-import { setRunNpmForTest } from "../src/update.js";
 import { tmpPath } from "./tmp-path.js";
 
 // Issue #454 stopgap (direction per owner via #452): declared fork hosts
 // (PI_ACP_FORK_HOST=1) are admitted but carry a known ref-drift limitation, so
 // (a) session_start warns loudly at admission, and (b) ref-resolution failures
 // on such hosts log a distinct attribution event pointing at root fix #459.
-setRunNpmForTest(async (args) => ({ code: 0, stdout: args[0] === "view" ? "0.0.1\n" : "", stderr: "" }));
-process.env.ACP_AUTO_UPDATE = "false";
 delete process.env.BILLION_CONTEXT_PROXY;
 delete process.env.PI_ACP_FORK_HOST;
 

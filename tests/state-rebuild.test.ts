@@ -83,7 +83,7 @@ function eventOf(entries: any[]) {
     return { type: "context", messages: entries.map((e) => ({ role: e.message.role, content: [{ type: "text", text: e.message.content }], timestamp: 0 })) };
 }
 
-const ADAPTER = { modelContextLimit: 200_000, autoUpdate: false };
+const ADAPTER = { modelContextLimit: 200_000 };
 const LONG = "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor ".repeat(80);
 
 async function fire(handlers: Map<string, ((event: any, ctx: any) => any)[]>, entries: any[], ctx: any) {
@@ -219,6 +219,30 @@ test("Lean: rebuild prefers the fold recorded in the toolResult details over the
     assert.equal(saved.blocks.length, 1, "the failed range is not rebuilt");
     assert.equal(saved.blocks[0].summary, DETAILED);
     assert.equal(saved.blocks[0].topic, "t1");
+    assert.deepEqual(saved.blocks[0].effectiveMessageIds, ["m1", "m2"]);
+    await rm(dir, { recursive: true, force: true });
+});
+
+test("Lean: a call that passed content as a JSON string is rebuilt without a recorded fold", async () => {
+    // The live tool accepts stringified content (non-strict-tool providers);
+    // without acpFolded details the rebuild must parse it the same way.
+    const dir = await mkdtemp(join(tmpdir(), "pi-rebuild-"));
+    const stateFile = join(dir, "string-args-nofold.session.jsonl");
+    const SUMMARY = "main-model summary for a call whose content argument was a JSON string";
+    const call = assistantCallEntry("m8", "c1", []) as any;
+    call.message.content[0].arguments = { content: JSON.stringify([{ startId: "m1", endId: "m2", summary: SUMMARY }]), topic: "top" };
+    const entries = [
+        entry("m1", "user", LONG), entry("m2", "user", LONG), entry("m3", "user", LONG), entry("m4", "user", LONG),
+        entry("m5", "user", LONG), entry("m6", "user", LONG), entry("m7", "user", LONG),
+        call, compressResultEntry("m9", "c1"), entry("m10", "user", "tail message"),
+    ];
+    const { api, handlers } = captureApi();
+    createAcpExtension(ADAPTER)(api as any);
+    await fire(handlers, entries, fakeCtx(entries, stateFile, "rebuild-string-nofold", dir));
+    const saved = JSON.parse(readFileSync(`${stateFile}.acp.json`, "utf8"));
+    assert.equal(saved.blocks.length, 1);
+    assert.equal(saved.blocks[0].summary, SUMMARY);
+    assert.equal(saved.blocks[0].topic, "top");
     assert.deepEqual(saved.blocks[0].effectiveMessageIds, ["m1", "m2"]);
     await rm(dir, { recursive: true, force: true });
 });

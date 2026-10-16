@@ -4,6 +4,9 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { logWarn } from "./log.js";
 import { entriesToCoreMessages } from "./messages.js";
 import { sanitizeSummary } from "./summary-sanitize.js";
+// Lean: cyclic with compress-tool (it imports this module); only called at
+// replay time, never during module init.
+import { normalizeRanges } from "./compress-tool.js";
 
 /**
  * Issue #299 (ranxianglei/billion-context-pi#299) last-resort state recovery.
@@ -79,18 +82,24 @@ function foldedFromDetails(details: unknown): unknown[] | null {
 
 function parseCompressCall(toolCallId: string, arguments_: unknown, entryIndex: number, folded: unknown[] | null = null): CompressCall | null {
   // Mirror handleCompress's arg surface: { content: [{startId, endId, summary,
-  // topic?}], topic?, summaryMaxChars? }. Anything else is treated as
-  // unparseable and skipped rather than replayed with guessed ranges.
+  // topic?}] | string, topic?, summaryMaxChars? }. Anything the live parser
+  // rejects is skipped rather than replayed with guessed ranges.
   const args = (arguments_ ?? {}) as { content?: unknown; topic?: unknown; summaryMaxChars?: unknown };
-  // Lean: a recorded fold does not depend on the argument shape (the tool
-  // also accepts `content` as a JSON string).
-  if (!folded && (!Array.isArray(args.content) || args.content.length === 0)) return null;
+  // Lean: the recorded fold (what was actually applied) beats the arguments,
+  // which carry only the caller's fallback when a dedicated model wrote.
+  // Without one, parse the arguments exactly as the live tool did (it also
+  // accepts `content` as a JSON string and repairs malformed payloads), so a
+  // call the tool applied is never silently skipped on rebuild.
+  let source = folded;
+  if (!source) {
+    const parsed = normalizeRanges(args as Parameters<typeof normalizeRanges>[0]);
+    if (typeof parsed === "string" || parsed.length === 0) return null;
+    source = parsed;
+  }
   const topLevelTopic = typeof args.topic === "string" ? args.topic : undefined;
   const summaryMaxChars = typeof args.summaryMaxChars === "number" ? args.summaryMaxChars : undefined;
   const ranges: CompressCall["ranges"] = [];
-  // Lean: the recorded fold (what was actually applied) beats the arguments,
-  // which carry only the caller's fallback when a dedicated model wrote.
-  for (const r of folded ?? (args.content as unknown[])) {
+  for (const r of source) {
     const item = r as { startId?: unknown; endId?: unknown; summary?: unknown; topic?: unknown };
     if (typeof item.startId !== "string" || typeof item.endId !== "string" || typeof item.summary !== "string") return null;
     ranges.push({

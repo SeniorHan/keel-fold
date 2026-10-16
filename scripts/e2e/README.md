@@ -33,7 +33,7 @@ persisted ACP state.
 For each scenario in `scenarios/*.json`:
 
 1. An **isolated Pi HOME** is written (`models.json` → fake provider,
-   `acp.json` → `{ autoUpdate:false, debug:false }` merged with the scenario's
+   `acp.json` → `{ debug:false }` merged with the scenario's
    `acpConfig`).
 2. The **fake LLM server** is started, seeded with the scenario file. It tracks
    turns via a file counter (one counter per scenario, so each `pi -p`

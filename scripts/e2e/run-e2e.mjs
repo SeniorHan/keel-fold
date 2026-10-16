@@ -149,7 +149,7 @@ function writePiConfig(home) {
     },
   };
   fs.writeFileSync(path.join(home, ".pi", "agent", "models.json"), JSON.stringify(models, null, 2));
-  fs.writeFileSync(path.join(home, ".pi", "acp.json"), JSON.stringify({ autoUpdate: false, debug: false }, null, 2));
+  fs.writeFileSync(path.join(home, ".pi", "acp.json"), JSON.stringify({ debug: false }, null, 2));
 }
 
 function applyScenarioAcpConfig(scenarioPath, home) {

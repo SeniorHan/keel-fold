@@ -62,10 +62,10 @@ test("loadUserConfig reads global config from home directory", async () => {
   const savedHome = snapshotHome();
   setHome(tmpHome);
   try {
-    await writeConfig(tmpHome, { debug: true, autoUpdate: false });
+    await writeConfig(tmpHome, { debug: true, autoUpdate: true });
     const config = await loadUserConfig(tmpCwd);
     assert.equal(config.debug, true);
-    assert.equal(config.autoUpdate, false);
+    assert.equal("autoUpdate" in config, false, "removed autoUpdate key is ignored");
   } finally {
     restoreHome(savedHome);
     await fs.rm(tmpCwd, { recursive: true, force: true });
@@ -177,13 +177,12 @@ test("loadUserConfig handles bad JSON gracefully", async () => {
 test("applyUserConfig merges user config onto adapter config", () => {
   const adapter: AdapterConfig = {
     modelContextLimit: 200_000,
-    autoUpdate: true,
+    debug: false,
     preserveRecentMessages: 5000,
   };
-  const user = { debug: true, autoUpdate: false, toolOutputMaxBytes: 50000 };
+  const user = { debug: true, toolOutputMaxBytes: 50000 };
   const result = applyUserConfig(adapter, user);
-  assert.equal(result.debug, true, "user debug applied");
-  assert.equal(result.autoUpdate, false, "user autoUpdate overrides adapter");
+  assert.equal(result.debug, true, "user debug overrides adapter");
   assert.equal(result.toolOutputMaxBytes, 50000, "user toolOutputMaxBytes added");
   assert.equal(result.modelContextLimit, 200_000, "adapter modelContextLimit preserved");
 });
@@ -217,7 +216,6 @@ test("applyUserConfig supports all user config keys", () => {
   const adapter: AdapterConfig = { modelContextLimit: 200_000 };
   const user = {
     debug: true,
-    autoUpdate: false,
     modelContextLimit: 50_000,
     toolBashDefaultTimeout: 120,
     toolOutputMaxBytes: 100_000,
@@ -226,7 +224,6 @@ test("applyUserConfig supports all user config keys", () => {
   };
   const result = applyUserConfig(adapter, user);
   assert.equal(result.debug, true);
-  assert.equal(result.autoUpdate, false);
   assert.equal(result.modelContextLimit, 50_000);
   assert.equal(result.toolBashDefaultTimeout, 120);
   assert.equal(result.toolOutputMaxBytes, 100_000);

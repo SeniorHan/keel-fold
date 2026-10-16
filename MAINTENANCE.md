@@ -6,7 +6,7 @@
 
 - 分支：`main`（默认分支）。远程 `origin` 是本仓库，`upstream` 是上游，只用于 fetch 和挑修复。
 - 基线：上游 tag `v0.1.83`（commit `1cb6340`），之后的上游提交不自动合并。
-- 运行时源码：`src/`，`npm run build` 生成 `dist/`。`acp-kernel@0.0.98` 由 tsup 打进 `dist/`，运行时只依赖 Pi 自带的包。
+- 运行时源码：`src/`，`npm run build` 生成 `dist/`。`acp-kernel@0.0.101` 由 tsup 打进 `dist/`，运行时只依赖 Pi 自带的包。
 - Lean 外壳：`lean/index.ts`（测试 `lean/tests/facade.test.mjs`），通过 `../dist/index.js` 引用运行时；`package.json` 的 `pi.extensions` 指向它。
 - `dist/` 提交进仓库（`*.map` 除外）：Pi 用 git 安装时执行 `npm install --omit=dev`，不会 build，也装不到 tsup 和 kernel。jiti 只加载 `lean/index.ts`，不能直接加载 `src/`。CI 会检查提交的 `dist/` 与源码一致。
 - 移植来源：上游 PR #241（commits `631d51e`、`c5e7de8`，基于 0.1.52，无法直接 rebase）。
@@ -63,7 +63,7 @@
 
 ### Lean 外壳
 
-- 工具面：直接暴露 `compress`（以 `model-only` exposure 注册，codemode 下也直接声明给模型；ACP 按工具名在会话里识别 compress 结果），把 `decompress`、`search_context`、`acp_status`、`acp_cache` 合并到 `acp_context`。关闭自动更新。
+- 工具面：直接暴露 `compress`（以 `model-only` exposure 注册，codemode 下也直接声明给模型；ACP 按工具名在会话里识别 compress 结果），把 `decompress`、`search_context`、`acp_status`、`acp_cache` 合并到 `acp_context`。自更新代码（`src/update.ts`）已删除，`autoUpdate` 配置被忽略。
 - Pi 1.x 上把 ACP 规则写进 `systemPromptOptions.sections.acp_context`，不返回 `systemPrompt`。返回 `systemPrompt` 会变成 `forceSystemPrompt`，导致其它扩展的 `appendSystemPrompt` 被丢弃（上游 #630/#631）。其它扩展已经 force 过时，退回拼接的旧行为。
 - 去掉 “Refs may be renumbered” 的错误说法（上游 #541）。
 - 改写规则：覆盖 `acp_cache(...)` 和 “call/run acp_status …”；调用改写用非贪婪匹配（避免同一行两个调用被合并）。召回结果不改写（`rewriteRecallResult`）：decompress 的输出原样返回；search_context 只改写每条结果末尾的提示行——必须完全符合上游格式 `  → decompress({ blockId: "bN" })`（可带 `  (block containing message <原始 entry id>)`，id 形如 `088aaedb` 或 `4d9e965e#toolu_…|fc_…`，不是 mNNNNN），且后面是空行或文末（`SEARCH_HINT_LINE`）。预览是召回原文，一律不动。上游改 `src/search-tool.ts` 的 `formatResult` 或给这两个工具新增提示文字时，要同步这里的正则。

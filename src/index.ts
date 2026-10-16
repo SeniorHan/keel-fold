@@ -37,7 +37,6 @@ import { debug, logError, logInfo, logWarn, logThrow, closeLogStream } from "./l
 import { collectCoveredMessageIds, estimateTokens, collectImageTokens, modelSupportsImages, sentViewTokenCount, sentViewMeterMatches, adoptedViewTokens, blockSignature, historyCanary } from "./tokens.js";
 import { lastTurnBoundaryId, lastTurnBoundaryIndex } from "./turn-boundary.js";
 import { compressionAnchorStaleness } from "./floor-stale.js";
-import { checkForUpdate } from "./update.js";
 import {
   THROTTLE_RETRY_ERROR_MESSAGE,
   THROTTLE_KICK_TEXT,
@@ -269,13 +268,6 @@ function wireSessionLifecycle(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
     if (runtime.adapter.rules === true) {
       pi.registerTool(makeRuleTool(runtime));
     }
-    // Headless hosts exit as soon as the turn ends; awaiting the check keeps
-    // the process alive until a running install finishes. TUI stays
-    // fire-and-forget so interactive startup is never blocked by npm.
-    const updateCheck = checkForUpdate(runtime.adapter.autoUpdate ?? true, (msg) => {
-      if (ctx.hasUI) ctx.ui.notify(msg);
-    });
-    if (!ctx.hasUI) await updateCheck;
   });
   pi.on("session_shutdown", (_event, ctx) => {
     const sid = ctx.sessionManager.getSessionId();
@@ -850,16 +842,6 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
     // Capture the provider-bound prefix for the `session` summary model (#241).
     runtime.setLastSentMessages(sid, rebuilt);
     debug.event("context-out", { outMsgs: rebuilt.length, injected: turn.nudge?.shouldInject ?? false, emergency: turn.nudge?.breakdown?.emergencyOverride === 1 });
-    // Also check for updates here (not only on session_start): resuming a
-    // long-running session never re-fires session_start, so an update could
-    // go unnoticed for days. checkForUpdate throttles internally (3 min) and
-    // is guarded against concurrent calls, so firing it per LLM call is safe.
-    // Headless: await so a process exiting after this turn cannot kill a
-    // running install (TUI stays fire-and-forget to avoid blocking the turn).
-    const updateCheck = checkForUpdate(runtime.adapter.autoUpdate ?? true, (msg) => {
-      if (ctx.hasUI) ctx.ui.notify(msg);
-    });
-    if (!ctx.hasUI) await updateCheck;
     return { messages: rebuilt };
     } catch (e) {
       logThrow("context", e, { sid, phase: "transform" });

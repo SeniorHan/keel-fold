@@ -119,7 +119,7 @@ async function setup(name: string, registry: any, opts: { acpJson?: object; sess
     await fs.writeFile(acpJsonPath, JSON.stringify(opts.acpJson));
   }
   const { api, handlers } = captureApi();
-  createAcpExtension({ autoUpdate: false })(api as any);
+  createAcpExtension({})(api as any);
   const stateFile = path.join(tmp, `${name}.session.json`);
   await fs.rm(`${stateFile}.acp.json`, { force: true });
   const ctx = fakeCtx(opts.entries ?? compressibleEntries(), stateFile, tmp, registry, opts.notify, opts.sessionModel);

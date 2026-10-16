@@ -229,8 +229,8 @@ Existing files keep working. Earlier releases used `.pi` on every host, so on a 
 user-authored path (`acp.json`, `acp/packs`, global and project) falls back to its `.pi`
 counterpart while the fork's own path does not exist (`userConfigPath()` in
 `src/config-dir.ts`). Creating `~/.prime/acp.json` — even `{}` — stops Prime from reading
-`~/.pi/acp.json`. Files the adapter writes itself (the log, update-check and read-only
-markers under the agent dir) move without a fallback.
+`~/.pi/acp.json`. Files the adapter writes itself (the log under the agent dir) move without a
+fallback.
 
 Responsibility boundary: the *directory layout* belongs to the host (only it knows it) and
 is read from its exports; the *fallback* belongs to the adapter (it must not crash at

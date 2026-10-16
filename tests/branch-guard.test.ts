@@ -86,7 +86,7 @@ test("Lean: runtime.stateFor marks off-branch blocks from the session tree (pi h
       getEntries: () => all,
     },
   } as any;
-  const rt = createRuntime({ autoUpdate: false });
+  const rt = createRuntime({});
   await rt.save(state, ctx);
   const rewound = await rt.stateFor(ctx);
   assert.deepEqual([...(offBranchBlocksOf(rewound.state) ?? [])], [state.blocks[0]!.blockId]);
