@@ -65,7 +65,7 @@ With only this extension enabled, its recurring model-facing initialization cont
 
 This saves **8,184 tokens (94.4%)** against upstream's default, and 4,391 tokens (90.0%) against its `lean` prompt pack. The three `acp_delegate*` tools (1,877 tokens) belong to sub-agent delegation, which this fork removed; leaving them out, the savings are 92.8% and 83.8%.
 
-Compression nudges come on top of this and only when context fills up. With a dedicated summary model, the rules in each nudge drop from about 1,460 tokens to about 220 ([setup](#summary-model)).
+Compression nudges come on top of this and only when context fills up. With a dedicated summary model, the rules in each nudge drop from about 1,460 tokens to about 220 ([setup](#settings)).
 
 Measured with `npm run measure` on Pi 1.3.0, each variant in a separate temporary process with an empty working directory and configuration. Built-in tools, skills, context files, session history, user messages, unrelated extensions, runtime UI, and slash commands are excluded; `before_agent_start` additions are included. Tokens are a fixed character-proxy estimate using `ceil(characters / 4)`, not provider tokenizer billing.
 
@@ -83,93 +83,48 @@ Append `@<version>` to pin a version from [Releases](https://github.com/kunkun95
 
 ## Configuration
 
-Settings live in `~/.pi/acp.json` (global) and `<project>/.pi/acp.json` (per project; it wins over the global file). There are two ways to change them:
-
-- **`/acp-config`** (TUI) opens a settings panel with the settings below. Up/Down picks a setting, Enter or Space switches its value, Esc closes. Changes go to the global `~/.pi/acp.json` (other keys are kept) and apply at once; if the project file overrides a key, the panel tells you which value is in effect.
-- **Edit `acp.json`** for anything the panel does not offer, or to set values per project or per provider.
+Type `/acp-config` in Pi to open the settings panel. Up/Down picks a setting, Enter or Space changes it, Esc closes. Changes apply at once, no restart needed.
 
 ### Settings
 
-Ordered as in the panel, most used first. The names are the ones the panel shows.
+The panel lists these, most used first.
 
-| Setting | acp.json key | What it does | Default |
-|---|---|---|---|
-| Summary model | `compressionModelId` | Who writes the summaries ([details](#summary-model)). `main model` lets the main model write them; `session` reuses the current model and its cached prefix. In the panel, Enter opens the models Pi can use right now; type to filter. | `main model` |
-| Idle compact | `idleCompact.enabled` | Compress once while you are away, before the prompt cache expires ([details](#idle-compact)). | `off` |
-| Idle minutes | `idleCompact.idleMinutes` | Idle time before that turn. Keep it a little under your models' cache lifetime (29 fits a 30-minute cache). Locked at `off` while Idle compact is off; the stored minutes come back when you turn it on. | 29 |
-| Context threshold | `compress.providers.<p>.models.<id>.maxContextLimit` | Share of the model's window above which the compress nudge stops waiting for Nudge interval and appears whenever Minimum benefit could be reclaimed. Lower keeps the context small; higher lets it run fuller. Not a hard cap. | 75% |
-| Nudge interval | `….nudgeGrowthTokens` | Below Context threshold, the nudge waits until about this many tokens of old, compressible content have piled up. Bigger: fewer nudges, more folded at once. Smaller: frequent small compressions, a leaner context. | 50K |
-| Minimum benefit | `….minPressureBenefitTokens` | No nudge, and no idle compact turn, when less than this could be reclaimed: rewriting a few thousand tokens is not worth breaking the cache. | larger of 5K and 1% of the window |
-| Tool output cap | `toolOutputMaxBytes` | A single tool result larger than this is cut, with a note telling the model where the full output is ([tool guards](#tool-guards)). `off` keeps everything. | 50K bytes |
-| bash default timeout | `toolBashDefaultTimeout` | Seconds a bash command may run when the model gave no timeout ([tool guards](#tool-guards)). `off` means no limit. | 60 |
-| Debug log | `debug` | Writes detailed events to `~/.pi/acp.log` for troubleshooting. Errors and the main events are always logged. | `off` |
+| Setting | What it does | Default |
+|---|---|---|
+| Summary model | Who writes the summaries. `main model`: the main model writes them itself. `session`: the current model, in a separate call that reuses its cached prefix. Or pick any model Pi can use (Enter opens the list; type to filter), e.g. a cheap one. If that model's call fails, the range stays uncompressed and is tried again next time. | `main model` |
+| Idle compact | Compress once while you are away, before the prompt cache expires ([how it works](#idle-compact)). | `off` |
+| Idle minutes | How long the session must be idle first. Keep it a little under your models' cache lifetime: 29 fits a 30-minute cache. | 29 |
+| Context threshold | Share of the model's window above which the compress nudge no longer waits for Nudge interval and appears whenever Minimum benefit could be reclaimed. Lower keeps the context small; higher lets it run fuller. Not a hard cap. | 75% |
+| Nudge interval | Below Context threshold, the nudge waits until about this many tokens of old, compressible content have piled up. Bigger: fewer nudges, more folded at once. Smaller: frequent small compressions, a leaner context. | 50K |
+| Minimum benefit | No nudge, and no idle compact, when less than this could be reclaimed: rewriting a few thousand tokens is not worth breaking the cache. | larger of 5K and 1% of the window |
+| Tool output cap | A single tool result larger than this is cut, with a note telling the model where the full output is. Pi's own bash and read already stop at 50KB, so this mainly catches MCP and other extensions' tools, which can return hundreds of KB at once. `off` keeps everything. | 50K bytes |
+| bash default timeout | Seconds a bash command may run when the model gave no timeout. Pi has no default, so a stuck command would make the session wait forever; on timeout the model is told to re-run with a larger one. `off` means no limit. | 60 |
+| Debug log | Writes detailed events to `~/.pi/acp.log` for troubleshooting. Errors and the main events are always logged. | `off` |
 
-### Summary model
+Context threshold, Nudge interval and Minimum benefit depend on the model's window and price, so the panel sets them for the **current model only**; switch models to set another one. `inherit` drops the model's own value; a provider-wide or global value from `acp.json`, or else the default, applies.
 
-Besides the panel, `/acp compact` sets it from the command line:
-
-```text
-/acp compact                    # show the current setting
-/acp compact <provider/model>   # any model in Pi's model registry
-/acp compact session            # the session's own model, in a separate call
-/acp compact reset              # the main model writes summaries again
-```
-
-- Write `provider/id`. A bare id shared by several providers is rejected as ambiguous.
-- Models come from Pi's live registry, so providers registered by other extensions work too.
-- A model being listed does not mean its provider can serve it. If the call fails, that range stays uncompressed and is retried next time; `~/.pi/acp.log` records `compression-model-failed`. Only when the model cannot be resolved at all, or the host cannot make nested calls, does the main model's short summary get used, with a warning.
+Regardless of these settings, at 95% of the window ACP cuts large tool outputs as a last resort.
 
 ### Idle compact
 
-Coming back to a long session after the prompt cache expired means the first request rewrites the whole context uncached. With Idle compact on, after Idle minutes without activity ACP starts one idle compact turn that shows the main model the compress nudge; the model decides whether to compress.
+Coming back to a long session after the prompt cache expired means the first request rewrites the whole context uncached. With Idle compact on, after Idle minutes without activity ACP starts one turn that shows the main model the compress nudge; the model decides whether to compress.
 
-```json
-{ "idleCompact": { "enabled": true, "idleMinutes": 29 } }
-```
+- Activity means a real model request: your messages, and also a sub-agent waking the session, so long background work does not count as idle.
+- At most one such turn per idle period. Skipped when less than Minimum benefit could be reclaimed, outside the TUI and RPC modes, or when the timer fires more than a minute late (the machine slept).
+- During that turn only ACP tools may run. If you type or a sub-agent result arrives, it becomes a normal turn.
+- Idle minutes applies to every model. With a shorter cache (e.g. 5 minutes) that turn itself reads the long context uncached once.
 
-- Idle minutes applies to every model. With a shorter cache (e.g. 5 minutes) the idle compact turn itself reads the long context uncached once.
-- Activity means a real model request: your messages, but also a sub-agent waking the session, so long background work does not count as idle.
-- Skipped when less than Minimum benefit could be reclaimed, outside TUI/RPC mode, or when the timer wakes more than a minute late (machine slept). At most one idle compact turn per idle period.
-- During that turn only ACP tools may run. Typing, or a sub-agent result arriving, turns it into a normal turn.
+### Editing acp.json
 
-### Compression timing per model
+The panel saves to `~/.pi/acp.json` and keeps every other key there. Edit the file yourself only for what the panel cannot do:
 
-Context threshold, Nudge interval and Minimum benefit depend on the model's window and price, so the panel sets them for the **current model only**. Choosing `inherit` removes the model's own value; the provider-wide or global value (or the default) then applies. In `acp.json` you can set them at any of these levels:
+- **Per project:** `<project>/.pi/acp.json` overrides the global file. The panel shows the value in effect and warns when the project file overrides it.
+- **Per provider:** the three compression timing settings can also be set for a whole provider or globally, not only for one model ([how](CONFIGURATION.md#compressproviders--per-provider--per-model-overrides)).
+- **Options not in the panel**, e.g. `compress.emergencyThresholdPercent`. The full list is in [CONFIGURATION.md](CONFIGURATION.md), with these exceptions: `autoUpdate` and `ACP_AUTO_UPDATE` are gone (update with `pi install`); the removed delegation keys (`delegate.*`, `displayUsage`, `delegatePrompt`) are ignored; `promptSections.*` is ignored with a one-time warning, because this fork injects its own prompt.
 
-```json
-{
-  "compressionModelId": "<provider>/<cheap-model>",
-  "compress": {
-    "promptPack": "lean",
-    "providers": {
-      "<provider>": {
-        "models": {
-          "<main-model>": { "maxContextLimit": 0.4, "nudgeGrowthTokens": 70000, "minPressureBenefitTokens": 30000 }
-        }
-      }
-    }
-  }
-}
-```
+Panel settings map to these keys: Summary model `compressionModelId`, Idle compact `idleCompact.enabled`, Idle minutes `idleCompact.idleMinutes`, Tool output cap `toolOutputMaxBytes`, bash default timeout `toolBashDefaultTimeout`, Debug log `debug`.
 
-Independently of these, at 95% of the window ACP cuts large tool outputs as a last resort (`emergencyThresholdPercent`, acp.json only).
-
-### Tool guards
-
-Tool output cap and bash default timeout are not about compression; they stop single tool calls from blowing up the context or hanging the session.
-
-- Tool output cap: Pi's own bash and read already stop at 50KB; the cap mainly catches MCP and other extensions' tools, which can return hundreds of KB at once.
-- bash default timeout: Pi itself has no default timeout, so a stuck command would make the session wait forever. On timeout the model is told to re-run with a larger one.
-
-ACP applies them through Pi's normal extension hooks (`tool_call` fills in the missing bash timeout, `tool_result` trims the oversized result), the same hooks any extension can use.
-
-### Other options
-
-Upstream options in [CONFIGURATION.md](CONFIGURATION.md) still apply in `acp.json`, except:
-
-- `autoUpdate` and `ACP_AUTO_UPDATE` are gone: the fork has no self-update code. Update with `pi install`.
-- The removed delegation keys (`delegate.*`, `displayUsage`, `delegatePrompt`) are ignored.
-- `promptSections.*` is ignored because the fork injects its own prompt; you get a one-time warning.
+`/acp compact <provider/model>` sets the summary model from the command line (`/acp compact` shows it, `reset` returns to the main model).
 
 ## Development
 
