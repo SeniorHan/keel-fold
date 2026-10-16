@@ -59,7 +59,7 @@ ACP 不会自己动手压缩。已经做完的旧内容积累多了，它会在�
 
 | 版本 | 工具与提示词构成 | 合计 |
 | --- | --- | ---: |
-| Lean `billion-context-pi-lean@0.2.0` | `compress` (231) + `acp_context` (87) + 提示词 (168) | **486** |
+| Lean `billion-context-pi-lean@0.2.1` | `compress` (231) + `acp_context` (87) + 提示词 (168) | **486** |
 | 上游 `billion-context-pi@0.1.83`，开 `promptPack: "lean"` | `compress` (389) + `decompress` (271) + `search_context` (90) + `acp_status` (227) + `acp_cache` (204) + `acp_delegate` (1,452) + `acp_delegate_wait` (342) + `acp_delegate_cancel` (83) + 提示词 (1,819) | **4,877** |
 | 上游 `billion-context-pi@0.1.83` | `compress` (549) + `decompress` (546) + `search_context` (210) + `acp_status` (339) + `acp_cache` (204) + `acp_delegate` (1,452) + `acp_delegate_wait` (342) + `acp_delegate_cancel` (83) + 提示词 (4,945) | **8,670** |
 
