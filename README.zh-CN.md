@@ -1,10 +1,31 @@
 # billion-context-pi-lean
 
+<!-- token-benchmark:summary:start -->
+> **Token 基准：Lean 486，上游 `billion-context-pi@0.1.83` 8,670，减少 94.4%。**
+<!-- token-benchmark:summary:end -->
+> [查看我的完整 Pi 配置](https://github.com/kunkun9527/my-lean-pi-setup)
+
 [English](README.md)
 
 给 [Pi coding agent](https://github.com/earendil-works/pi-coding-agent) 用的上下文管理扩展，让长会话能一直做下去：上下文快满时，模型把做完的部分折叠成摘要块，原文随时可以取回。
 
 本仓库是 [`billion-context-pi`](https://github.com/ranxianglei/billion-context-pi) **v0.1.83** 的分支，专注于运行稳定性和降低 token 消耗。它保留上游的压缩引擎（ACP），主要改动是：**摘要可以交给便宜模型写**，**上下文管理本身少花 token**。上游已转向 [`billion-context`](https://github.com/ranxianglei/billion-context)；本分支停在 0.1.83，按需手工挑选上游修复，与上游没有隶属关系。
+
+## 上下文占用对比
+
+只启用本扩展时，模型每次请求都会看到的初始化内容如下：
+
+| 版本 | 工具与提示词构成 | 合计 |
+| --- | --- | ---: |
+| Lean `billion-context-pi-lean@0.1.83-lean.9` | `compress` (231) + `acp_context` (87) + 提示词 (168) | **486** |
+| 上游 `billion-context-pi@0.1.83`，开 `promptPack: "lean"` | `compress` (389) + `decompress` (271) + `search_context` (90) + `acp_status` (227) + `acp_cache` (204) + `acp_delegate` (1,452) + `acp_delegate_wait` (342) + `acp_delegate_cancel` (83) + 提示词 (1,819) | **4,877** |
+| 上游 `billion-context-pi@0.1.83` | `compress` (549) + `decompress` (546) + `search_context` (210) + `acp_status` (339) + `acp_cache` (204) + `acp_delegate` (1,452) + `acp_delegate_wait` (342) + `acp_delegate_cancel` (83) + 提示词 (4,945) | **8,670** |
+
+比上游默认配置少 **8,184 token（94.4%）**，比上游开 `lean` 提示词包少 4,391 token（90.0%）。其中 3 个 `acp_delegate*` 工具（共 1,877 token）属于子代理委派，本分支已删除这项功能；不算它们的话，分别少 92.8% 和 83.8%。
+
+压缩提示不在上表内，只在上下文快满时出现。配置专用摘要模型后，每次压缩提示里的规则从约 1,460 token 降到约 220（[配置方法](#用便宜模型写摘要)）。
+
+在 Pi 1.3.0 上用 `npm run measure` 测得，每个版本各用一个临时进程，工作目录和配置都是空的。不计内置工具、skill、上下文文件、会话历史、用户消息、无关扩展、运行时 UI 和斜杠命令；计入 `before_agent_start` 追加的内容。Token 按 `ceil(字符数 / 4)` 固定估算，不是服务商分词器的计费数。
 
 ## 与上游 0.1.83 的主要区别
 
@@ -13,11 +34,11 @@
 | 谁写摘要 | 主模型，通常是贵的那个 | 可指定**专用摘要模型**，比如便宜模型；主模型只负责选范围 |
 | 压缩规则 | 每次压缩提示都发给主模型（约 1,460 token；`promptPack: "lean"` 时约 720） | 只发给摘要模型，不再占用主模型的上下文；主模型的压缩提示里只有一段约 220 token 的选范围说明\* |
 | 摘要质量 | 通用压缩规则，只检查长度 | 另外：用户的要求和工具显示的内容分开记；待办分成用户目标、建议、未核实风险三类。调用失败或不合格的摘要不会折叠，这段留待下次再压缩 |
-| 工具和常驻提示词 | 5 个上下文工具 + 3 个子代理工具，约 8,700 token（`promptPack: "lean"` 时约 4,900） | `compress` + `acp_context`，约 490 token\*。常驻提示词只保留调用前必须知道的规则，其余说明随压缩提示、报错和工具结果给出 |
+| 工具和常驻提示词 | 5 个上下文工具 + 3 个子代理工具，约 8,700 token（`promptPack: "lean"` 时约 4,900） | `compress` + `acp_context`，486 token（[对比](#上下文占用对比)）。常驻提示词只保留调用前必须知道的规则，其余说明随压缩提示、报错和工具结果给出 |
 | 系统提示词 | 返回整份系统提示词，在 Pi 1.x 上会丢掉之后加载的扩展追加的提示词 | 作为独立段落注入，其他扩展的内容保留 |
 | 子代理委派、自动更新 | 内置 | 已移除。子代理请用专门的扩展，它们的会话仍由 ACP 管理 |
 
-\* 按 `ceil(字符数 / 4)` 估算，不是计费 token。工具和常驻提示词：在空白 Pi 1.3 会话中运行 `npm run measure`（上游 0.1.83 对比本分支）；压缩规则：压缩提示中规则文本的长度。
+\* 按压缩提示中规则文本的长度，以 `ceil(字符数 / 4)` 估算，不是计费 token。
 
 <details>
 <summary>本分支修好的上游小问题</summary>
