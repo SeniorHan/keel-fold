@@ -8,6 +8,7 @@ import type { PiPromptSections } from "./system-prompt.js";
 import type { NudgeSectionsConfig, ToolPromptsConfig } from "./surface.js";
 import type { DegenerationGuardConfig } from "./degeneration.js";
 import type { ThrottleRetryConfig } from "./throttle-retry.js";
+import type { IdleCompactConfig } from "./idle-compact.js";
 import { debug } from "./log.js";
 
 /** User-facing config keys (subset of AdapterConfig). Loaded from
@@ -27,6 +28,7 @@ export interface UserAcpConfig {
   compress?: CompressConfig;
   outputHeadroomMaxPct?: number | string;
   throttleRetry?: boolean | ThrottleRetryConfig;
+  idleCompact?: boolean | IdleCompactConfig;
   repetitionGuard?: boolean | RepetitionGuardConfig;
   degenerationGuard?: boolean | DegenerationGuardConfig;
   prompts?: Partial<Prompts>;
@@ -132,7 +134,7 @@ const KNOWN = new Set([
   "enabled", "debug", "autoUpdate", "modelContextLimit",
   "protectedTools", "protectedLatestTools", "neverPreserveRecentTools", "preserveRecentTools",
   "toolBashDefaultTimeout", "toolOutputMaxBytes",
-  "compress", "throttleRetry",
+  "compress", "throttleRetry", "idleCompact",
   "outputHeadroomMaxPct",
   "repetitionGuard", "degenerationGuard",
   "prompts", "acknowledgePromptsRisk",
@@ -220,6 +222,25 @@ function cleanProtectionList(key: string, value: unknown): string[] | undefined 
  *  acp.json still overrides the global value. A present-but-unparseable file
  *  is never overwritten. */
 export async function saveCompressionModelId(value: string | null): Promise<void> {
+  await updateGlobalAcpConfig((current) => {
+    if (value === null) delete current.compressionModelId;
+    else current.compressionModelId = value;
+  });
+}
+
+let globalWriteQueue: Promise<unknown> = Promise.resolve();
+
+/** Read-modify-write the GLOBAL acp.json, keeping every key the mutator does
+ *  not touch. A present-but-unparseable file is never overwritten. Calls are
+ *  serialized so quick successive changes (settings panel) never read the same
+ *  old snapshot and drop each other. */
+export function updateGlobalAcpConfig(mutate: (current: Record<string, unknown>) => void): Promise<void> {
+  const run = globalWriteQueue.then(() => writeGlobalAcpConfig(mutate));
+  globalWriteQueue = run.catch(() => undefined);
+  return run;
+}
+
+async function writeGlobalAcpConfig(mutate: (current: Record<string, unknown>) => void): Promise<void> {
   const file = userConfigPath(homedir(), "acp.json");
   let current: Record<string, unknown> = {};
   try {
@@ -229,8 +250,7 @@ export async function saveCompressionModelId(value: string | null): Promise<void
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
   }
-  if (value === null) delete current.compressionModelId;
-  else current.compressionModelId = value;
+  mutate(current);
   await fs.mkdir(dirname(file), { recursive: true });
   await fs.writeFile(file, `${JSON.stringify(current, null, 2)}\n`, "utf8");
 }

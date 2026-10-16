@@ -109,6 +109,42 @@ pi install npm:billion-context-pi-lean
 }
 ```
 
+### 空闲压缩（Idle compact）
+
+长会话里离开到提示缓存过期再回来，第一条请求会按无缓存价格重写整段上下文。打开 Idle compact（`idleCompact`）后，会话空闲 29 分钟时（30 分钟缓存过期之前），ACP 启动一轮空闲压缩，把压缩提醒交给主模型，由它决定要不要压缩，回来时上下文已经变短。
+
+```json
+{ "idleCompact": { "enabled": true, "idleMinutes": 29 } }
+```
+
+- Idle minutes（`idleMinutes`，默认 29）对所有模型生效。应略短于所用模型的缓存时长：缓存更短（比如 5 分钟）时，这一轮空闲压缩本身要按无缓存价读一次长上下文。
+- 能腾出的空间不到 Minimum benefit（`minPressureBenefitTokens`）、非 TUI/RPC 模式、定时器晚醒超过 1 分钟（电脑睡眠）时跳过。每段空闲最多一轮空闲压缩。
+- 这一轮里只能用 ACP 工具。期间你输入消息或子代理结果到达，它就变成普通轮次。
+
+### 设置面板
+
+`/acp-config`（TUI）打开设置面板。面板界面是英文的，下表按面板上的名字列出，括号里是中文意思。上下键选设置项，Enter 或空格切换取值，Esc 关闭。每次改动都写进 `~/.pi/acp.json`（其它设置原样保留），立即生效；如果项目的 `.pi/acp.json` 也设了同一项，以项目为准，面板会提示。
+
+先简单说一下压缩是怎么发生的：ACP 不会自己动手压缩。已经做完的旧内容积累多了，它会在下一次请求里附一段简短的压缩提醒（nudge），列出可以折叠的范围；主模型挑范围、调用 `compress`，摘要由摘要模型来写。下面的压缩设置决定压缩提醒什么时候出现。
+
+设置按常用程度排序：Summary model 和 Idle compact 在最前，按模型的压缩项居中，工具防护和 Debug log 在最后。
+
+| 设置 | acp.json 里的键 | 意思 | 默认 |
+|---|---|---|---|
+| Summary model（摘要模型） | `compressionModelId` | 谁来写压缩摘要。选便宜模型能省主模型的 token；`session` 复用当前模型和它的缓存前缀；`main model` 就是不另外指定，由主模型自己写。按 Enter 列出 Pi 当前能用的模型，可以打字过滤。 | `main model` |
+| Idle compact（空闲压缩） | `idleCompact.enabled` | 你离开一段时间后，ACP 趁提示缓存还没过期，给模型一次压缩机会，回来时上下文更短、更省钱。 | `off` |
+| Idle minutes（空闲分钟数） | `idleCompact.idleMinutes` | 空闲多久后启动空闲压缩。设得比所用模型的缓存时长略短（30 分钟缓存就用 29）。Idle compact 关掉时，这一项显示 `off` 且不能改；原来的分钟数保留，重新打开就恢复。 | 29 |
+| Context threshold（上下文阈值） | `compress.providers.<p>.models.<id>.maxContextLimit` | 上下文占到模型窗口的这个比例以上，压缩提醒不再等 Nudge interval：只要能腾出的空间达到 Minimum benefit 就提醒。调低让上下文常保小；调高允许它更满。它不是硬上限。 | 75% |
+| Nudge interval（提醒间隔） | `….nudgeGrowthTokens` | 上下文没到 Context threshold 时，要等可压缩的旧内容攒到大约这么多 token，才提醒一次。调大：提醒少，每次压得多，两次之间上下文更满；调小：频繁小压缩，上下文更精简。 | 50K |
+| Minimum benefit（最小收益） | `….minPressureBenefitTokens` | 能腾出的空间少于这个值时不提醒，也不启动空闲压缩，因为只为几千 token 去重写、打断缓存不划算。 | 5K 与窗口 1% 中较大者 |
+| Tool output cap（工具输出上限） | `toolOutputMaxBytes` | 防止一次工具输出撑爆上下文：单个工具结果超过这个大小就截断，并告诉模型完整输出在哪。Pi 自带的 bash、read 本来就有 50KB 上限，这里主要兜住 MCP 和其它扩展的工具，它们可能一次返回几百 KB。`off` 表示不截。 | 50K 字节 |
+| bash default timeout（bash 默认超时） | `toolBashDefaultTimeout` | 防止卡住的命令让会话一直干等：模型没给超时时间时，bash 最多跑这么多秒，超时后提示模型用更大的 timeout 重跑。Pi 自己没有默认超时。`off` 表示不限时。 | 60 |
+| Debug log（调试日志） | `debug` | 在 `~/.pi/acp.log` 里额外记录详细事件，排查问题用。错误和主要事件始终会记。 | `off` |
+
+Tool output cap 和 bash default timeout 是工具防护，不属于压缩设置：它们防止单次工具调用撑爆上下文或让会话卡死。ACP 通过 Pi 普通的扩展钩子实现：`tool_call` 给没写超时的 bash 补上超时，`tool_result` 截掉超大的结果。任何扩展都能用这两个钩子。
+
+Context threshold、Nudge interval、Minimum benefit 三项**只作用于当前模型**，因为不同模型的窗口和价格差别很大。选 `inherit`（继承）会去掉这个模型自己的值，改用 provider 级或全局的值（都没有就用默认值）。另外不论这些怎么设，上下文到窗口 95% 时，ACP 会兜底截断大的工具输出（`emergencyThresholdPercent`，只能在 acp.json 里改）。
+
 ## 模型能用的工具
 
 - `compress`：把做完的消息范围折叠成摘要块。

@@ -73,6 +73,23 @@
 - 专用摘要模型的“只写 1-2 句 fallback”规则由提示钩子每轮按 compress 描述 getter 追加（`DEDICATED_PROMPT_LINE`）。不能只靠 compress 描述：Pi 1.3 在绑定扩展时（`_refreshToolRegistry` → `wrapToolDefinition`）就快照工具描述，pi-collapsed-tools 的 `{...base}` 也会快照 getter，而 `compressionModelId` 要到 session_start 的 `reloadConfig` 才载入，所以模型看到的始终是非专用描述。
 - 测试：`lean/tests/facade.test.mjs`，含工具面和 1450 字符提示预算。
 
+### 空闲压缩（Idle compact，`idleCompact`）
+
+- 目的：用户离开后回来，第一条请求会把整段长上下文按无缓存价格重写一次。会话空闲 `idleMinutes`（默认 29，对应 30 分钟缓存）后，用 `pi.sendMessage(..., { triggerTurn: true })` 发一条 `acp-idle-check` 消息启动一轮，context 钩子在这轮强制附上常规 compress nudge（不受增长、使用率阈值和每轮去重限制），由主模型决定是否压缩。实现在 `src/idle-compact.ts`，默认关闭。
+- 只有一个全局分钟数，不按模型推断 TTL：各家缓存时长差异大，无法替所有模型定义。缓存短于设定值时，检查轮本身读不到缓存。
+- 计时照搬 pi-keepwarm：锚点是一次 run 里最后一个 provider 请求的开始时间（只认 `agent_start` 到 `agent_settled` 之间的请求，keepwarm 等空闲期请求不算活动）；`agent_settled` 后布防，`agent_start` 时撤销；`model_select`、`session_tree` 作废锚点，等下一次真实请求重新计时。子代理唤醒、throttle kick 等任何 run 都算活动，只有空闲检查自己的 run 不重新计周期，所以一次空闲最多检查一次。
+- 跳过条件：非 TUI/RPC 模式、会话不空闲、定时器晚醒超过 1 分钟（`IDLE_LATE_MS`，电脑睡眠后）、throttle 重试待发、可压缩量低于 `minPressureBenefitTokens` 或没有可用范围（取上一次 context 事件的 nudge 决策）。跳过记 `idle-compact` 日志。
+- 检查轮里 `tool_call` 只放行 ACP 工具（compress、acp_context 及其包装的 op），其它工具被拦截。用户输入（`input` 事件，非扩展来源）或子代理等扩展消息到达时解除限制，这一轮变成普通 run，结束后重新计时。
+- 测试：`tests/idle-compact.test.ts`（mock 定时器；定时器回调里 `Date.now()` 是 tick 的终点，测试按触发点精确 tick）。
+
+### 设置面板（/acp-config）
+
+- `src/config-panel.ts`：pi-tui 的 `SettingsList`（摘要模型子菜单是 `SearchableList`：`Input` + `SelectList`，列 `modelRegistry.getAvailable()`，打字用 pi-tui 的 `fuzzyFilter` 过滤并重建列表；`SelectList.setFilter` 只做前缀匹配，搜不到 `cliproxyapi/claude-opus` 里的 `opus`），主题取宿主的 `getSettingsListTheme`。`PANEL_ITEMS` 的顺序就是面板顺序（按常用程度）；`dependsOn` 指向上游开关，上游为 `off` 时 `panelDisplay` 把该项显示为 `off` 并去掉 `values` 锁住（存储值不动），上游保存后在 `save` 里刷新下游——`SettingsList` 按引用持有 item，直接改对象即可。pi-tui 和其它运行时代码一样由 tsup 打进 `dist/`。
+- 显示的是生效值（含项目 acp.json）；改动经 `updateGlobalAcpConfig` 读-改-写全局 `~/.pi/acp.json`（不认识的键原样保留，解析失败的文件不覆盖），再 `reloadConfig` 立即生效。写完回读生效值，与所选不同说明项目配置覆盖了该项，提示用户。摘要模型走 `runtime.setCompressionModelRef`，和 `/acp compact` 同一路径。
+- 按模型的三项写到 `compress.providers.<provider>.models.<id>`；选 `inherit` 删除该键并清掉空对象。面板文案全部用英文（扩展面向所有用户），README_zh-CN 的设置表标注了对应中文。没有当前模型时隐藏这三项。
+- 空闲开关和分钟数改动后调用 `IdleCompactHandle.rearm()` 按新值重排定时器。
+- 测试：`tests/config-panel.test.ts`（含一次真实渲染和按键保存，测试里需先 `initTheme()`）。
+
 ## 修改流程
 
 1. 改 `src/` 或 `lean/`。

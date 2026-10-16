@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Idle compact (`idleCompact`, off by default): after `idleMinutes` of idle time (default 29, just inside a 30-minute prompt cache), ACP starts one turn that shows the main model the regular compress nudge (below the usual thresholds) and lets it decide whether to compress. With the cache still warm that turn reads the long prefix from cache, so the request sent when the user returns carries the shorter context instead of rewriting the long one uncached. One global value for every model; set it a little under the cache lifetime of the models you use. At most one idle compact turn per idle period; skipped when there is less to compress than `minPressureBenefitTokens`, outside TUI/RPC mode, or when the timer wakes more than a minute late (sleep). During that turn only ACP tools may run; user input or a sub-agent result turns it back into a normal run.
+- `/acp-config` settings panel (TUI): Summary model (pick from the models Pi can use, type to filter), Idle compact on/off and Idle minutes, per-model Context threshold / Nudge interval / Minimum benefit for the current model, Tool output cap, bash default timeout, Debug log. Names match the README. Writes `~/.pi/acp.json` (other keys kept) and applies at once; warns when a project `.pi/acp.json` overrides the key.
+
 ## v0.1.83-lean.10 (2026-10-16)
 
 - Published to npm as `billion-context-pi-lean`: `pi install npm:billion-context-pi-lean`. The package now ships the Lean facade (`lean/index.ts`), which `pi.extensions` points at. Git installs keep working.

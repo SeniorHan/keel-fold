@@ -4,6 +4,7 @@ import type { PiPromptSections } from "./system-prompt.js";
 import type { NudgeSectionsConfig, ToolPromptsConfig } from "./surface.js";
 import type { DegenerationGuardConfig } from "./degeneration.js";
 import type { ThrottleRetryConfig } from "./throttle-retry.js";
+import type { IdleCompactConfig } from "./idle-compact.js";
 /** User-facing config keys (subset of AdapterConfig). Loaded from
  *  ~/.<CONFIG_DIR_NAME>/acp.json (global) and <cwd>/.<CONFIG_DIR_NAME>/acp.json
  *  (project-local overrides project-global). Project wins over global. */
@@ -21,6 +22,7 @@ export interface UserAcpConfig {
     compress?: CompressConfig;
     outputHeadroomMaxPct?: number | string;
     throttleRetry?: boolean | ThrottleRetryConfig;
+    idleCompact?: boolean | IdleCompactConfig;
     repetitionGuard?: boolean | RepetitionGuardConfig;
     degenerationGuard?: boolean | DegenerationGuardConfig;
     prompts?: Partial<Prompts>;
@@ -59,3 +61,8 @@ export declare function applyUserConfig(adapter: AdapterConfig, user: UserAcpCon
  *  acp.json still overrides the global value. A present-but-unparseable file
  *  is never overwritten. */
 export declare function saveCompressionModelId(value: string | null): Promise<void>;
+/** Read-modify-write the GLOBAL acp.json, keeping every key the mutator does
+ *  not touch. A present-but-unparseable file is never overwritten. Calls are
+ *  serialized so quick successive changes (settings panel) never read the same
+ *  old snapshot and drop each other. */
+export declare function updateGlobalAcpConfig(mutate: (current: Record<string, unknown>) => void): Promise<void>;

@@ -91,7 +91,7 @@ function writeLine(level, scope, fields) {
     }
   } catch {
   }
-  const body = Object.keys(fields).map((k) => `${k}=${fmt(fields[k])}`).join(" ");
+  const body = Object.keys(fields).map((k2) => `${k2}=${fmt(fields[k2])}`).join(" ");
   const line = `${ts()} [${level}] [${scope}] ${body}
 `;
   try {
@@ -214,6 +214,7 @@ var KNOWN = /* @__PURE__ */ new Set([
   "toolOutputMaxBytes",
   "compress",
   "throttleRetry",
+  "idleCompact",
   "outputHeadroomMaxPct",
   "repetitionGuard",
   "degenerationGuard",
@@ -228,8 +229,8 @@ var KNOWN = /* @__PURE__ */ new Set([
 ]);
 function pickKnown(parsed) {
   const out = {};
-  for (const [k, v2] of Object.entries(parsed)) {
-    if (KNOWN.has(k)) out[k] = v2;
+  for (const [k2, v2] of Object.entries(parsed)) {
+    if (KNOWN.has(k2)) out[k2] = v2;
   }
   return out;
 }
@@ -284,6 +285,18 @@ function cleanProtectionList(key, value) {
   return value.map((v2) => v2.trim());
 }
 async function saveCompressionModelId(value) {
+  await updateGlobalAcpConfig((current) => {
+    if (value === null) delete current.compressionModelId;
+    else current.compressionModelId = value;
+  });
+}
+var globalWriteQueue = Promise.resolve();
+function updateGlobalAcpConfig(mutate) {
+  const run = globalWriteQueue.then(() => writeGlobalAcpConfig(mutate));
+  globalWriteQueue = run.catch(() => void 0);
+  return run;
+}
+async function writeGlobalAcpConfig(mutate) {
   const file = userConfigPath(homedir3(), "acp.json");
   let current = {};
   try {
@@ -293,11 +306,99 @@ async function saveCompressionModelId(value) {
   } catch (e) {
     if (e.code !== "ENOENT") throw e;
   }
-  if (value === null) delete current.compressionModelId;
-  else current.compressionModelId = value;
+  mutate(current);
   await fs.mkdir(dirname3(file), { recursive: true });
   await fs.writeFile(file, `${JSON.stringify(current, null, 2)}
 `, "utf8");
+}
+
+// node_modules/@earendil-works/pi-tui/dist/fuzzy.js
+function fuzzyMatch(query, text) {
+  const queryLower = query.toLowerCase();
+  const textLower = text.toLowerCase();
+  const matchQuery = (normalizedQuery) => {
+    if (normalizedQuery.length === 0) {
+      return { matches: true, score: 0 };
+    }
+    if (normalizedQuery.length > textLower.length) {
+      return { matches: false, score: 0 };
+    }
+    let queryIndex = 0;
+    let score = 0;
+    let lastMatchIndex = -1;
+    let consecutiveMatches = 0;
+    for (let i = 0; i < textLower.length && queryIndex < normalizedQuery.length; i++) {
+      if (textLower[i] === normalizedQuery[queryIndex]) {
+        const isWordBoundary = i === 0 || /[\s\-_./:]/.test(textLower[i - 1]);
+        if (lastMatchIndex === i - 1) {
+          consecutiveMatches++;
+          score -= consecutiveMatches * 5;
+        } else {
+          consecutiveMatches = 0;
+          if (lastMatchIndex >= 0) {
+            score += (i - lastMatchIndex - 1) * 2;
+          }
+        }
+        if (isWordBoundary) {
+          score -= 10;
+        }
+        score += i * 0.1;
+        lastMatchIndex = i;
+        queryIndex++;
+      }
+    }
+    if (queryIndex < normalizedQuery.length) {
+      return { matches: false, score: 0 };
+    }
+    if (normalizedQuery === textLower) {
+      score -= 100;
+    }
+    return { matches: true, score };
+  };
+  const primaryMatch = matchQuery(queryLower);
+  if (primaryMatch.matches) {
+    return primaryMatch;
+  }
+  const alphaNumericMatch = queryLower.match(/^(?<letters>[a-z]+)(?<digits>[0-9]+)$/);
+  const numericAlphaMatch = queryLower.match(/^(?<digits>[0-9]+)(?<letters>[a-z]+)$/);
+  const swappedQuery = alphaNumericMatch ? `${alphaNumericMatch.groups?.digits ?? ""}${alphaNumericMatch.groups?.letters ?? ""}` : numericAlphaMatch ? `${numericAlphaMatch.groups?.letters ?? ""}${numericAlphaMatch.groups?.digits ?? ""}` : "";
+  if (!swappedQuery) {
+    return primaryMatch;
+  }
+  const swappedMatch = matchQuery(swappedQuery);
+  if (!swappedMatch.matches) {
+    return primaryMatch;
+  }
+  return { matches: true, score: swappedMatch.score + 5 };
+}
+function fuzzyFilter(items, query, getText) {
+  if (!query.trim()) {
+    return items;
+  }
+  const tokens = query.trim().split(/[\s/]+/).filter((t) => t.length > 0);
+  if (tokens.length === 0) {
+    return items;
+  }
+  const results = [];
+  for (const item of items) {
+    const text = getText(item);
+    let totalScore = 0;
+    let allMatch = true;
+    for (const token of tokens) {
+      const match = fuzzyMatch(token, text);
+      if (match.matches) {
+        totalScore += match.score;
+      } else {
+        allMatch = false;
+        break;
+      }
+    }
+    if (allMatch) {
+      results.push({ item, totalScore });
+    }
+  }
+  results.sort((a, b2) => a.totalScore - b2.totalScore);
+  return results.map((r) => r.item);
 }
 
 // node_modules/get-east-asian-width/lookup-data.js
@@ -416,6 +517,88 @@ function isPrintableAscii(str) {
     }
   }
   return true;
+}
+function truncateFragmentToWidth(text, maxWidth) {
+  if (maxWidth <= 0 || text.length === 0) {
+    return { text: "", width: 0 };
+  }
+  if (isPrintableAscii(text)) {
+    const clipped = text.slice(0, maxWidth);
+    return { text: clipped, width: clipped.length };
+  }
+  const hasAnsi = text.includes("\x1B");
+  const hasTabs = text.includes("	");
+  if (!hasAnsi && !hasTabs) {
+    let result2 = "";
+    let width2 = 0;
+    for (const { segment } of graphemeSegmenter.segment(text)) {
+      const w2 = graphemeWidth(segment);
+      if (width2 + w2 > maxWidth) {
+        break;
+      }
+      result2 += segment;
+      width2 += w2;
+    }
+    return { text: result2, width: width2 };
+  }
+  let result = "";
+  let width = 0;
+  let i = 0;
+  let pendingAnsi = "";
+  while (i < text.length) {
+    const ansi = extractAnsiCode(text, i);
+    if (ansi) {
+      pendingAnsi += ansi.code;
+      i += ansi.length;
+      continue;
+    }
+    if (text[i] === "	") {
+      if (width + 3 > maxWidth) {
+        break;
+      }
+      if (pendingAnsi) {
+        result += pendingAnsi;
+        pendingAnsi = "";
+      }
+      result += "	";
+      width += 3;
+      i++;
+      continue;
+    }
+    let end = i;
+    while (end < text.length && text[end] !== "	") {
+      const nextAnsi = extractAnsiCode(text, end);
+      if (nextAnsi) {
+        break;
+      }
+      end++;
+    }
+    for (const { segment } of graphemeSegmenter.segment(text.slice(i, end))) {
+      const w2 = graphemeWidth(segment);
+      if (width + w2 > maxWidth) {
+        return { text: result, width };
+      }
+      if (pendingAnsi) {
+        result += pendingAnsi;
+        pendingAnsi = "";
+      }
+      result += segment;
+      width += w2;
+    }
+    i = end;
+  }
+  return { text: result, width };
+}
+function finalizeTruncatedResult(prefix, prefixWidth, ellipsis, ellipsisWidth, maxWidth, pad) {
+  const reset = "\x1B[0m";
+  const visibleWidth2 = prefixWidth + ellipsisWidth;
+  let result;
+  if (ellipsis.length > 0) {
+    result = `${prefix}${reset}${ellipsis}${reset}`;
+  } else {
+    result = `${prefix}${reset}`;
+  }
+  return pad ? result + " ".repeat(Math.max(0, maxWidth - visibleWidth2)) : result;
 }
 function graphemeWidth(segment) {
   if (segment === "	") {
@@ -894,6 +1077,10 @@ function wrapSingleLine(line, width) {
   }
   return wrapped.length > 0 ? wrapped.map((line2) => line2.trimEnd()) : [""];
 }
+var PUNCTUATION_REGEX = /[(){}[\]<>.,;:'"!?+\-=*/\\|&%^$#@~`]/;
+function isWhitespaceChar(char) {
+  return /\s/.test(char);
+}
 function breakLongWord(word, width, tracker) {
   const lines = [];
   let currentLine = tracker.getActiveCodes();
@@ -953,6 +1140,169 @@ function applyBackgroundToLine(line, width, bgFn) {
   const padding = " ".repeat(paddingNeeded);
   const withPadding = line + padding;
   return bgFn(withPadding);
+}
+function truncateToWidth(text, maxWidth, ellipsis = "...", pad = false) {
+  if (maxWidth <= 0) {
+    return "";
+  }
+  if (text.length === 0) {
+    return pad ? " ".repeat(maxWidth) : "";
+  }
+  const ellipsisWidth = visibleWidth(ellipsis);
+  if (ellipsisWidth >= maxWidth) {
+    const textWidth = visibleWidth(text);
+    if (textWidth <= maxWidth) {
+      return pad ? text + " ".repeat(maxWidth - textWidth) : text;
+    }
+    const clippedEllipsis = truncateFragmentToWidth(ellipsis, maxWidth);
+    if (clippedEllipsis.width === 0) {
+      return pad ? " ".repeat(maxWidth) : "";
+    }
+    return finalizeTruncatedResult("", 0, clippedEllipsis.text, clippedEllipsis.width, maxWidth, pad);
+  }
+  if (isPrintableAscii(text)) {
+    if (text.length <= maxWidth) {
+      return pad ? text + " ".repeat(maxWidth - text.length) : text;
+    }
+    const targetWidth2 = maxWidth - ellipsisWidth;
+    return finalizeTruncatedResult(text.slice(0, targetWidth2), targetWidth2, ellipsis, ellipsisWidth, maxWidth, pad);
+  }
+  const targetWidth = maxWidth - ellipsisWidth;
+  let result = "";
+  let pendingAnsi = "";
+  let visibleSoFar = 0;
+  let keptWidth = 0;
+  let keepContiguousPrefix = true;
+  let overflowed = false;
+  let exhaustedInput = false;
+  const hasAnsi = text.includes("\x1B");
+  const hasTabs = text.includes("	");
+  if (!hasAnsi && !hasTabs) {
+    for (const { segment } of graphemeSegmenter.segment(text)) {
+      const width = graphemeWidth(segment);
+      if (keepContiguousPrefix && keptWidth + width <= targetWidth) {
+        result += segment;
+        keptWidth += width;
+      } else {
+        keepContiguousPrefix = false;
+      }
+      visibleSoFar += width;
+      if (visibleSoFar > maxWidth) {
+        overflowed = true;
+        break;
+      }
+    }
+    exhaustedInput = !overflowed;
+  } else {
+    let i = 0;
+    while (i < text.length) {
+      const ansi = extractAnsiCode(text, i);
+      if (ansi) {
+        pendingAnsi += ansi.code;
+        i += ansi.length;
+        continue;
+      }
+      if (text[i] === "	") {
+        if (keepContiguousPrefix && keptWidth + 3 <= targetWidth) {
+          if (pendingAnsi) {
+            result += pendingAnsi;
+            pendingAnsi = "";
+          }
+          result += "	";
+          keptWidth += 3;
+        } else {
+          keepContiguousPrefix = false;
+          pendingAnsi = "";
+        }
+        visibleSoFar += 3;
+        if (visibleSoFar > maxWidth) {
+          overflowed = true;
+          break;
+        }
+        i++;
+        continue;
+      }
+      let end = i;
+      while (end < text.length && text[end] !== "	") {
+        const nextAnsi = extractAnsiCode(text, end);
+        if (nextAnsi) {
+          break;
+        }
+        end++;
+      }
+      for (const { segment } of graphemeSegmenter.segment(text.slice(i, end))) {
+        const width = graphemeWidth(segment);
+        if (keepContiguousPrefix && keptWidth + width <= targetWidth) {
+          if (pendingAnsi) {
+            result += pendingAnsi;
+            pendingAnsi = "";
+          }
+          result += segment;
+          keptWidth += width;
+        } else {
+          keepContiguousPrefix = false;
+          pendingAnsi = "";
+        }
+        visibleSoFar += width;
+        if (visibleSoFar > maxWidth) {
+          overflowed = true;
+          break;
+        }
+      }
+      if (overflowed) {
+        break;
+      }
+      i = end;
+    }
+    exhaustedInput = i >= text.length;
+  }
+  if (!overflowed && exhaustedInput) {
+    return pad ? text + " ".repeat(Math.max(0, maxWidth - visibleSoFar)) : text;
+  }
+  return finalizeTruncatedResult(result, keptWidth, ellipsis, ellipsisWidth, maxWidth, pad);
+}
+function sliceByColumn(line, startCol, length, strict = false) {
+  return sliceWithWidth(line, startCol, length, strict).text;
+}
+function sliceWithWidth(line, startCol, length, strict = false) {
+  if (length <= 0)
+    return { text: "", width: 0 };
+  const endCol = startCol + length;
+  let result = "", resultWidth = 0, currentCol = 0, i = 0, pendingAnsi = "";
+  while (i < line.length) {
+    const ansi = extractAnsiCode(line, i);
+    if (ansi) {
+      if (currentCol >= startCol && currentCol < endCol)
+        result += ansi.code;
+      else if (currentCol < startCol)
+        pendingAnsi += ansi.code;
+      i += ansi.length;
+      continue;
+    }
+    let textEnd = i;
+    while (textEnd < line.length && !extractAnsiCode(line, textEnd))
+      textEnd++;
+    for (const { segment } of graphemeSegmenter.segment(line.slice(i, textEnd))) {
+      const w2 = graphemeWidth(segment);
+      const inRange = currentCol >= startCol && currentCol < endCol;
+      const fits = !strict || currentCol + w2 <= endCol;
+      if (inRange && fits) {
+        if (pendingAnsi) {
+          result += pendingAnsi;
+          pendingAnsi = "";
+        }
+        result += segment;
+        resultWidth += w2;
+      }
+      currentCol += w2;
+      if (currentCol >= endCol)
+        break;
+    }
+    i = textEnd;
+    if (currentCol >= endCol)
+      break;
+  }
+  return { text: result, width: resultWidth };
 }
 var pooledStyleTracker = new AnsiCodeTracker();
 
@@ -1045,6 +1395,40 @@ var Box = class {
 };
 
 // node_modules/@earendil-works/pi-tui/dist/keys.js
+var _kittyProtocolActive = false;
+var SYMBOL_KEYS = /* @__PURE__ */ new Set([
+  "`",
+  "-",
+  "=",
+  "[",
+  "]",
+  "\\",
+  ";",
+  "'",
+  ",",
+  ".",
+  "/",
+  "!",
+  "@",
+  "#",
+  "$",
+  "%",
+  "^",
+  "&",
+  "*",
+  "(",
+  ")",
+  "_",
+  "+",
+  "|",
+  "~",
+  "{",
+  "}",
+  ":",
+  "<",
+  ">",
+  "?"
+]);
 var MODIFIERS = {
   shift: 1,
   alt: 2,
@@ -1052,6 +1436,15 @@ var MODIFIERS = {
   super: 8
 };
 var LOCK_MASK = 64 + 128;
+var CODEPOINTS = {
+  escape: 27,
+  tab: 9,
+  enter: 13,
+  space: 32,
+  backspace: 127,
+  kpEnter: 57414
+  // Numpad Enter (Kitty protocol)
+};
 var ARROW_CODEPOINTS = {
   up: -1,
   down: -2,
@@ -1112,7 +1505,659 @@ var KITTY_FUNCTIONAL_KEY_EQUIVALENTS = /* @__PURE__ */ new Map([
   [57425, FUNCTIONAL_CODEPOINTS.insert],
   [57426, FUNCTIONAL_CODEPOINTS.delete]
 ]);
+function normalizeKittyFunctionalCodepoint(codepoint) {
+  return KITTY_FUNCTIONAL_KEY_EQUIVALENTS.get(codepoint) ?? codepoint;
+}
+function normalizeShiftedLetterIdentityCodepoint(codepoint, modifier) {
+  const effectiveModifier = modifier & ~LOCK_MASK;
+  if ((effectiveModifier & MODIFIERS.shift) !== 0 && codepoint >= 65 && codepoint <= 90) {
+    return codepoint + 32;
+  }
+  return codepoint;
+}
+var LEGACY_KEY_SEQUENCES = {
+  up: ["\x1B[A", "\x1BOA"],
+  down: ["\x1B[B", "\x1BOB"],
+  right: ["\x1B[C", "\x1BOC"],
+  left: ["\x1B[D", "\x1BOD"],
+  home: ["\x1B[H", "\x1BOH", "\x1B[1~", "\x1B[7~"],
+  end: ["\x1B[F", "\x1BOF", "\x1B[4~", "\x1B[8~"],
+  insert: ["\x1B[2~"],
+  delete: ["\x1B[3~"],
+  pageUp: ["\x1B[5~", "\x1B[[5~"],
+  pageDown: ["\x1B[6~", "\x1B[[6~"],
+  clear: ["\x1B[E", "\x1BOE"],
+  f1: ["\x1BOP", "\x1B[11~", "\x1B[[A"],
+  f2: ["\x1BOQ", "\x1B[12~", "\x1B[[B"],
+  f3: ["\x1BOR", "\x1B[13~", "\x1B[[C"],
+  f4: ["\x1BOS", "\x1B[14~", "\x1B[[D"],
+  f5: ["\x1B[15~", "\x1B[[E"],
+  f6: ["\x1B[17~"],
+  f7: ["\x1B[18~"],
+  f8: ["\x1B[19~"],
+  f9: ["\x1B[20~"],
+  f10: ["\x1B[21~"],
+  f11: ["\x1B[23~"],
+  f12: ["\x1B[24~"]
+};
+var LEGACY_SHIFT_SEQUENCES = {
+  up: ["\x1B[a"],
+  down: ["\x1B[b"],
+  right: ["\x1B[c"],
+  left: ["\x1B[d"],
+  clear: ["\x1B[e"],
+  insert: ["\x1B[2$"],
+  delete: ["\x1B[3$"],
+  pageUp: ["\x1B[5$"],
+  pageDown: ["\x1B[6$"],
+  home: ["\x1B[7$"],
+  end: ["\x1B[8$"]
+};
+var LEGACY_CTRL_SEQUENCES = {
+  up: ["\x1BOa"],
+  down: ["\x1BOb"],
+  right: ["\x1BOc"],
+  left: ["\x1BOd"],
+  clear: ["\x1BOe"],
+  insert: ["\x1B[2^"],
+  delete: ["\x1B[3^"],
+  pageUp: ["\x1B[5^"],
+  pageDown: ["\x1B[6^"],
+  home: ["\x1B[7^"],
+  end: ["\x1B[8^"]
+};
+var matchesLegacySequence = (data, sequences) => sequences.includes(data);
+var matchesLegacyModifierSequence = (data, key, modifier) => {
+  if (modifier === MODIFIERS.shift) {
+    return matchesLegacySequence(data, LEGACY_SHIFT_SEQUENCES[key]);
+  }
+  if (modifier === MODIFIERS.ctrl) {
+    return matchesLegacySequence(data, LEGACY_CTRL_SEQUENCES[key]);
+  }
+  return false;
+};
+var _lastEventType = "press";
+function parseEventType(eventTypeStr) {
+  if (!eventTypeStr)
+    return "press";
+  const eventType = parseInt(eventTypeStr, 10);
+  if (eventType === 2)
+    return "repeat";
+  if (eventType === 3)
+    return "release";
+  return "press";
+}
+function parseKittySequence(data) {
+  const csiUMatch = data.match(/^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$/);
+  if (csiUMatch) {
+    const codepoint = parseInt(csiUMatch[1], 10);
+    const shiftedKey = csiUMatch[2] && csiUMatch[2].length > 0 ? parseInt(csiUMatch[2], 10) : void 0;
+    const baseLayoutKey = csiUMatch[3] ? parseInt(csiUMatch[3], 10) : void 0;
+    const modValue = csiUMatch[4] ? parseInt(csiUMatch[4], 10) : 1;
+    const eventType = parseEventType(csiUMatch[5]);
+    _lastEventType = eventType;
+    return { codepoint, shiftedKey, baseLayoutKey, modifier: modValue - 1, eventType };
+  }
+  const arrowMatch = data.match(/^\x1b\[1;(\d+)(?::(\d+))?([ABCD])$/);
+  if (arrowMatch) {
+    const modValue = parseInt(arrowMatch[1], 10);
+    const eventType = parseEventType(arrowMatch[2]);
+    const arrowCodes = { A: -1, B: -2, C: -3, D: -4 };
+    _lastEventType = eventType;
+    return { codepoint: arrowCodes[arrowMatch[3]], modifier: modValue - 1, eventType };
+  }
+  const funcMatch = data.match(/^\x1b\[(\d+)(?:;(\d+))?(?::(\d+))?~$/);
+  if (funcMatch) {
+    const keyNum = parseInt(funcMatch[1], 10);
+    const modValue = funcMatch[2] ? parseInt(funcMatch[2], 10) : 1;
+    const eventType = parseEventType(funcMatch[3]);
+    const funcCodes = {
+      2: FUNCTIONAL_CODEPOINTS.insert,
+      3: FUNCTIONAL_CODEPOINTS.delete,
+      5: FUNCTIONAL_CODEPOINTS.pageUp,
+      6: FUNCTIONAL_CODEPOINTS.pageDown,
+      7: FUNCTIONAL_CODEPOINTS.home,
+      8: FUNCTIONAL_CODEPOINTS.end
+    };
+    const codepoint = funcCodes[keyNum];
+    if (codepoint !== void 0) {
+      _lastEventType = eventType;
+      return { codepoint, modifier: modValue - 1, eventType };
+    }
+  }
+  const homeEndMatch = data.match(/^\x1b\[1;(\d+)(?::(\d+))?([HF])$/);
+  if (homeEndMatch) {
+    const modValue = parseInt(homeEndMatch[1], 10);
+    const eventType = parseEventType(homeEndMatch[2]);
+    const codepoint = homeEndMatch[3] === "H" ? FUNCTIONAL_CODEPOINTS.home : FUNCTIONAL_CODEPOINTS.end;
+    _lastEventType = eventType;
+    return { codepoint, modifier: modValue - 1, eventType };
+  }
+  return null;
+}
+function matchesKittySequence(data, expectedCodepoint, expectedModifier) {
+  const parsed = parseKittySequence(data);
+  if (!parsed)
+    return false;
+  const actualMod = parsed.modifier & ~LOCK_MASK;
+  const expectedMod = expectedModifier & ~LOCK_MASK;
+  if (actualMod !== expectedMod)
+    return false;
+  const normalizedCodepoint = normalizeShiftedLetterIdentityCodepoint(normalizeKittyFunctionalCodepoint(parsed.codepoint), parsed.modifier);
+  const normalizedExpectedCodepoint = normalizeShiftedLetterIdentityCodepoint(normalizeKittyFunctionalCodepoint(expectedCodepoint), expectedModifier);
+  if (normalizedCodepoint === normalizedExpectedCodepoint)
+    return true;
+  if (parsed.baseLayoutKey !== void 0 && parsed.baseLayoutKey === expectedCodepoint) {
+    const cp = normalizedCodepoint;
+    const isLatinLetter = cp >= 97 && cp <= 122;
+    const isKnownSymbol = SYMBOL_KEYS.has(String.fromCharCode(cp));
+    if (!isLatinLetter && !isKnownSymbol)
+      return true;
+  }
+  return false;
+}
+function parseModifyOtherKeysSequence(data) {
+  const match = data.match(/^\x1b\[27;(\d+);(\d+)~$/);
+  if (!match)
+    return null;
+  const modValue = parseInt(match[1], 10);
+  const codepoint = parseInt(match[2], 10);
+  return { codepoint, modifier: modValue - 1 };
+}
+function matchesModifyOtherKeys(data, expectedKeycode, expectedModifier) {
+  const parsed = parseModifyOtherKeysSequence(data);
+  if (!parsed)
+    return false;
+  return parsed.codepoint === expectedKeycode && parsed.modifier === expectedModifier;
+}
+function isWindowsTerminalSession() {
+  return Boolean(process.env.WT_SESSION) && !process.env.SSH_CONNECTION && !process.env.SSH_CLIENT && !process.env.SSH_TTY;
+}
+function matchesRawBackspace(data, expectedModifier) {
+  if (data === "\x7F")
+    return expectedModifier === 0;
+  if (data !== "\b")
+    return false;
+  return isWindowsTerminalSession() ? expectedModifier === MODIFIERS.ctrl : expectedModifier === 0;
+}
+function rawCtrlChar(key) {
+  const char = key.toLowerCase();
+  const code = char.charCodeAt(0);
+  if (code >= 97 && code <= 122 || char === "[" || char === "\\" || char === "]" || char === "_") {
+    return String.fromCharCode(code & 31);
+  }
+  if (char === "-") {
+    return String.fromCharCode(31);
+  }
+  return null;
+}
+function isDigitKey(key) {
+  return key >= "0" && key <= "9";
+}
+function matchesPrintableModifyOtherKeys(data, expectedKeycode, expectedModifier) {
+  if (expectedModifier === 0)
+    return false;
+  const parsed = parseModifyOtherKeysSequence(data);
+  if (!parsed || parsed.modifier !== expectedModifier)
+    return false;
+  return normalizeShiftedLetterIdentityCodepoint(parsed.codepoint, parsed.modifier) === normalizeShiftedLetterIdentityCodepoint(expectedKeycode, expectedModifier);
+}
+function parseKeyId(keyId) {
+  const parts = keyId.toLowerCase().split("+");
+  const key = parts[parts.length - 1];
+  if (!key)
+    return null;
+  return {
+    key,
+    ctrl: parts.includes("ctrl"),
+    shift: parts.includes("shift"),
+    alt: parts.includes("alt"),
+    super: parts.includes("super")
+  };
+}
+function matchesKey(data, keyId) {
+  const parsed = parseKeyId(keyId);
+  if (!parsed)
+    return false;
+  const { key, ctrl, shift, alt, super: superModifier } = parsed;
+  let modifier = 0;
+  if (shift)
+    modifier |= MODIFIERS.shift;
+  if (alt)
+    modifier |= MODIFIERS.alt;
+  if (ctrl)
+    modifier |= MODIFIERS.ctrl;
+  if (superModifier)
+    modifier |= MODIFIERS.super;
+  switch (key) {
+    case "escape":
+    case "esc":
+      if (modifier !== 0)
+        return false;
+      return data === "\x1B" || matchesKittySequence(data, CODEPOINTS.escape, 0) || matchesModifyOtherKeys(data, CODEPOINTS.escape, 0);
+    case "space":
+      if (!_kittyProtocolActive) {
+        if (modifier === MODIFIERS.ctrl && data === "\0") {
+          return true;
+        }
+        if (modifier === MODIFIERS.alt && data === "\x1B ") {
+          return true;
+        }
+      }
+      if (modifier === 0) {
+        return data === " " || matchesKittySequence(data, CODEPOINTS.space, 0) || matchesModifyOtherKeys(data, CODEPOINTS.space, 0);
+      }
+      return matchesKittySequence(data, CODEPOINTS.space, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.space, modifier);
+    case "tab":
+      if (modifier === MODIFIERS.shift) {
+        return data === "\x1B[Z" || matchesKittySequence(data, CODEPOINTS.tab, MODIFIERS.shift) || matchesModifyOtherKeys(data, CODEPOINTS.tab, MODIFIERS.shift);
+      }
+      if (modifier === 0) {
+        return data === "	" || matchesKittySequence(data, CODEPOINTS.tab, 0);
+      }
+      return matchesKittySequence(data, CODEPOINTS.tab, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.tab, modifier);
+    case "enter":
+    case "return":
+      if (modifier === MODIFIERS.shift) {
+        if (matchesKittySequence(data, CODEPOINTS.enter, MODIFIERS.shift) || matchesKittySequence(data, CODEPOINTS.kpEnter, MODIFIERS.shift)) {
+          return true;
+        }
+        if (matchesModifyOtherKeys(data, CODEPOINTS.enter, MODIFIERS.shift)) {
+          return true;
+        }
+        if (_kittyProtocolActive) {
+          return data === "\x1B\r" || data === "\n";
+        }
+        return false;
+      }
+      if (modifier === MODIFIERS.alt) {
+        if (matchesKittySequence(data, CODEPOINTS.enter, MODIFIERS.alt) || matchesKittySequence(data, CODEPOINTS.kpEnter, MODIFIERS.alt)) {
+          return true;
+        }
+        if (matchesModifyOtherKeys(data, CODEPOINTS.enter, MODIFIERS.alt)) {
+          return true;
+        }
+        if (!_kittyProtocolActive) {
+          return data === "\x1B\r";
+        }
+        return false;
+      }
+      if (modifier === 0) {
+        return data === "\r" || !_kittyProtocolActive && data === "\n" || data === "\x1BOM" || // SS3 M (numpad enter in some terminals)
+        matchesKittySequence(data, CODEPOINTS.enter, 0) || matchesKittySequence(data, CODEPOINTS.kpEnter, 0);
+      }
+      return matchesKittySequence(data, CODEPOINTS.enter, modifier) || matchesKittySequence(data, CODEPOINTS.kpEnter, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.enter, modifier);
+    case "backspace":
+      if (modifier === MODIFIERS.alt) {
+        if (data === "\x1B\x7F" || data === "\x1B\b") {
+          return true;
+        }
+        return matchesKittySequence(data, CODEPOINTS.backspace, MODIFIERS.alt) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, MODIFIERS.alt);
+      }
+      if (modifier === MODIFIERS.ctrl) {
+        if (matchesRawBackspace(data, MODIFIERS.ctrl))
+          return true;
+        return matchesKittySequence(data, CODEPOINTS.backspace, MODIFIERS.ctrl) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, MODIFIERS.ctrl);
+      }
+      if (modifier === 0) {
+        return matchesRawBackspace(data, 0) || matchesKittySequence(data, CODEPOINTS.backspace, 0) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, 0);
+      }
+      return matchesKittySequence(data, CODEPOINTS.backspace, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, modifier);
+    case "insert":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.insert) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.insert, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "insert", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.insert, modifier);
+    case "delete":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.delete) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.delete, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "delete", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.delete, modifier);
+    case "clear":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.clear);
+      }
+      return matchesLegacyModifierSequence(data, "clear", modifier);
+    case "home":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.home) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.home, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "home", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.home, modifier);
+    case "end":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.end) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.end, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "end", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.end, modifier);
+    case "pageup":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.pageUp) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageUp, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "pageUp", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageUp, modifier);
+    case "pagedown":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.pageDown) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageDown, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "pageDown", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageDown, modifier);
+    case "up":
+      if (modifier === MODIFIERS.alt) {
+        return data === "\x1Bp" || matchesKittySequence(data, ARROW_CODEPOINTS.up, MODIFIERS.alt);
+      }
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.up) || matchesKittySequence(data, ARROW_CODEPOINTS.up, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "up", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, ARROW_CODEPOINTS.up, modifier);
+    case "down":
+      if (modifier === MODIFIERS.alt) {
+        return data === "\x1Bn" || matchesKittySequence(data, ARROW_CODEPOINTS.down, MODIFIERS.alt);
+      }
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.down) || matchesKittySequence(data, ARROW_CODEPOINTS.down, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "down", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, ARROW_CODEPOINTS.down, modifier);
+    case "left":
+      if (modifier === MODIFIERS.alt) {
+        return data === "\x1B[1;3D" || !_kittyProtocolActive && data === "\x1BB" || data === "\x1Bb" || matchesKittySequence(data, ARROW_CODEPOINTS.left, MODIFIERS.alt);
+      }
+      if (modifier === MODIFIERS.ctrl) {
+        return data === "\x1B[1;5D" || matchesLegacyModifierSequence(data, "left", MODIFIERS.ctrl) || matchesKittySequence(data, ARROW_CODEPOINTS.left, MODIFIERS.ctrl);
+      }
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.left) || matchesKittySequence(data, ARROW_CODEPOINTS.left, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "left", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, ARROW_CODEPOINTS.left, modifier);
+    case "right":
+      if (modifier === MODIFIERS.alt) {
+        return data === "\x1B[1;3C" || !_kittyProtocolActive && data === "\x1BF" || data === "\x1Bf" || matchesKittySequence(data, ARROW_CODEPOINTS.right, MODIFIERS.alt);
+      }
+      if (modifier === MODIFIERS.ctrl) {
+        return data === "\x1B[1;5C" || matchesLegacyModifierSequence(data, "right", MODIFIERS.ctrl) || matchesKittySequence(data, ARROW_CODEPOINTS.right, MODIFIERS.ctrl);
+      }
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.right) || matchesKittySequence(data, ARROW_CODEPOINTS.right, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "right", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, ARROW_CODEPOINTS.right, modifier);
+    case "f1":
+    case "f2":
+    case "f3":
+    case "f4":
+    case "f5":
+    case "f6":
+    case "f7":
+    case "f8":
+    case "f9":
+    case "f10":
+    case "f11":
+    case "f12": {
+      if (modifier !== 0) {
+        return false;
+      }
+      const functionKey = key;
+      return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES[functionKey]);
+    }
+  }
+  if (key.length === 1 && (key >= "a" && key <= "z" || isDigitKey(key) || SYMBOL_KEYS.has(key))) {
+    const codepoint = key.charCodeAt(0);
+    const rawCtrl = rawCtrlChar(key);
+    const isLetter = key >= "a" && key <= "z";
+    const isDigit = isDigitKey(key);
+    if (modifier === MODIFIERS.ctrl + MODIFIERS.alt && !_kittyProtocolActive && rawCtrl) {
+      if (data === `\x1B${rawCtrl}`)
+        return true;
+    }
+    if (modifier === MODIFIERS.alt && !_kittyProtocolActive && (isLetter || isDigit || SYMBOL_KEYS.has(key))) {
+      if (data === `\x1B${key}`)
+        return true;
+    }
+    if (modifier === MODIFIERS.ctrl) {
+      if (rawCtrl && data === rawCtrl)
+        return true;
+      return matchesKittySequence(data, codepoint, MODIFIERS.ctrl) || matchesPrintableModifyOtherKeys(data, codepoint, MODIFIERS.ctrl);
+    }
+    if (modifier === MODIFIERS.shift + MODIFIERS.ctrl) {
+      return matchesKittySequence(data, codepoint, MODIFIERS.shift + MODIFIERS.ctrl) || matchesPrintableModifyOtherKeys(data, codepoint, MODIFIERS.shift + MODIFIERS.ctrl);
+    }
+    if (modifier === MODIFIERS.shift) {
+      if (isLetter && data === key.toUpperCase())
+        return true;
+      return matchesKittySequence(data, codepoint, MODIFIERS.shift) || matchesPrintableModifyOtherKeys(data, codepoint, MODIFIERS.shift);
+    }
+    if (modifier !== 0) {
+      return matchesKittySequence(data, codepoint, modifier) || matchesPrintableModifyOtherKeys(data, codepoint, modifier);
+    }
+    return data === key || matchesKittySequence(data, codepoint, 0);
+  }
+  return false;
+}
+var KITTY_CSI_U_REGEX = /^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$/;
 var KITTY_PRINTABLE_ALLOWED_MODIFIERS = MODIFIERS.shift | LOCK_MASK;
+function decodeKittyPrintable(data) {
+  const match = data.match(KITTY_CSI_U_REGEX);
+  if (!match)
+    return void 0;
+  const codepoint = Number.parseInt(match[1] ?? "", 10);
+  if (!Number.isFinite(codepoint))
+    return void 0;
+  const shiftedKey = match[2] && match[2].length > 0 ? Number.parseInt(match[2], 10) : void 0;
+  const modValue = match[4] ? Number.parseInt(match[4], 10) : 1;
+  const modifier = Number.isFinite(modValue) ? modValue - 1 : 0;
+  if ((modifier & ~KITTY_PRINTABLE_ALLOWED_MODIFIERS) !== 0)
+    return void 0;
+  if (modifier & (MODIFIERS.alt | MODIFIERS.ctrl))
+    return void 0;
+  let effectiveCodepoint = codepoint;
+  if (modifier & MODIFIERS.shift && typeof shiftedKey === "number") {
+    effectiveCodepoint = shiftedKey;
+  }
+  effectiveCodepoint = normalizeKittyFunctionalCodepoint(effectiveCodepoint);
+  if (!Number.isFinite(effectiveCodepoint) || effectiveCodepoint < 32)
+    return void 0;
+  try {
+    return String.fromCodePoint(effectiveCodepoint);
+  } catch {
+    return void 0;
+  }
+}
+
+// node_modules/@earendil-works/pi-tui/dist/keybindings.js
+var TUI_KEYBINDINGS = {
+  "tui.editor.cursorUp": { defaultKeys: "up", description: "Move cursor up" },
+  "tui.editor.cursorDown": { defaultKeys: "down", description: "Move cursor down" },
+  "tui.editor.cursorLeft": {
+    defaultKeys: ["left", "ctrl+b"],
+    description: "Move cursor left"
+  },
+  "tui.editor.cursorRight": {
+    defaultKeys: ["right", "ctrl+f"],
+    description: "Move cursor right"
+  },
+  "tui.editor.cursorWordLeft": {
+    defaultKeys: ["alt+left", "ctrl+left", "alt+b"],
+    description: "Move cursor word left"
+  },
+  "tui.editor.cursorWordRight": {
+    defaultKeys: ["alt+right", "ctrl+right", "alt+f"],
+    description: "Move cursor word right"
+  },
+  "tui.editor.cursorLineStart": {
+    defaultKeys: ["home", "ctrl+a"],
+    description: "Move to line start"
+  },
+  "tui.editor.cursorLineEnd": {
+    defaultKeys: ["end", "ctrl+e"],
+    description: "Move to line end"
+  },
+  "tui.editor.jumpForward": {
+    defaultKeys: "ctrl+]",
+    description: "Jump forward to character"
+  },
+  "tui.editor.jumpBackward": {
+    defaultKeys: "ctrl+alt+]",
+    description: "Jump backward to character"
+  },
+  "tui.editor.pageUp": { defaultKeys: "pageUp", description: "Page up" },
+  "tui.editor.pageDown": { defaultKeys: "pageDown", description: "Page down" },
+  "tui.editor.deleteCharBackward": {
+    defaultKeys: "backspace",
+    description: "Delete character backward"
+  },
+  "tui.editor.deleteCharForward": {
+    defaultKeys: ["delete", "ctrl+d"],
+    description: "Delete character forward"
+  },
+  "tui.editor.deleteWordBackward": {
+    defaultKeys: ["ctrl+w", "alt+backspace"],
+    description: "Delete word backward"
+  },
+  "tui.editor.deleteWordForward": {
+    defaultKeys: ["alt+d", "alt+delete"],
+    description: "Delete word forward"
+  },
+  "tui.editor.deleteToLineStart": {
+    defaultKeys: "ctrl+u",
+    description: "Delete to line start"
+  },
+  "tui.editor.deleteToLineEnd": {
+    defaultKeys: "ctrl+k",
+    description: "Delete to line end"
+  },
+  "tui.editor.yank": { defaultKeys: "ctrl+y", description: "Yank" },
+  "tui.editor.yankPop": { defaultKeys: "alt+y", description: "Yank pop" },
+  "tui.editor.undo": { defaultKeys: "ctrl+-", description: "Undo" },
+  "tui.input.newLine": { defaultKeys: ["shift+enter", "ctrl+j"], description: "Insert newline" },
+  "tui.input.submit": { defaultKeys: "enter", description: "Submit input" },
+  "tui.input.tab": { defaultKeys: "tab", description: "Tab / autocomplete" },
+  "tui.input.copy": { defaultKeys: "ctrl+c", description: "Copy selection" },
+  "tui.select.up": { defaultKeys: "up", description: "Move selection up" },
+  "tui.select.down": { defaultKeys: "down", description: "Move selection down" },
+  "tui.select.pageUp": { defaultKeys: "pageUp", description: "Selection page up" },
+  "tui.select.pageDown": {
+    defaultKeys: "pageDown",
+    description: "Selection page down"
+  },
+  "tui.select.confirm": { defaultKeys: "enter", description: "Confirm selection" },
+  "tui.select.cancel": {
+    defaultKeys: ["escape", "ctrl+c"],
+    description: "Cancel selection"
+  }
+};
+function normalizeKeys(keys) {
+  if (keys === void 0)
+    return [];
+  const keyList = Array.isArray(keys) ? keys : [keys];
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const key of keyList) {
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(key);
+    }
+  }
+  return result;
+}
+var KeybindingsManager = class {
+  definitions;
+  userBindings;
+  keysById = /* @__PURE__ */ new Map();
+  conflicts = [];
+  constructor(definitions, userBindings = {}) {
+    this.definitions = definitions;
+    this.userBindings = userBindings;
+    this.rebuild();
+  }
+  rebuild() {
+    this.keysById.clear();
+    this.conflicts = [];
+    const userClaims = /* @__PURE__ */ new Map();
+    for (const [keybinding, keys] of Object.entries(this.userBindings)) {
+      if (!(keybinding in this.definitions))
+        continue;
+      for (const key of normalizeKeys(keys)) {
+        const claimants = userClaims.get(key) ?? /* @__PURE__ */ new Set();
+        claimants.add(keybinding);
+        userClaims.set(key, claimants);
+      }
+    }
+    for (const [key, keybindings] of userClaims) {
+      if (keybindings.size > 1) {
+        this.conflicts.push({ key, keybindings: [...keybindings] });
+      }
+    }
+    for (const [id, definition] of Object.entries(this.definitions)) {
+      const userKeys = this.userBindings[id];
+      const keys = userKeys === void 0 ? normalizeKeys(definition.defaultKeys) : normalizeKeys(userKeys);
+      this.keysById.set(id, keys);
+    }
+  }
+  matches(data, keybinding) {
+    const keys = this.keysById.get(keybinding) ?? [];
+    for (const key of keys) {
+      if (matchesKey(data, key))
+        return true;
+    }
+    return false;
+  }
+  getKeys(keybinding) {
+    return [...this.keysById.get(keybinding) ?? []];
+  }
+  getDefinition(keybinding) {
+    return this.definitions[keybinding];
+  }
+  getConflicts() {
+    return this.conflicts.map((conflict) => ({ ...conflict, keybindings: [...conflict.keybindings] }));
+  }
+  setUserBindings(userBindings) {
+    this.userBindings = userBindings;
+    this.rebuild();
+  }
+  getUserBindings() {
+    return { ...this.userBindings };
+  }
+  getResolvedBindings() {
+    const resolved = {};
+    for (const id of Object.keys(this.definitions)) {
+      const keys = this.keysById.get(id) ?? [];
+      resolved[id] = keys.length === 1 ? keys[0] : [...keys];
+    }
+    return resolved;
+  }
+};
+var globalKeybindings = null;
+function getKeybindings() {
+  if (!globalKeybindings) {
+    globalKeybindings = new KeybindingsManager(TUI_KEYBINDINGS);
+  }
+  return globalKeybindings;
+}
 
 // node_modules/@earendil-works/pi-tui/dist/components/text.js
 var Text = class {
@@ -1190,6 +2235,43 @@ var Text = class {
   }
 };
 
+// node_modules/@earendil-works/pi-tui/dist/kill-ring.js
+var KillRing = class {
+  ring = [];
+  /**
+   * Add text to the kill ring.
+   *
+   * @param text - The killed text to add
+   * @param opts - Push options
+   * @param opts.prepend - If accumulating, prepend (backward deletion) or append (forward deletion)
+   * @param opts.accumulate - Merge with the most recent entry instead of creating a new one
+   */
+  push(text, opts) {
+    if (!text)
+      return;
+    if (opts.accumulate && this.ring.length > 0) {
+      const last = this.ring.pop();
+      this.ring.push(opts.prepend ? text + last : last + text);
+    } else {
+      this.ring.push(text);
+    }
+  }
+  /** Get most recent entry without modifying the ring. */
+  peek() {
+    return this.ring.length > 0 ? this.ring[this.ring.length - 1] : void 0;
+  }
+  /** Move last entry to front (for yank-pop cycling). */
+  rotate() {
+    if (this.ring.length > 1) {
+      const last = this.ring.pop();
+      this.ring.unshift(last);
+    }
+  }
+  get length() {
+    return this.ring.length;
+  }
+};
+
 // node_modules/@earendil-works/pi-tui/dist/tui.js
 import * as fs2 from "fs";
 import * as os from "os";
@@ -1202,8 +2284,263 @@ import { homedir as homedir4 } from "os";
 import { isAbsolute } from "path";
 import { pathToFileURL } from "url";
 
+// node_modules/@earendil-works/pi-tui/dist/tui.js
+var CURSOR_MARKER = "\x1B_pi:c\x07";
+var Container = class {
+  children = [];
+  addChild(component) {
+    this.children.push(component);
+  }
+  removeChild(component) {
+    const index = this.children.indexOf(component);
+    if (index !== -1) {
+      this.children.splice(index, 1);
+    }
+  }
+  clear() {
+    this.children = [];
+  }
+  invalidate() {
+    for (const child of this.children) {
+      child.invalidate?.();
+    }
+  }
+  render(width) {
+    const lines = [];
+    for (const child of this.children) {
+      const childLines = child.render(width);
+      for (const line of childLines) {
+        lines.push(line);
+      }
+    }
+    return lines;
+  }
+};
+
+// node_modules/@earendil-works/pi-tui/dist/undo-stack.js
+var UndoStack = class {
+  stack = [];
+  /** Push a deep clone of the given state onto the stack. */
+  push(state) {
+    this.stack.push(structuredClone(state));
+  }
+  /** Pop and return the most recent snapshot, or undefined if empty. */
+  pop() {
+    return this.stack.pop();
+  }
+  /** Remove all snapshots. */
+  clear() {
+    this.stack.length = 0;
+  }
+  get length() {
+    return this.stack.length;
+  }
+};
+
 // node_modules/@earendil-works/pi-tui/dist/word-navigation.js
 var wordSegmenter2 = getWordSegmenter();
+function findWordBackward(text, cursor, options) {
+  if (cursor <= 0)
+    return 0;
+  const textBeforeCursor = text.slice(0, cursor);
+  const segmentFn = options?.segment;
+  const isAtomic = options?.isAtomicSegment;
+  const segments = segmentFn ? [...segmentFn(textBeforeCursor)] : [...wordSegmenter2.segment(textBeforeCursor)];
+  let newCursor = cursor;
+  while (segments.length > 0 && !isAtomic?.(segments[segments.length - 1]?.segment || "") && isWhitespaceChar(segments[segments.length - 1]?.segment || "")) {
+    newCursor -= segments.pop()?.segment.length || 0;
+  }
+  if (segments.length === 0)
+    return newCursor;
+  const last = segments[segments.length - 1];
+  if (isAtomic?.(last.segment)) {
+    newCursor -= last.segment.length;
+  } else if (last.isWordLike) {
+    const segment = last.segment;
+    const matches = [...segment.matchAll(new RegExp(PUNCTUATION_REGEX, "g"))];
+    if (matches.length <= 0) {
+      newCursor -= segment.length;
+    } else {
+      const lastMatch = matches[matches.length - 1];
+      newCursor -= segment.length - (lastMatch.index + lastMatch[0].length);
+    }
+  } else {
+    while (segments.length > 0 && !isAtomic?.(segments[segments.length - 1]?.segment || "") && !segments[segments.length - 1]?.isWordLike && !isWhitespaceChar(segments[segments.length - 1]?.segment || "")) {
+      newCursor -= segments.pop()?.segment.length || 0;
+    }
+  }
+  return newCursor;
+}
+function findWordForward(text, cursor, options) {
+  if (cursor >= text.length)
+    return text.length;
+  const textAfterCursor = text.slice(cursor);
+  const segmentFn = options?.segment;
+  const isAtomic = options?.isAtomicSegment;
+  const segments = segmentFn ? segmentFn(textAfterCursor) : wordSegmenter2.segment(textAfterCursor);
+  const iterator = segments[Symbol.iterator]();
+  let next = iterator.next();
+  let newCursor = cursor;
+  while (!next.done && !isAtomic?.(next.value.segment) && isWhitespaceChar(next.value.segment)) {
+    newCursor += next.value.segment.length;
+    next = iterator.next();
+  }
+  if (next.done)
+    return newCursor;
+  if (isAtomic?.(next.value.segment)) {
+    newCursor += next.value.segment.length;
+  } else if (next.value.isWordLike) {
+    newCursor += PUNCTUATION_REGEX.exec(next.value.segment)?.index ?? next.value.segment.length;
+  } else {
+    while (!next.done && !isAtomic?.(next.value.segment) && !next.value.isWordLike && !isWhitespaceChar(next.value.segment)) {
+      newCursor += next.value.segment.length;
+      next = iterator.next();
+    }
+  }
+  return newCursor;
+}
+
+// node_modules/@earendil-works/pi-tui/dist/components/select-list.js
+var DEFAULT_PRIMARY_COLUMN_WIDTH = 32;
+var PRIMARY_COLUMN_GAP = 2;
+var MIN_DESCRIPTION_WIDTH = 10;
+var normalizeToSingleLine = (text) => text.replace(/[\r\n]+/g, " ").trim();
+var clamp = (value, min, max) => Math.max(min, Math.min(value, max));
+var SelectList = class {
+  items = [];
+  filteredItems = [];
+  selectedIndex = 0;
+  maxVisible = 5;
+  theme;
+  layout;
+  onSelect;
+  onCancel;
+  onSelectionChange;
+  constructor(items, maxVisible, theme, layout = {}) {
+    this.items = items;
+    this.filteredItems = items;
+    this.maxVisible = maxVisible;
+    this.theme = theme;
+    this.layout = layout;
+  }
+  setFilter(filter) {
+    this.filteredItems = this.items.filter((item) => item.value.toLowerCase().startsWith(filter.toLowerCase()));
+    this.selectedIndex = 0;
+  }
+  setSelectedIndex(index) {
+    this.selectedIndex = Math.max(0, Math.min(index, this.filteredItems.length - 1));
+  }
+  invalidate() {
+  }
+  render(width) {
+    const lines = [];
+    if (this.filteredItems.length === 0) {
+      lines.push(this.theme.noMatch("  No matching commands"));
+      return lines;
+    }
+    const primaryColumnWidth = this.getPrimaryColumnWidth();
+    const startIndex = Math.max(0, Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), this.filteredItems.length - this.maxVisible));
+    const endIndex = Math.min(startIndex + this.maxVisible, this.filteredItems.length);
+    for (let i = startIndex; i < endIndex; i++) {
+      const item = this.filteredItems[i];
+      if (!item)
+        continue;
+      const isSelected = i === this.selectedIndex;
+      const descriptionSingleLine = item.description ? normalizeToSingleLine(item.description) : void 0;
+      lines.push(this.renderItem(item, isSelected, width, descriptionSingleLine, primaryColumnWidth));
+    }
+    if (startIndex > 0 || endIndex < this.filteredItems.length) {
+      const scrollText = `  (${this.selectedIndex + 1}/${this.filteredItems.length})`;
+      lines.push(this.theme.scrollInfo(truncateToWidth(scrollText, width - 2, "")));
+    }
+    return lines;
+  }
+  handleInput(keyData) {
+    const kb = getKeybindings();
+    if (kb.matches(keyData, "tui.select.up")) {
+      this.selectedIndex = this.selectedIndex === 0 ? this.filteredItems.length - 1 : this.selectedIndex - 1;
+      this.notifySelectionChange();
+    } else if (kb.matches(keyData, "tui.select.down")) {
+      this.selectedIndex = this.selectedIndex === this.filteredItems.length - 1 ? 0 : this.selectedIndex + 1;
+      this.notifySelectionChange();
+    } else if (kb.matches(keyData, "tui.select.confirm")) {
+      const selectedItem = this.filteredItems[this.selectedIndex];
+      if (selectedItem && this.onSelect) {
+        this.onSelect(selectedItem);
+      }
+    } else if (kb.matches(keyData, "tui.select.cancel")) {
+      if (this.onCancel) {
+        this.onCancel();
+      }
+    }
+  }
+  renderItem(item, isSelected, width, descriptionSingleLine, primaryColumnWidth) {
+    const prefix = isSelected ? "\u2192 " : "  ";
+    const prefixWidth = visibleWidth(prefix);
+    if (descriptionSingleLine && width > 40) {
+      const effectivePrimaryColumnWidth = Math.max(1, Math.min(primaryColumnWidth, width - prefixWidth - 4));
+      const maxPrimaryWidth = Math.max(1, effectivePrimaryColumnWidth - PRIMARY_COLUMN_GAP);
+      const truncatedValue2 = this.truncatePrimary(item, isSelected, maxPrimaryWidth, effectivePrimaryColumnWidth);
+      const truncatedValueWidth = visibleWidth(truncatedValue2);
+      const spacing = " ".repeat(Math.max(1, effectivePrimaryColumnWidth - truncatedValueWidth));
+      const descriptionStart = prefixWidth + truncatedValueWidth + spacing.length;
+      const remainingWidth = width - descriptionStart - 2;
+      if (remainingWidth > MIN_DESCRIPTION_WIDTH) {
+        const truncatedDesc = truncateToWidth(descriptionSingleLine, remainingWidth, "");
+        if (isSelected) {
+          return this.theme.selectedText(`${prefix}${truncatedValue2}${spacing}${truncatedDesc}`);
+        }
+        const descText = this.theme.description(spacing + truncatedDesc);
+        return prefix + truncatedValue2 + descText;
+      }
+    }
+    const maxWidth = width - prefixWidth - 2;
+    const truncatedValue = this.truncatePrimary(item, isSelected, maxWidth, maxWidth);
+    if (isSelected) {
+      return this.theme.selectedText(`${prefix}${truncatedValue}`);
+    }
+    return prefix + truncatedValue;
+  }
+  getPrimaryColumnWidth() {
+    const { min, max } = this.getPrimaryColumnBounds();
+    const widestPrimary = this.filteredItems.reduce((widest, item) => {
+      return Math.max(widest, visibleWidth(this.getDisplayValue(item)) + PRIMARY_COLUMN_GAP);
+    }, 0);
+    return clamp(widestPrimary, min, max);
+  }
+  getPrimaryColumnBounds() {
+    const rawMin = this.layout.minPrimaryColumnWidth ?? this.layout.maxPrimaryColumnWidth ?? DEFAULT_PRIMARY_COLUMN_WIDTH;
+    const rawMax = this.layout.maxPrimaryColumnWidth ?? this.layout.minPrimaryColumnWidth ?? DEFAULT_PRIMARY_COLUMN_WIDTH;
+    return {
+      min: Math.max(1, Math.min(rawMin, rawMax)),
+      max: Math.max(1, Math.max(rawMin, rawMax))
+    };
+  }
+  truncatePrimary(item, isSelected, maxWidth, columnWidth) {
+    const displayValue = this.getDisplayValue(item);
+    const truncatedValue = this.layout.truncatePrimary ? this.layout.truncatePrimary({
+      text: displayValue,
+      maxWidth,
+      columnWidth,
+      item,
+      isSelected
+    }) : truncateToWidth(displayValue, maxWidth, "");
+    return truncateToWidth(truncatedValue, maxWidth, "");
+  }
+  getDisplayValue(item) {
+    return item.label || item.value;
+  }
+  notifySelectionChange() {
+    const selectedItem = this.filteredItems[this.selectedIndex];
+    if (selectedItem && this.onSelectionChange) {
+      this.onSelectionChange(selectedItem);
+    }
+  }
+  getSelectedItem() {
+    const item = this.filteredItems[this.selectedIndex];
+    return item || null;
+  }
+};
 
 // node_modules/@earendil-works/pi-tui/dist/components/editor.js
 var graphemeSegmenter2 = getGraphemeSegmenter();
@@ -1211,6 +2548,327 @@ var wordSegmenter3 = getWordSegmenter();
 
 // node_modules/@earendil-works/pi-tui/dist/components/input.js
 var segmenter = getGraphemeSegmenter();
+var Input = class {
+  value = "";
+  cursor = 0;
+  // Cursor position in the value
+  onSubmit;
+  onEscape;
+  /** Focusable interface - set by TUI when focus changes */
+  focused = false;
+  // Bracketed paste mode buffering
+  pasteBuffer = "";
+  isInPaste = false;
+  // Kill ring for Emacs-style kill/yank operations
+  killRing = new KillRing();
+  lastAction = null;
+  // Undo support
+  undoStack = new UndoStack();
+  getValue() {
+    return this.value;
+  }
+  setValue(value) {
+    this.value = value;
+    this.cursor = Math.min(this.cursor, value.length);
+  }
+  handleInput(data) {
+    if (data.includes("\x1B[200~")) {
+      this.isInPaste = true;
+      this.pasteBuffer = "";
+      data = data.replace("\x1B[200~", "");
+    }
+    if (this.isInPaste) {
+      this.pasteBuffer += data;
+      const endIndex = this.pasteBuffer.indexOf("\x1B[201~");
+      if (endIndex !== -1) {
+        const pasteContent = this.pasteBuffer.substring(0, endIndex);
+        this.handlePaste(pasteContent);
+        this.isInPaste = false;
+        const remaining = this.pasteBuffer.substring(endIndex + 6);
+        this.pasteBuffer = "";
+        if (remaining) {
+          this.handleInput(remaining);
+        }
+      }
+      return;
+    }
+    const kb = getKeybindings();
+    if (kb.matches(data, "tui.select.cancel")) {
+      if (this.onEscape)
+        this.onEscape();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.undo")) {
+      this.undo();
+      return;
+    }
+    if (kb.matches(data, "tui.input.submit") || data === "\n") {
+      if (this.onSubmit)
+        this.onSubmit(this.value);
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteCharBackward")) {
+      this.handleBackspace();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteCharForward")) {
+      this.handleForwardDelete();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteWordBackward")) {
+      this.deleteWordBackwards();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteWordForward")) {
+      this.deleteWordForward();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteToLineStart")) {
+      this.deleteToLineStart();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteToLineEnd")) {
+      this.deleteToLineEnd();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.yank")) {
+      this.yank();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.yankPop")) {
+      this.yankPop();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorLeft")) {
+      this.lastAction = null;
+      if (this.cursor > 0) {
+        const beforeCursor = this.value.slice(0, this.cursor);
+        const graphemes = [...segmenter.segment(beforeCursor)];
+        const lastGrapheme = graphemes[graphemes.length - 1];
+        this.cursor -= lastGrapheme ? lastGrapheme.segment.length : 1;
+      }
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorRight")) {
+      this.lastAction = null;
+      if (this.cursor < this.value.length) {
+        const afterCursor = this.value.slice(this.cursor);
+        const graphemes = [...segmenter.segment(afterCursor)];
+        const firstGrapheme = graphemes[0];
+        this.cursor += firstGrapheme ? firstGrapheme.segment.length : 1;
+      }
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorLineStart")) {
+      this.lastAction = null;
+      this.cursor = 0;
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorLineEnd")) {
+      this.lastAction = null;
+      this.cursor = this.value.length;
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorWordLeft")) {
+      this.moveWordBackwards();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorWordRight")) {
+      this.moveWordForwards();
+      return;
+    }
+    const kittyPrintable = decodeKittyPrintable(data);
+    if (kittyPrintable !== void 0) {
+      this.insertCharacter(kittyPrintable);
+      return;
+    }
+    const hasControlChars = [...data].some((ch) => {
+      const code = ch.charCodeAt(0);
+      return code < 32 || code === 127 || code >= 128 && code <= 159;
+    });
+    if (!hasControlChars) {
+      this.insertCharacter(data);
+    }
+  }
+  insertCharacter(char) {
+    if (isWhitespaceChar(char) || this.lastAction !== "type-word") {
+      this.pushUndo();
+    }
+    this.lastAction = "type-word";
+    this.value = this.value.slice(0, this.cursor) + char + this.value.slice(this.cursor);
+    this.cursor += char.length;
+  }
+  handleBackspace() {
+    this.lastAction = null;
+    if (this.cursor > 0) {
+      this.pushUndo();
+      const beforeCursor = this.value.slice(0, this.cursor);
+      const graphemes = [...segmenter.segment(beforeCursor)];
+      const lastGrapheme = graphemes[graphemes.length - 1];
+      const graphemeLength = lastGrapheme ? lastGrapheme.segment.length : 1;
+      this.value = this.value.slice(0, this.cursor - graphemeLength) + this.value.slice(this.cursor);
+      this.cursor -= graphemeLength;
+    }
+  }
+  handleForwardDelete() {
+    this.lastAction = null;
+    if (this.cursor < this.value.length) {
+      this.pushUndo();
+      const afterCursor = this.value.slice(this.cursor);
+      const graphemes = [...segmenter.segment(afterCursor)];
+      const firstGrapheme = graphemes[0];
+      const graphemeLength = firstGrapheme ? firstGrapheme.segment.length : 1;
+      this.value = this.value.slice(0, this.cursor) + this.value.slice(this.cursor + graphemeLength);
+    }
+  }
+  deleteToLineStart() {
+    if (this.cursor === 0)
+      return;
+    this.pushUndo();
+    const deletedText = this.value.slice(0, this.cursor);
+    this.killRing.push(deletedText, { prepend: true, accumulate: this.lastAction === "kill" });
+    this.lastAction = "kill";
+    this.value = this.value.slice(this.cursor);
+    this.cursor = 0;
+  }
+  deleteToLineEnd() {
+    if (this.cursor >= this.value.length)
+      return;
+    this.pushUndo();
+    const deletedText = this.value.slice(this.cursor);
+    this.killRing.push(deletedText, { prepend: false, accumulate: this.lastAction === "kill" });
+    this.lastAction = "kill";
+    this.value = this.value.slice(0, this.cursor);
+  }
+  deleteWordBackwards() {
+    if (this.cursor === 0)
+      return;
+    const wasKill = this.lastAction === "kill";
+    this.pushUndo();
+    const oldCursor = this.cursor;
+    this.moveWordBackwards();
+    const deleteFrom = this.cursor;
+    this.cursor = oldCursor;
+    const deletedText = this.value.slice(deleteFrom, this.cursor);
+    this.killRing.push(deletedText, { prepend: true, accumulate: wasKill });
+    this.lastAction = "kill";
+    this.value = this.value.slice(0, deleteFrom) + this.value.slice(this.cursor);
+    this.cursor = deleteFrom;
+  }
+  deleteWordForward() {
+    if (this.cursor >= this.value.length)
+      return;
+    const wasKill = this.lastAction === "kill";
+    this.pushUndo();
+    const oldCursor = this.cursor;
+    this.moveWordForwards();
+    const deleteTo = this.cursor;
+    this.cursor = oldCursor;
+    const deletedText = this.value.slice(this.cursor, deleteTo);
+    this.killRing.push(deletedText, { prepend: false, accumulate: wasKill });
+    this.lastAction = "kill";
+    this.value = this.value.slice(0, this.cursor) + this.value.slice(deleteTo);
+  }
+  yank() {
+    const text = this.killRing.peek();
+    if (!text)
+      return;
+    this.pushUndo();
+    this.value = this.value.slice(0, this.cursor) + text + this.value.slice(this.cursor);
+    this.cursor += text.length;
+    this.lastAction = "yank";
+  }
+  yankPop() {
+    if (this.lastAction !== "yank" || this.killRing.length <= 1)
+      return;
+    this.pushUndo();
+    const prevText = this.killRing.peek() || "";
+    this.value = this.value.slice(0, this.cursor - prevText.length) + this.value.slice(this.cursor);
+    this.cursor -= prevText.length;
+    this.killRing.rotate();
+    const text = this.killRing.peek() || "";
+    this.value = this.value.slice(0, this.cursor) + text + this.value.slice(this.cursor);
+    this.cursor += text.length;
+    this.lastAction = "yank";
+  }
+  pushUndo() {
+    this.undoStack.push({ value: this.value, cursor: this.cursor });
+  }
+  undo() {
+    const snapshot = this.undoStack.pop();
+    if (!snapshot)
+      return;
+    this.value = snapshot.value;
+    this.cursor = snapshot.cursor;
+    this.lastAction = null;
+  }
+  moveWordBackwards() {
+    if (this.cursor === 0)
+      return;
+    this.lastAction = null;
+    this.cursor = findWordBackward(this.value, this.cursor);
+  }
+  moveWordForwards() {
+    if (this.cursor >= this.value.length)
+      return;
+    this.lastAction = null;
+    this.cursor = findWordForward(this.value, this.cursor);
+  }
+  handlePaste(pastedText) {
+    this.lastAction = null;
+    this.pushUndo();
+    const cleanText = pastedText.replace(/\r\n/g, "").replace(/\r/g, "").replace(/\n/g, "").replace(/\t/g, "    ");
+    this.value = this.value.slice(0, this.cursor) + cleanText + this.value.slice(this.cursor);
+    this.cursor += cleanText.length;
+  }
+  invalidate() {
+  }
+  render(width) {
+    const prompt = "> ";
+    const availableWidth = width - prompt.length;
+    if (availableWidth <= 0) {
+      return [prompt];
+    }
+    let visibleText = "";
+    let cursorDisplay = this.cursor;
+    const totalWidth = visibleWidth(this.value);
+    if (totalWidth < availableWidth) {
+      visibleText = this.value;
+    } else {
+      const scrollWidth = this.cursor === this.value.length ? availableWidth - 1 : availableWidth;
+      const cursorCol = visibleWidth(this.value.slice(0, this.cursor));
+      if (scrollWidth > 0) {
+        const halfWidth = Math.floor(scrollWidth / 2);
+        let startCol = 0;
+        if (cursorCol < halfWidth) {
+          startCol = 0;
+        } else if (cursorCol > totalWidth - halfWidth) {
+          startCol = Math.max(0, totalWidth - scrollWidth);
+        } else {
+          startCol = Math.max(0, cursorCol - halfWidth);
+        }
+        visibleText = sliceByColumn(this.value, startCol, scrollWidth, true);
+        const beforeCursor2 = sliceByColumn(this.value, startCol, Math.max(0, cursorCol - startCol), true);
+        cursorDisplay = beforeCursor2.length;
+      } else {
+        visibleText = "";
+        cursorDisplay = 0;
+      }
+    }
+    const graphemes = [...segmenter.segment(visibleText.slice(cursorDisplay))];
+    const cursorGrapheme = graphemes[0];
+    const beforeCursor = visibleText.slice(0, cursorDisplay);
+    const atCursor = cursorGrapheme?.segment ?? " ";
+    const afterCursor = visibleText.slice(cursorDisplay + atCursor.length);
+    const marker = this.focused ? CURSOR_MARKER : "";
+    const cursorChar = `\x1B[7m${atCursor}\x1B[27m`;
+    const textWithCursor = beforeCursor + marker + cursorChar + afterCursor;
+    const visualLength = visibleWidth(textWithCursor);
+    const padding = " ".repeat(Math.max(0, availableWidth - visualLength));
+    const line = prompt + textWithCursor + padding;
+    return [line];
+  }
+};
 
 // node_modules/marked/lib/marked.esm.js
 function M() {
@@ -1446,8 +3104,8 @@ var w = class {
         s = s ? `${s}
 ${c}` : c, r = r ? `${r}
 ${p}` : p;
-        let k = this.lexer.state.top;
-        if (this.lexer.state.top = true, this.lexer.blockTokens(p, i, true), this.lexer.state.top = k, n.length === 0) break;
+        let k2 = this.lexer.state.top;
+        if (this.lexer.state.top = true, this.lexer.blockTokens(p, i, true), this.lexer.state.top = k2, n.length === 0) break;
         let h = i.at(-1);
         if (h?.type === "code") break;
         if (h?.type === "blockquote") {
@@ -1478,10 +3136,10 @@ ${p}` : p;
         let a = false, c = "", p = "";
         if (!(t = i.exec(e)) || this.rules.block.hr.test(e)) break;
         c = t[0], e = e.substring(c.length);
-        let k = me(t[2].split(`
+        let k2 = me(t[2].split(`
 `, 1)[0], t[1].length), h = e.split(`
-`, 1)[0], R = !k.trim(), f = 0;
-        if (this.options.pedantic ? (f = 2, p = k.trimStart()) : R ? f = t[1].length + 1 : (f = k.search(this.rules.other.nonSpaceChar), f = f > 4 ? 1 : f, p = k.slice(f), f += t[1].length), R && this.rules.other.blankLine.test(h) && (c += h + `
+`, 1)[0], R = !k2.trim(), f = 0;
+        if (this.options.pedantic ? (f = 2, p = k2.trimStart()) : R ? f = t[1].length + 1 : (f = k2.search(this.rules.other.nonSpaceChar), f = f > 4 ? 1 : f, p = k2.slice(f), f += t[1].length), R && this.rules.other.blankLine.test(h) && (c += h + `
 `, e = e.substring(h.length + 1), a = true), !a) {
           let S = this.rules.other.nextBulletRegex(f), te = this.rules.other.hrRegex(f), ne = this.rules.other.fencesBeginRegex(f), re = this.rules.other.headingBeginRegex(f), be = this.rules.other.htmlBeginRegex(f), Re = this.rules.other.blockquoteBeginRegex(f);
           for (; e; ) {
@@ -1491,12 +3149,12 @@ ${p}` : p;
             if (C.search(this.rules.other.nonSpaceChar) >= f || !h.trim()) p += `
 ` + C.slice(f);
             else {
-              if (R || k.replace(this.rules.other.tabCharGlobal, "    ").search(this.rules.other.nonSpaceChar) >= 4 || ne.test(k) || re.test(k) || te.test(k)) break;
+              if (R || k2.replace(this.rules.other.tabCharGlobal, "    ").search(this.rules.other.nonSpaceChar) >= 4 || ne.test(k2) || re.test(k2) || te.test(k2)) break;
               p += `
 ` + h;
             }
             R = !h.trim(), c += G + `
-`, e = e.substring(G.length + 1), k = C.slice(f);
+`, e = e.substring(G.length + 1), k2 = C.slice(f);
           }
         }
         r.loose || (o ? r.loose = true : this.rules.other.doubleBlankLine.test(c) && (o = true)), r.items.push({ type: "list_item", raw: c, task: !!this.options.gfm && this.rules.other.listIsTask.test(p), loose: false, text: p, tokens: [] }), r.raw += c;
@@ -1510,19 +3168,19 @@ ${p}` : p;
         let c = a.tokens[0];
         if (a.task && (c?.type === "text" || c?.type === "paragraph")) {
           a.text = a.text.replace(this.rules.other.listReplaceTask, ""), c.raw = c.raw.replace(this.rules.other.listReplaceTask, ""), c.text = c.text.replace(this.rules.other.listReplaceTask, "");
-          for (let k = this.lexer.inlineQueue.length - 1; k >= 0; k--) if (this.rules.other.listIsTask.test(this.lexer.inlineQueue[k].src)) {
-            this.lexer.inlineQueue[k].src = this.lexer.inlineQueue[k].src.replace(this.rules.other.listReplaceTask, "");
+          for (let k2 = this.lexer.inlineQueue.length - 1; k2 >= 0; k2--) if (this.rules.other.listIsTask.test(this.lexer.inlineQueue[k2].src)) {
+            this.lexer.inlineQueue[k2].src = this.lexer.inlineQueue[k2].src.replace(this.rules.other.listReplaceTask, "");
             break;
           }
           let p = this.rules.other.listTaskCheckbox.exec(a.raw);
           if (p) {
-            let k = { type: "checkbox", raw: p[0] + " ", checked: p[0] !== "[ ]" };
-            a.checked = k.checked, r.loose ? a.tokens[0] && ["paragraph", "text"].includes(a.tokens[0].type) && "tokens" in a.tokens[0] && a.tokens[0].tokens ? (a.tokens[0].raw = k.raw + a.tokens[0].raw, a.tokens[0].text = k.raw + a.tokens[0].text, a.tokens[0].tokens.unshift(k)) : a.tokens.unshift({ type: "paragraph", raw: k.raw, text: k.raw, tokens: [k] }) : a.tokens.unshift(k);
+            let k2 = { type: "checkbox", raw: p[0] + " ", checked: p[0] !== "[ ]" };
+            a.checked = k2.checked, r.loose ? a.tokens[0] && ["paragraph", "text"].includes(a.tokens[0].type) && "tokens" in a.tokens[0] && a.tokens[0].tokens ? (a.tokens[0].raw = k2.raw + a.tokens[0].raw, a.tokens[0].text = k2.raw + a.tokens[0].text, a.tokens[0].tokens.unshift(k2)) : a.tokens.unshift({ type: "paragraph", raw: k2.raw, text: k2.raw, tokens: [k2] }) : a.tokens.unshift(k2);
           }
         } else a.task && (a.task = false);
         if (!r.loose) {
-          let p = a.tokens.filter((h) => h.type === "space"), k = p.length > 0 && p.some((h) => this.rules.other.anyLine.test(h.raw));
-          r.loose = k;
+          let p = a.tokens.filter((h) => h.type === "space"), k2 = p.length > 0 && p.some((h) => this.rules.other.anyLine.test(h.raw));
+          r.loose = k2;
         }
       }
       if (r.loose) for (let a of r.items) {
@@ -1639,7 +3297,7 @@ ${p}` : p;
         }
         if (a -= u, a > 0) continue;
         u = Math.min(u, u + a + c);
-        let k = [...s[0]][0].length, h = e.slice(0, i + s.index + k + u);
+        let k2 = [...s[0]][0].length, h = e.slice(0, i + s.index + k2 + u);
         if (Math.min(i, u) % 2) {
           let f = h.slice(1, -1);
           return { type: "em", raw: h, text: f, tokens: this.lexer.inlineTokens(f) };
@@ -1673,8 +3331,8 @@ ${p}` : p;
         }
         if (a -= u, a > 0) continue;
         u = Math.min(u, u + a);
-        let p = [...s[0]][0].length, k = e.slice(0, i + s.index + p + u), h = k.slice(i, -i);
-        return { type: "del", raw: k, text: h, tokens: this.lexer.inlineTokens(h) };
+        let p = [...s[0]][0].length, k2 = e.slice(0, i + s.index + p + u), h = k2.slice(i, -i);
+        return { type: "del", raw: k2, text: h, tokens: this.lexer.inlineTokens(h) };
       }
     }
   }
@@ -1904,9 +3562,9 @@ var x = class l {
       }
       let c = e;
       if (this.options.extensions?.startInline) {
-        let p = 1 / 0, k = e.slice(1), h;
+        let p = 1 / 0, k2 = e.slice(1), h;
         this.options.extensions.startInline.forEach((R) => {
-          h = R.call({ lexer: this }, k), typeof h == "number" && h >= 0 && (p = Math.min(p, h));
+          h = R.call({ lexer: this }, k2), typeof h == "number" && h >= 0 && (p = Math.min(p, h));
         }), p < 1 / 0 && p >= 0 && (c = e.substring(0, p + 1));
       }
       if (a = this.tokenizer.inlineText(c)) {
@@ -2348,15 +4006,15 @@ var q = class {
           let o = i, u = n.hooks[o], a = r[o];
           P.passThroughHooks.has(i) ? r[o] = (c) => {
             if (this.defaults.async && P.passThroughHooksRespectAsync.has(i)) return (async () => {
-              let k = await u.call(r, c);
-              return a.call(r, k);
+              let k2 = await u.call(r, c);
+              return a.call(r, k2);
             })();
             let p = u.call(r, c);
             return a.call(r, p);
           } : r[o] = (...c) => {
             if (this.defaults.async) return (async () => {
-              let k = await u.apply(r, c);
-              return k === false && (k = await a.apply(r, c)), k;
+              let k2 = await u.apply(r, c);
+              return k2 === false && (k2 = await a.apply(r, c)), k2;
             })();
             let p = u.apply(r, c);
             return p === false && (p = a.apply(r, c)), p;
@@ -2472,6 +4130,166 @@ var markdownParser = new q();
 markdownParser.setOptions({
   tokenizer: new StrictStrikethroughTokenizer()
 });
+
+// node_modules/@earendil-works/pi-tui/dist/components/settings-list.js
+var SettingsList = class {
+  items;
+  filteredItems;
+  theme;
+  selectedIndex = 0;
+  maxVisible;
+  onChange;
+  onCancel;
+  searchInput;
+  searchEnabled;
+  // Submenu state
+  submenuComponent = null;
+  submenuItemIndex = null;
+  constructor(items, maxVisible, theme, onChange, onCancel, options = {}) {
+    this.items = items;
+    this.filteredItems = items;
+    this.maxVisible = maxVisible;
+    this.theme = theme;
+    this.onChange = onChange;
+    this.onCancel = onCancel;
+    this.searchEnabled = options.enableSearch ?? false;
+    if (this.searchEnabled) {
+      this.searchInput = new Input();
+    }
+  }
+  /** Update an item's currentValue */
+  updateValue(id, newValue) {
+    const item = this.items.find((i) => i.id === id);
+    if (item) {
+      item.currentValue = newValue;
+    }
+  }
+  invalidate() {
+    this.submenuComponent?.invalidate?.();
+  }
+  render(width) {
+    if (this.submenuComponent) {
+      return this.submenuComponent.render(width);
+    }
+    return this.renderMainList(width);
+  }
+  renderMainList(width) {
+    const lines = [];
+    if (this.searchEnabled && this.searchInput) {
+      lines.push(...this.searchInput.render(width));
+      lines.push("");
+    }
+    if (this.items.length === 0) {
+      lines.push(this.theme.hint("  No settings available"));
+      if (this.searchEnabled) {
+        this.addHintLine(lines, width);
+      }
+      return lines;
+    }
+    const displayItems = this.searchEnabled ? this.filteredItems : this.items;
+    if (displayItems.length === 0) {
+      lines.push(truncateToWidth(this.theme.hint("  No matching settings"), width));
+      this.addHintLine(lines, width);
+      return lines;
+    }
+    const startIndex = Math.max(0, Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), displayItems.length - this.maxVisible));
+    const endIndex = Math.min(startIndex + this.maxVisible, displayItems.length);
+    const maxLabelWidth = Math.min(30, Math.max(...this.items.map((item) => visibleWidth(item.label))));
+    for (let i = startIndex; i < endIndex; i++) {
+      const item = displayItems[i];
+      if (!item)
+        continue;
+      const isSelected = i === this.selectedIndex;
+      const prefix = isSelected ? this.theme.cursor : "  ";
+      const prefixWidth = visibleWidth(prefix);
+      const labelPadded = item.label + " ".repeat(Math.max(0, maxLabelWidth - visibleWidth(item.label)));
+      const labelText = this.theme.label(labelPadded, isSelected);
+      const separator = "  ";
+      const usedWidth = prefixWidth + maxLabelWidth + visibleWidth(separator);
+      const valueMaxWidth = width - usedWidth - 2;
+      const valueText = this.theme.value(truncateToWidth(item.currentValue, valueMaxWidth, ""), isSelected);
+      lines.push(truncateToWidth(prefix + labelText + separator + valueText, width));
+    }
+    if (startIndex > 0 || endIndex < displayItems.length) {
+      const scrollText = `  (${this.selectedIndex + 1}/${displayItems.length})`;
+      lines.push(this.theme.hint(truncateToWidth(scrollText, width - 2, "")));
+    }
+    const selectedItem = displayItems[this.selectedIndex];
+    if (selectedItem?.description) {
+      lines.push("");
+      const wrappedDesc = wrapTextWithAnsi(selectedItem.description, width - 4);
+      for (const line of wrappedDesc) {
+        lines.push(this.theme.description(`  ${line}`));
+      }
+    }
+    this.addHintLine(lines, width);
+    return lines;
+  }
+  handleInput(data) {
+    if (this.submenuComponent) {
+      this.submenuComponent.handleInput?.(data);
+      return;
+    }
+    const kb = getKeybindings();
+    const displayItems = this.searchEnabled ? this.filteredItems : this.items;
+    if (kb.matches(data, "tui.select.up")) {
+      if (displayItems.length === 0)
+        return;
+      this.selectedIndex = this.selectedIndex === 0 ? displayItems.length - 1 : this.selectedIndex - 1;
+    } else if (kb.matches(data, "tui.select.down")) {
+      if (displayItems.length === 0)
+        return;
+      this.selectedIndex = this.selectedIndex === displayItems.length - 1 ? 0 : this.selectedIndex + 1;
+    } else if (kb.matches(data, "tui.select.confirm") || data === " ") {
+      this.activateItem();
+    } else if (kb.matches(data, "tui.select.cancel")) {
+      this.onCancel();
+    } else if (this.searchEnabled && this.searchInput) {
+      const sanitized = data.replace(/ /g, "");
+      if (!sanitized) {
+        return;
+      }
+      this.searchInput.handleInput(sanitized);
+      this.applyFilter(this.searchInput.getValue());
+    }
+  }
+  activateItem() {
+    const item = this.searchEnabled ? this.filteredItems[this.selectedIndex] : this.items[this.selectedIndex];
+    if (!item)
+      return;
+    if (item.submenu) {
+      this.submenuItemIndex = this.selectedIndex;
+      this.submenuComponent = item.submenu(item.currentValue, (selectedValue) => {
+        if (selectedValue !== void 0) {
+          item.currentValue = selectedValue;
+          this.onChange(item.id, selectedValue);
+        }
+        this.closeSubmenu();
+      });
+    } else if (item.values && item.values.length > 0) {
+      const currentIndex = item.values.indexOf(item.currentValue);
+      const nextIndex = (currentIndex + 1) % item.values.length;
+      const newValue = item.values[nextIndex];
+      item.currentValue = newValue;
+      this.onChange(item.id, newValue);
+    }
+  }
+  closeSubmenu() {
+    this.submenuComponent = null;
+    if (this.submenuItemIndex !== null) {
+      this.selectedIndex = this.submenuItemIndex;
+      this.submenuItemIndex = null;
+    }
+  }
+  applyFilter(query) {
+    this.filteredItems = fuzzyFilter(this.items, query, (item) => item.label);
+    this.selectedIndex = 0;
+  }
+  addHintLine(lines, width) {
+    lines.push("");
+    lines.push(truncateToWidth(this.theme.hint(this.searchEnabled ? "  Type to search \xB7 Enter/Space to change \xB7 Esc to cancel" : "  Enter/Space to change \xB7 Esc to cancel"), width));
+  }
+};
 
 // node_modules/@earendil-works/pi-tui/dist/terminal.js
 import * as fs3 from "fs";
@@ -3137,7 +4955,7 @@ function buildAnchorPairingIndex(messages) {
     }
     let j2 = i;
     while (j2 + 1 < n && messages[j2 + 1].role === "assistant") j2++;
-    for (let k = i; k <= j2; k++) runStart[k] = i;
+    for (let k2 = i; k2 <= j2; k2++) runStart[k2] = i;
     i = j2 + 1;
   }
   const prefixEnd = new Int32Array(n + 1);
@@ -3244,7 +5062,7 @@ function stripOrphanedReasoning(messages) {
     const companion = messages[j2 + 1];
     const hasCompanion = companion !== void 0 && companion.role === "assistant" && (companion.contentType === "text" || companion.contentType === "tool-call");
     if (!hasCompanion) {
-      for (let k = i; k <= j2; k++) drop.add(k);
+      for (let k2 = i; k2 <= j2; k2++) drop.add(k2);
     }
   }
   if (drop.size === 0) return messages;
@@ -3277,19 +5095,19 @@ function remintCoveredLiveIds(messages, state) {
     );
     if (!conflict) continue;
     const liveIds = new Set(idxs.map((i) => baseIdOf(messages[i].id)));
-    let k = 1;
+    let k2 = 1;
     for (const i of idxs) {
       const id = messages[i].id;
       const exactCovered = coveredBases.has(baseIdOf(id));
       if (!exactCovered || prior.has(id)) continue;
-      while (coveredBases.has(`${root}_${k}`) || liveIds.has(`${root}_${k}`) || prior.has(`${root}_${k}`))
-        k++;
+      while (coveredBases.has(`${root}_${k2}`) || liveIds.has(`${root}_${k2}`) || prior.has(`${root}_${k2}`))
+        k2++;
       const hash = id.indexOf("#");
       const tail = hash > 0 ? id.slice(hash) : "";
-      const minted = `${root}_${k}${tail}`;
+      const minted = `${root}_${k2}${tail}`;
       liveIds.add(baseIdOf(minted));
       next[i] = { ...messages[i], id: minted };
-      k++;
+      k2++;
       changed = true;
     }
   }
@@ -4835,27 +6653,27 @@ function parseCallText(text) {
     return null;
   }
   if (!parsed || typeof parsed !== "object") return null;
-  const obj = parsed;
+  const obj2 = parsed;
   let content = null;
   let contentWasString = false;
-  if (Array.isArray(obj.content)) {
-    content = obj.content;
-  } else if (typeof obj.content === "string") {
+  if (Array.isArray(obj2.content)) {
+    content = obj2.content;
+  } else if (typeof obj2.content === "string") {
     contentWasString = true;
     try {
-      const inner = JSON.parse(obj.content);
+      const inner = JSON.parse(obj2.content);
       if (Array.isArray(inner)) content = inner;
     } catch {
       content = null;
     }
   }
   if (!content || content.length === 0) return null;
-  return { prefix: raw.slice(0, start), obj, content, contentWasString };
+  return { prefix: raw.slice(0, start), obj: obj2, content, contentWasString };
 }
 function rewriteCompressText(text, liveKeys) {
   const parsed = parseCallText(text);
   if (!parsed) return null;
-  const { prefix, obj, content, contentWasString } = parsed;
+  const { prefix, obj: obj2, content, contentWasString } = parsed;
   const kept = content.filter((entry) => {
     if (!entry || typeof entry !== "object") return false;
     const e = entry;
@@ -4864,7 +6682,7 @@ function rewriteCompressText(text, liveKeys) {
     return liveKeys.has(rangeKey(s, end));
   });
   if (kept.length === 0) return null;
-  return prefix + serializeCompacted(obj, kept, contentWasString).text;
+  return prefix + serializeCompacted(obj2, kept, contentWasString).text;
 }
 var SUMMARY_STUB_CHARS = 200;
 function compactEntry(entry) {
@@ -4877,7 +6695,7 @@ function compactEntry(entry) {
     summary: `${clampPrefix(e.summary, SUMMARY_STUB_CHARS - 1)}\u2026`
   };
 }
-function serializeCompacted(obj, content, contentWasString) {
+function serializeCompacted(obj2, content, contentWasString) {
   let changed = false;
   const compacted = content.map((entry) => {
     const out = compactEntry(entry);
@@ -4885,14 +6703,14 @@ function serializeCompacted(obj, content, contentWasString) {
     return out;
   });
   const outContent = contentWasString ? JSON.stringify(compacted) : compacted;
-  return { text: JSON.stringify({ ...obj, content: outContent }), changed };
+  return { text: JSON.stringify({ ...obj2, content: outContent }), changed };
 }
 function compactCompressText(text) {
   const parsed = parseCallText(text);
   if (!parsed) return null;
-  const { prefix, obj, content, contentWasString } = parsed;
+  const { prefix, obj: obj2, content, contentWasString } = parsed;
   const { text: out, changed } = serializeCompacted(
-    obj,
+    obj2,
     content,
     contentWasString
   );
@@ -5124,7 +6942,7 @@ function canonOf(v2, cache2) {
   if (Array.isArray(v2)) {
     s = `[${v2.map((e) => canonOf(e, cache2)).join(",")}]`;
   } else {
-    const entries = Object.entries(v2).map(([k, val]) => `${JSON.stringify(k)}:${canonOf(val, cache2)}`).sort();
+    const entries = Object.entries(v2).map(([k2, val]) => `${JSON.stringify(k2)}:${canonOf(val, cache2)}`).sort();
     s = `{${entries.join(",")}}`;
   }
   cache2.set(key, s);
@@ -5139,9 +6957,9 @@ function compactValue(v2, depth, stats, cache2) {
   if (isPlainObject(v2)) {
     let changed = false;
     const out = {};
-    for (const [k, val] of Object.entries(v2)) {
+    for (const [k2, val] of Object.entries(v2)) {
       const nv = compactValue(val, depth + 1, stats, cache2);
-      out[k] = nv;
+      out[k2] = nv;
       if (nv !== val) changed = true;
     }
     return changed ? out : v2;
@@ -5194,7 +7012,7 @@ function buildRunFold(arr, depth, cache2) {
       segs.push({ [CRUSH_KEY]: "identical-run", count: runLen, item: arr[i] });
       runs++;
     } else {
-      for (let k = i; k <= j2; k++) segs.push(arr[k]);
+      for (let k2 = i; k2 <= j2; k2++) segs.push(arr[k2]);
     }
     i = j2 + 1;
   }
@@ -5210,37 +7028,37 @@ function buildConstHoist(arr, depth, cache2) {
   const keys = [];
   const seen = /* @__PURE__ */ new Set();
   for (const e of arr) {
-    for (const k of Object.keys(e)) {
-      if (!seen.has(k)) {
-        seen.add(k);
-        keys.push(k);
+    for (const k2 of Object.keys(e)) {
+      if (!seen.has(k2)) {
+        seen.add(k2);
+        keys.push(k2);
       }
     }
   }
   const first = arr[0];
   if (!first) return null;
   const constKeys = [];
-  for (const k of keys) {
-    if (!(k in first)) continue;
-    const c0 = canonOf(first[k], cache2);
+  for (const k2 of keys) {
+    if (!(k2 in first)) continue;
+    const c0 = canonOf(first[k2], cache2);
     let constant = true;
     for (let i = 1; i < n; i++) {
       const row = arr[i];
-      if (!(k in row) || canonOf(row[k], cache2) !== c0) {
+      if (!(k2 in row) || canonOf(row[k2], cache2) !== c0) {
         constant = false;
         break;
       }
     }
-    if (constant) constKeys.push(k);
+    if (constant) constKeys.push(k2);
   }
   if (constKeys.length === 0) return null;
   const constSet = new Set(constKeys);
   const constObj = {};
-  for (const k of constKeys) constObj[k] = first[k];
+  for (const k2 of constKeys) constObj[k2] = first[k2];
   const items = arr.map((e) => {
     const o = {};
-    for (const [k, v2] of Object.entries(e)) {
-      if (!constSet.has(k)) o[k] = v2;
+    for (const [k2, v2] of Object.entries(e)) {
+      if (!constSet.has(k2)) o[k2] = v2;
     }
     return o;
   });
@@ -6569,11 +8387,11 @@ function adjustBoundariesForReasoningPairs(startIndex, endIndex, messages) {
       }
     }
     if (msg.role === "assistant" && (msg.contentType === "text" || msg.contentType === "tool-call")) {
-      let k = i - 1;
-      while (k >= 0 && messages[k].contentType === "reasoning") {
-        k--;
+      let k2 = i - 1;
+      while (k2 >= 0 && messages[k2].contentType === "reasoning") {
+        k2--;
       }
-      const runStart = k + 1;
+      const runStart = k2 + 1;
       if (runStart < i && runStart >= 0 && messages[runStart].contentType === "reasoning" && runStart < newStartIndex) {
         newStartIndex = runStart;
       }
@@ -6625,8 +8443,8 @@ function computeTurnGroups(messages) {
       burstEnd++;
     }
     const members = /* @__PURE__ */ new Set();
-    for (let k = reasoningStart; k <= burstEnd; k++) {
-      const m2 = messages[k];
+    for (let k2 = reasoningStart; k2 <= burstEnd; k2++) {
+      const m2 = messages[k2];
       if (!m2.id) continue;
       members.add(m2.id);
       if (m2.role === "assistant" && m2.contentType === "tool-call" && typeof m2.toolCallId === "string") {
@@ -8276,9 +10094,9 @@ function sanitizePackSurface(raw) {
   const prompts = {};
   const rawPrompts = raw.prompts;
   if (rawPrompts && typeof rawPrompts === "object" && !Array.isArray(rawPrompts)) {
-    for (const k of PROMPT_RULE_KEYS) {
-      const v2 = rawPrompts[k];
-      if (typeof v2 === "string") prompts[k] = v2;
+    for (const k2 of PROMPT_RULE_KEYS) {
+      const v2 = rawPrompts[k2];
+      if (typeof v2 === "string") prompts[k2] = v2;
     }
   }
   const toolPrompts = {};
@@ -9039,9 +10857,9 @@ var ANOMALY_MISS_TOK = 5e3;
 var TTL_SPIKE_TOK = 1e4;
 var SUMMARY_FOLD_TOPS = 3;
 var SUMMARY_ANOMALY_CAP = 20;
-function hitVerdict(pct2) {
-  if (pct2 >= HIT_HEALTHY_PCT) return "HEALTHY";
-  if (pct2 >= HIT_WATCH_PCT) return "WATCH";
+function hitVerdict(pct22) {
+  if (pct22 >= HIT_HEALTHY_PCT) return "HEALTHY";
+  if (pct22 >= HIT_WATCH_PCT) return "WATCH";
   return "INVESTIGATE";
 }
 function medianHitPct(lines) {
@@ -9093,11 +10911,11 @@ function formatCacheReportFull(report) {
     );
     for (const f of report.folds) {
       const nstar = f.breakevenTurns === null ? "n/a" : f.breakevenTurns.toFixed(1);
-      const k = f.turnsToNextFold === null ? "\u2014" : String(f.turnsToNextFold);
+      const k2 = f.turnsToNextFold === null ? "\u2014" : String(f.turnsToNextFold);
       const verdict = f.paidBack === null ? "?" : f.paidBack ? "PAID BACK" : "NOT PAID BACK";
       const h = f.hPct === null ? "n/a" : `${f.hPct.toFixed(1)}%`;
       out.push(
-        `  #${f.seq} ${fmtTime(f.at)} S=${fmtTok(f.S)} \u03C3=${fmtTok(f.sigma)} h=${h} T=${fmtTok(f.T)} \u0394C\u2081=${fmtTok(f.oneTimeCostUnits)} \u0394s=${fmtTok(f.perTurnSavingUnits)}/turn n*=${nstar} k=${k} \u2192 ${verdict}`
+        `  #${f.seq} ${fmtTime(f.at)} S=${fmtTok(f.S)} \u03C3=${fmtTok(f.sigma)} h=${h} T=${fmtTok(f.T)} \u0394C\u2081=${fmtTok(f.oneTimeCostUnits)} \u0394s=${fmtTok(f.perTurnSavingUnits)}/turn n*=${nstar} k=${k2} \u2192 ${verdict}`
       );
     }
   }
@@ -9178,10 +10996,10 @@ function formatCacheReportSummary(report) {
     if (report.folds.length <= SUMMARY_FOLD_TOPS * 2) {
       for (const f of report.folds) {
         const nstar = f.breakevenTurns === null ? "n/a" : f.breakevenTurns.toFixed(1);
-        const k = f.turnsToNextFold === null ? "\u2014" : String(f.turnsToNextFold);
+        const k2 = f.turnsToNextFold === null ? "\u2014" : String(f.turnsToNextFold);
         const h = f.hPct === null ? "n/a" : `${f.hPct.toFixed(1)}%`;
         out.push(
-          `  #${f.seq} ${fmtTime(f.at)} S=${fmtTok(f.S)} \u03C3=${fmtTok(f.sigma)} h=${h} T=${fmtTok(f.T)} \u0394C\u2081=${fmtTok(f.oneTimeCostUnits)} \u0394s=${fmtTok(f.perTurnSavingUnits)}/turn n*=${nstar} k=${k} \u2192 ${foldVerdict(f)}`
+          `  #${f.seq} ${fmtTime(f.at)} S=${fmtTok(f.S)} \u03C3=${fmtTok(f.sigma)} h=${h} T=${fmtTok(f.T)} \u0394C\u2081=${fmtTok(f.oneTimeCostUnits)} \u0394s=${fmtTok(f.perTurnSavingUnits)}/turn n*=${nstar} k=${k2} \u2192 ${foldVerdict(f)}`
         );
       }
     } else {
@@ -9543,9 +11361,9 @@ function parseObjectValue(value, callId, diag) {
     salvaged = parsed.salvaged;
     if (parsed.quoteRepaired) diag.quoteSalvage = true;
   } else if (content !== null && typeof content === "object") {
-    const obj = content;
-    const nested = obj["ranges"];
-    entries = Array.isArray(nested) ? nested : [obj];
+    const obj2 = content;
+    const nested = obj2["ranges"];
+    entries = Array.isArray(nested) ? nested : [obj2];
     diag.contentSalvage = true;
   } else {
     diag.kind = "content-not-array";
@@ -10125,9 +11943,9 @@ function docFeatures(text) {
   const f = build(text);
   if (text.length > 0 && text.length <= capChars) {
     while (cachedChars + text.length > capChars && cache.size > 0) {
-      const k = cache.keys().next().value;
-      cachedChars -= k.length;
-      cache.delete(k);
+      const k2 = cache.keys().next().value;
+      cachedChars -= k2.length;
+      cache.delete(k2);
     }
     cache.set(text, f);
     cachedChars += text.length;
@@ -10419,9 +12237,9 @@ function resolveConfig(adapter, liveContextLimit, provider, modelId) {
   const c = resolveCompress(adapter.compress, provider, modelId);
   if (c.maxContextLimit !== void 0) config.nudge.maxContextLimitPct = parsePercent(c.maxContextLimit);
   if (c.emergencyThresholdPercent !== void 0) {
-    const pct2 = parsePercent(c.emergencyThresholdPercent);
-    config.nudge.emergencyThresholdPct = pct2;
-    config.truncate.threshold = pct2;
+    const pct3 = parsePercent(c.emergencyThresholdPercent);
+    config.nudge.emergencyThresholdPct = pct3;
+    config.truncate.threshold = pct3;
   }
   if (c.nudgeGrowthTokens !== void 0) {
     config.nudge.growthFloor = c.nudgeGrowthTokens;
@@ -11482,9 +13300,9 @@ var SECTION_KEYS = new Set(SECTIONS.map(([key]) => key));
 function sanitizePromptSections(raw) {
   if (!raw || typeof raw !== "object") return {};
   const out = {};
-  for (const [k, v2] of Object.entries(raw)) {
-    if (SECTION_KEYS.has(k) && (typeof v2 === "string" || v2 === null)) {
-      out[k] = v2;
+  for (const [k2, v2] of Object.entries(raw)) {
+    if (SECTION_KEYS.has(k2) && (typeof v2 === "string" || v2 === null)) {
+      out[k2] = v2;
     }
   }
   return out;
@@ -11523,8 +13341,8 @@ function sanitizeToolPrompts(raw) {
     }
     if (src.paramDescriptions && typeof src.paramDescriptions === "object" && !Array.isArray(src.paramDescriptions)) {
       const params = {};
-      for (const [k, v2] of Object.entries(src.paramDescriptions)) {
-        if (typeof v2 === "string") params[k] = v2;
+      for (const [k2, v2] of Object.entries(src.paramDescriptions)) {
+        if (typeof v2 === "string") params[k2] = v2;
       }
       if (Object.keys(params).length > 0) entry.paramDescriptions = params;
     }
@@ -11535,9 +13353,9 @@ function sanitizeToolPrompts(raw) {
 function sanitizeNudgeSections(raw) {
   const out = {};
   if (!raw || typeof raw !== "object") return out;
-  for (const [k, v2] of Object.entries(raw)) {
-    if (NUDGE_KEYS.has(k) && (typeof v2 === "string" || v2 === null)) {
-      out[k] = v2;
+  for (const [k2, v2] of Object.entries(raw)) {
+    if (NUDGE_KEYS.has(k2) && (typeof v2 === "string" || v2 === null)) {
+      out[k2] = v2;
     }
   }
   return out;
@@ -11545,9 +13363,9 @@ function sanitizeNudgeSections(raw) {
 function withParamDescriptions(schema, descriptions) {
   const src = schema.properties ?? {};
   const properties = {};
-  for (const [k, v2] of Object.entries(src)) {
-    const d2 = descriptions[k];
-    properties[k] = d2 !== void 0 && v2 && typeof v2 === "object" ? { ...v2, description: d2 } : v2;
+  for (const [k2, v2] of Object.entries(src)) {
+    const d2 = descriptions[k2];
+    properties[k2] = d2 !== void 0 && v2 && typeof v2 === "object" ? { ...v2, description: d2 } : v2;
   }
   return { ...schema, properties };
 }
@@ -17981,13 +19799,13 @@ function withBlockSummaries(args, owned) {
     if (block) entries.push({ ...r, summary: block.summary });
   }
   if (entries.length === 0) return null;
-  const obj = args;
+  const obj2 = args;
   const next = {};
-  for (const [key, value] of Object.entries(obj)) {
+  for (const [key, value] of Object.entries(obj2)) {
     if (key !== "content" && !RANGE_KEYS.includes(key)) next[key] = value;
   }
-  next.content = typeof obj.content === "string" ? JSON.stringify(entries) : entries;
-  return safeJson(next) === safeJson(obj) ? null : next;
+  next.content = typeof obj2.content === "string" ? JSON.stringify(entries) : entries;
+  return safeJson(next) === safeJson(obj2) ? null : next;
 }
 function safeJson(value) {
   try {
@@ -19071,10 +20889,10 @@ function buildStatusPanel(input) {
     ];
     for (const cat of categories) {
       if (cat.value <= 0) continue;
-      const pct2 = sentTotal > 0 ? Math.round(cat.value / sentTotal * 100) : 0;
+      const pct3 = sentTotal > 0 ? Math.round(cat.value / sentTotal * 100) : 0;
       const b2 = bar(cat.value, sentTotal);
       lines.push(
-        `  ${cat.label.padEnd(10)} ${b2} ${String(pct2).padStart(3)}%  ${fmt2(cat.value)}`
+        `  ${cat.label.padEnd(10)} ${b2} ${String(pct3).padStart(3)}%  ${fmt2(cat.value)}`
       );
     }
   }
@@ -19648,15 +21466,15 @@ function findDegenerateRuns(text, minRun) {
   if (!hasLongRun(text, minRun)) return runs;
   const chars = Array.from(text);
   let utf16 = 0;
-  let k = 0;
-  while (k < chars.length) {
-    const ch = chars[k];
-    let m2 = k + 1;
+  let k2 = 0;
+  while (k2 < chars.length) {
+    const ch = chars[k2];
+    let m2 = k2 + 1;
     while (m2 < chars.length && chars[m2] === ch) m2++;
-    const count = m2 - k;
+    const count = m2 - k2;
     if (count >= minRun) runs.push({ char: ch, count, index: utf16 });
     utf16 += count * ch.length;
-    k = m2;
+    k2 = m2;
   }
   return runs;
 }
@@ -20058,7 +21876,7 @@ function canonicalStringify(value) {
     return `[${value.map((v2) => canonicalStringify(v2)).join(",")}]`;
   }
   const entries = Object.entries(value).filter(([, v2]) => v2 !== void 0).sort(([a], [b2]) => a < b2 ? -1 : a > b2 ? 1 : 0);
-  return `{${entries.map(([k, v2]) => `${JSON.stringify(k)}:${canonicalStringify(v2)}`).join(",")}}`;
+  return `{${entries.map(([k2, v2]) => `${JSON.stringify(k2)}:${canonicalStringify(v2)}`).join(",")}}`;
 }
 function repetitionFingerprint(toolName, input) {
   const payload = `${toolName}\0${canonicalStringify(input ?? {})}`;
@@ -20168,6 +21986,451 @@ function wireToolGuardrails(pi, runtime) {
   pi.on("session_shutdown", (_e2, ctx) => {
     trackers.delete(ctx.sessionManager.getSessionId());
   });
+}
+
+// src/idle-compact.ts
+var IDLE_CHECK_CUSTOM_TYPE = "acp-idle-check";
+var DEFAULT_IDLE_MINUTES = 29;
+var IDLE_LATE_MS = 6e4;
+var IDLE_ALLOWED_TOOLS = /* @__PURE__ */ new Set(["compress", "acp_context", "decompress", "search_context", "acp_status", "acp_cache"]);
+var warnedMinutes;
+function resolveIdleCompact(cfg) {
+  if (cfg === true) return { enabled: true, idleMinutes: DEFAULT_IDLE_MINUTES };
+  if (!cfg || typeof cfg !== "object") return { enabled: false, idleMinutes: DEFAULT_IDLE_MINUTES };
+  const raw = cfg.idleMinutes;
+  let idleMinutes = DEFAULT_IDLE_MINUTES;
+  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 1) idleMinutes = raw;
+  else if (raw !== void 0 && raw !== warnedMinutes) {
+    warnedMinutes = raw;
+    console.warn(`[bcp] acp.json "idleCompact.idleMinutes" must be a number >= 1 \u2014 using ${DEFAULT_IDLE_MINUTES}`);
+  }
+  return { enabled: cfg.enabled === true, idleMinutes };
+}
+function idleCheckText(awayMinutes) {
+  return `[ACP idle compact] The user has been away for about ${awayMinutes} minutes. This is an automatic maintenance turn, not a user request: decide whether consumed history is worth compressing now, using the ranges listed below. Do not continue other work and do not call tools other than compress and acp_context. If nothing is worth compressing, reply with one short line.`;
+}
+function freshState() {
+  return { sid: void 0, ctx: void 0, running: false, lastTouch: 0, checked: false, run: "none", forceNudge: false, pending: 0, minBenefit: Infinity, viable: 0, timer: void 0 };
+}
+function isRealMessage(message) {
+  const m2 = message;
+  if (m2?.role === "user") return true;
+  return m2?.role === "custom" && m2.customType !== IDLE_CHECK_CUSTOM_TYPE;
+}
+function wireIdleCompact(pi, runtime) {
+  let s = freshState();
+  const config = () => resolveIdleCompact(runtime.adapter.idleCompact);
+  const clearTimer = () => {
+    if (s.timer) clearTimeout(s.timer);
+    s.timer = void 0;
+  };
+  const invalidate = () => {
+    clearTimer();
+    s.lastTouch = 0;
+  };
+  const skip = (reason, extra = {}) => {
+    logInfo("idle-compact", { sid: s.sid ?? null, event: "skip", reason, ...extra });
+  };
+  const schedule = () => {
+    clearTimer();
+    if (s.running || s.checked || s.lastTouch === 0) return;
+    const cfg = config();
+    if (!cfg.enabled) return;
+    const at = s.lastTouch + cfg.idleMinutes * 6e4;
+    s.timer = setTimeout(() => fire(at), Math.max(0, at - Date.now()));
+    s.timer.unref?.();
+  };
+  const fire = (plannedAt) => {
+    s.timer = void 0;
+    const ctx = s.ctx;
+    if (!ctx || s.running || s.checked || !config().enabled) return;
+    if (runtime.refused) return;
+    if (ctx.mode !== "tui" && ctx.mode !== "rpc") return;
+    if (!ctx.isIdle()) return;
+    let sid;
+    try {
+      sid = ctx.sessionManager.getSessionId();
+    } catch {
+      return;
+    }
+    if (sid !== s.sid) return;
+    const idleMs = Date.now() - s.lastTouch;
+    const lateMs = Date.now() - plannedAt;
+    if (lateMs > IDLE_LATE_MS) return skip("timer-late", { idleMs, lateMs });
+    if (runtime.throttleFor(sid).state.candidate) return skip("throttle-retry-pending");
+    if (s.viable === 0 || s.pending < s.minBenefit) {
+      return skip("below-benefit", { pending: s.pending, minBenefit: s.minBenefit, viable: s.viable });
+    }
+    s.checked = true;
+    s.run = "pending";
+    s.forceNudge = true;
+    const awayMinutes = Math.round(idleMs / 6e4);
+    try {
+      pi.sendMessage({ customType: IDLE_CHECK_CUSTOM_TYPE, content: idleCheckText(awayMinutes), display: true }, { triggerTurn: true });
+    } catch (e) {
+      s.run = "none";
+      s.forceNudge = false;
+      logWarn("idle-compact", { sid, event: "send-failed", error: e instanceof Error ? e.message : String(e) });
+      return;
+    }
+    logInfo("idle-compact", { sid, event: "check-sent", idleMs, pending: s.pending, minBenefit: s.minBenefit });
+  };
+  const lift = () => {
+    if (s.run !== "active" && s.run !== "pending") return;
+    s.run = "lifted";
+    s.checked = false;
+    logInfo("idle-compact", { sid: s.sid ?? null, event: "lifted" });
+  };
+  const bind = (ctx) => {
+    const sid = ctx.sessionManager.getSessionId();
+    if (sid !== s.sid) {
+      clearTimer();
+      s = freshState();
+      s.sid = sid;
+    }
+    s.ctx = ctx;
+  };
+  pi.on("session_start", (_event, ctx) => {
+    clearTimer();
+    s = freshState();
+    bind(ctx);
+  });
+  pi.on("session_shutdown", () => {
+    clearTimer();
+    s = freshState();
+  });
+  pi.on("model_select", () => invalidate());
+  pi.on("session_tree", () => invalidate());
+  pi.on("agent_start", (_event, ctx) => {
+    bind(ctx);
+    s.running = true;
+    clearTimer();
+    if (s.run === "pending") s.run = "active";
+    else if (s.run === "none") s.checked = false;
+  });
+  pi.on("before_provider_request", (_event, ctx) => {
+    if (!s.running) return void 0;
+    bind(ctx);
+    s.lastTouch = Date.now();
+    return void 0;
+  });
+  pi.on("input", (event) => {
+    if (event.source !== "extension") lift();
+  });
+  pi.on("message_end", (event) => {
+    if (isRealMessage(event.message)) lift();
+  });
+  pi.on("tool_call", (event) => {
+    if (s.run !== "active" || IDLE_ALLOWED_TOOLS.has(event.toolName)) return void 0;
+    return { block: true, reason: "ACP idle compact: only compress and acp_context may run while the user is away. Reply with one short line instead." };
+  });
+  pi.on("agent_settled", (_event, ctx) => {
+    bind(ctx);
+    s.running = false;
+    const wasIdleCheck = s.run === "active";
+    s.run = "none";
+    s.forceNudge = false;
+    if (wasIdleCheck) logInfo("idle-compact", { sid: s.sid ?? null, event: "check-done" });
+    schedule();
+  });
+  return {
+    noteNudge(sid, nudge) {
+      if (sid !== s.sid) return;
+      s.pending = nudge?.breakdown?.maxPending ?? 0;
+      s.minBenefit = nudge?.breakdown?.minPressureBenefit ?? Infinity;
+      s.viable = nudge ? viableRanges(nudge.compressibleRanges).length : 0;
+    },
+    takeForcedNudge(sid) {
+      if (sid !== s.sid || !s.forceNudge || s.run === "lifted") return false;
+      s.forceNudge = false;
+      return true;
+    },
+    rearm() {
+      if (!s.running) schedule();
+    }
+  };
+}
+
+// src/config-panel.ts
+import { getSelectListTheme, getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+var ON = "on";
+var OFF = "off";
+var INHERIT = "inherit";
+var MAIN_MODEL = "main model";
+var k = (n) => n % 1e3 === 0 ? `${n / 1e3}K` : String(n);
+var parseK = (v2) => v2.endsWith("K") ? Number(v2.slice(0, -1)) * 1e3 : Number(v2);
+var pct2 = (n) => `${Math.round(n * 100)}%`;
+var withCurrent = (list, current) => list.includes(current) ? list : [...list, current];
+function obj(parent, key) {
+  const v2 = parent[key];
+  if (v2 && typeof v2 === "object" && !Array.isArray(v2)) return v2;
+  const fresh = {};
+  parent[key] = fresh;
+  return fresh;
+}
+function prune2(raw, path10) {
+  for (let depth = path10.length; depth > 0; depth--) {
+    let node = raw;
+    for (const key of path10.slice(0, depth)) node = node?.[key];
+    if (!node || typeof node !== "object" || Object.keys(node).length > 0) return;
+    let parent = raw;
+    for (const key of path10.slice(0, depth - 1)) parent = parent[key];
+    delete parent[path10[depth - 1]];
+  }
+}
+function idleObject(raw) {
+  if (raw.idleCompact === true) raw.idleCompact = { enabled: true };
+  return obj(raw, "idleCompact");
+}
+function modelPath(scope) {
+  return ["compress", "providers", scope.provider, "models", scope.modelId];
+}
+function modelSettings(raw, scope) {
+  let node = raw;
+  for (const key of modelPath(scope)) node = obj(node, key);
+  return node;
+}
+function modelValue(adapter, scope, key) {
+  return adapter.compress?.providers?.[scope.provider]?.models?.[scope.modelId]?.[key];
+}
+function modelKeyItem(id, label, description, presets, format, parse) {
+  return {
+    id,
+    label,
+    description,
+    model: true,
+    values: (current) => withCurrent([INHERIT, ...presets], current),
+    read(adapter, scope) {
+      const v2 = modelValue(adapter, scope, id);
+      if (typeof v2 === "number") return format(v2);
+      if (typeof v2 === "string") return v2;
+      return INHERIT;
+    },
+    write(raw, value, scope) {
+      const node = modelSettings(raw, scope);
+      if (value === INHERIT) {
+        delete node[id];
+        prune2(raw, modelPath(scope));
+      } else {
+        node[id] = parse(value);
+      }
+    }
+  };
+}
+var PANEL_ITEMS = [
+  {
+    id: "compressionModelId",
+    label: "Summary model",
+    description: "Who writes compression summaries. A cheap model saves the main model's tokens; session reuses the current model and its cached prefix; main model lets the main model write them itself.",
+    read: (a) => typeof a.compressionModelId === "string" && a.compressionModelId.trim() ? a.compressionModelId.trim() : MAIN_MODEL,
+    write(raw, value) {
+      if (value === MAIN_MODEL) delete raw.compressionModelId;
+      else raw.compressionModelId = value;
+    }
+  },
+  {
+    id: "idleEnabled",
+    label: "Idle compact",
+    description: "After the session has been idle for the set minutes, start one turn in which the main model decides whether to compress, so you come back to a shorter context instead of paying for a long uncached input.",
+    values: () => [ON, OFF],
+    read: (a) => resolveIdleCompact(a.idleCompact).enabled ? ON : OFF,
+    write(raw, value) {
+      idleObject(raw).enabled = value === ON;
+    }
+  },
+  {
+    id: "idleMinutes",
+    label: "Idle minutes",
+    dependsOn: "idleEnabled",
+    description: `Idle time before the idle compact turn (default ${DEFAULT_IDLE_MINUTES}). Keep it a little under your models' prompt-cache lifetime, or that turn itself reads the context uncached.`,
+    values: (current) => withCurrent(["10", "15", "20", "25", "29", "45", "55"], current),
+    read: (a) => String(resolveIdleCompact(a.idleCompact).idleMinutes),
+    write(raw, value) {
+      idleObject(raw).idleMinutes = Number(value);
+    }
+  },
+  modelKeyItem("maxContextLimit", "Context threshold", "Share of the window above which the compress nudge stops waiting for Nudge interval and appears whenever Minimum benefit could be reclaimed (default 75%). Not a hard cap. Current model only.", ["40%", "45%", "50%", "60%", "70%", "75%", "80%"], pct2, (v2) => Number(v2.slice(0, -1)) / 100),
+  modelKeyItem("nudgeGrowthTokens", "Nudge interval", "Below Context threshold, the compress nudge waits until about this many tokens of old, compressible content have piled up (default 50K). Bigger: fewer nudges, more folded at once. Current model only.", ["30K", "50K", "70K", "100K", "150K", "200K"], k, parseK),
+  modelKeyItem("minPressureBenefitTokens", "Minimum benefit", "No compress nudge, and no idle compact turn, when less than this could be reclaimed (default: larger of 5K and 1% of the window). Current model only.", ["5K", "10K", "20K", "30K", "50K"], k, parseK),
+  {
+    id: "toolOutputMaxBytes",
+    label: "Tool output cap",
+    description: `Keeps one huge tool result from flooding the context: a result larger than this is cut, with a note telling the model where the full output is (default ${k(DEFAULT_TOOL_OUTPUT_MAX_BYTES)} bytes). Pi's own bash/read already stop at 50KB; this mainly catches MCP and other extensions' tools. off = keep everything.`,
+    values: (current) => withCurrent(["8K", "20K", "50K", "100K", OFF], current),
+    read(a) {
+      const v2 = a.toolOutputMaxBytes ?? DEFAULT_TOOL_OUTPUT_MAX_BYTES;
+      return v2 === 0 ? OFF : k(v2);
+    },
+    write(raw, value) {
+      raw.toolOutputMaxBytes = value === OFF ? 0 : parseK(value);
+    }
+  },
+  {
+    id: "toolBashDefaultTimeout",
+    label: "bash default timeout",
+    description: "Keeps a stuck command from making the session wait forever: when the model gives no timeout, bash may run this many seconds (default 60), then the model is told to re-run with a larger one. Pi itself has no default timeout. off = no limit.",
+    values: (current) => withCurrent(["30", "60", "120", "300", OFF], current),
+    read(a) {
+      const v2 = a.toolBashDefaultTimeout ?? 60;
+      return v2 === 0 ? OFF : String(v2);
+    },
+    write(raw, value) {
+      raw.toolBashDefaultTimeout = value === OFF ? 0 : Number(value);
+    }
+  },
+  {
+    id: "debug",
+    label: "Debug log",
+    description: "Write detailed events to ~/.pi/acp.log for troubleshooting. Errors and main events are always logged.",
+    values: () => [ON, OFF],
+    read: (a) => a.debug === true ? ON : OFF,
+    write(raw, value) {
+      raw.debug = value === ON;
+    }
+  }
+];
+function panelItemsFor(scope) {
+  return PANEL_ITEMS.filter((item) => !item.model || scope.provider && scope.modelId);
+}
+function applyPanelValue(raw, id, value, scope) {
+  const item = PANEL_ITEMS.find((i) => i.id === id);
+  if (!item) throw new Error(`unknown setting ${id}`);
+  item.write(raw, value, scope);
+}
+function readPanelValue(adapter, id, scope) {
+  const item = PANEL_ITEMS.find((i) => i.id === id);
+  if (!item) throw new Error(`unknown setting ${id}`);
+  return item.read(adapter, scope);
+}
+function panelDisplay(item, adapter, scope) {
+  if (item.dependsOn && readPanelValue(adapter, item.dependsOn, scope) === OFF) return { currentValue: OFF, locked: true };
+  const currentValue = item.read(adapter, scope);
+  return { currentValue, values: item.values?.(currentValue), locked: false };
+}
+function summaryModelChoices(ctx) {
+  const models = ctx.modelRegistry.getAvailable();
+  return [MAIN_MODEL, SESSION_MODEL_REF, ...models.map((m2) => `${m2.provider}/${m2.id}`)];
+}
+function makeConfigCommand(runtime, idle) {
+  return {
+    name: "acp-config",
+    options: {
+      description: "Open the ACP settings panel (Summary model, Idle compact, per-model compression, tool guards).",
+      handler: async (_args, ctx) => {
+        if (ctx.mode !== "tui") {
+          ctx.ui.notify("/acp-config needs TUI mode; edit ~/.pi/acp.json directly instead", "error");
+          return;
+        }
+        const model = ctx.model;
+        const scope = { provider: model?.provider, modelId: model?.id };
+        const cwd = ctx.cwd ?? process.cwd();
+        await runtime.reloadConfig(cwd);
+        const items = panelItemsFor(scope);
+        const effective = resolveCompress(runtime.adapter.compress, scope.provider, scope.modelId);
+        await ctx.ui.custom((tui, theme, _kb, done) => {
+          const describe = (item, shown) => {
+            const upstream = item.dependsOn && items.find((i) => i.id === item.dependsOn);
+            const extra = shown.locked && upstream ? `Turn on "${upstream.label}" to change this.` : item.model && shown.currentValue === INHERIT ? inheritedNote(item.id, effective) : "";
+            return extra ? `${item.description} ${extra}` : item.description;
+          };
+          const settingItems = items.map((item) => {
+            const shown = panelDisplay(item, runtime.adapter, scope);
+            const setting = { id: item.id, label: item.label, description: describe(item, shown), currentValue: shown.currentValue };
+            if (shown.values) setting.values = shown.values;
+            if (item.id === "compressionModelId") {
+              setting.submenu = (current, close) => new SearchableList(summaryModelChoices(ctx), current, close, (t) => theme.fg("dim", t));
+            }
+            return setting;
+          });
+          const container = new Container();
+          const where = scope.provider && scope.modelId ? `current model ${scope.provider}/${scope.modelId}` : "no current model, per-model settings hidden";
+          container.addChild(new Text(theme.fg("accent", theme.bold("ACP settings")) + theme.fg("dim", `  saved to ~/.pi/acp.json \xB7 ${where}`), 0, 0));
+          const list = new SettingsList(
+            settingItems,
+            Math.min(settingItems.length + 2, 15),
+            getSettingsListTheme(),
+            (id, value) => {
+              void save(id, value).catch((e) => ctx.ui.notify(`[ACP] Save failed: ${e instanceof Error ? e.message : String(e)}`, "error"));
+            },
+            () => done(void 0)
+          );
+          container.addChild(list);
+          const save = async (id, value) => {
+            if (id === "compressionModelId") await runtime.setCompressionModelRef(value === MAIN_MODEL ? null : value);
+            else await updateGlobalAcpConfig((raw) => applyPanelValue(raw, id, value, scope));
+            await runtime.reloadConfig(cwd);
+            if (id === "idleEnabled" || id === "idleMinutes") idle?.rearm();
+            const now = readPanelValue(runtime.adapter, id, scope);
+            if (now !== value) {
+              list.updateValue(id, now);
+              ctx.ui.notify(`[ACP] Saved to the global config, but the project .pi/acp.json overrides this setting; in effect: ${now}`, "warning");
+            }
+            for (const item of items.filter((i) => i.dependsOn === id)) {
+              const setting = settingItems.find((s) => s.id === item.id);
+              const shown = panelDisplay(item, runtime.adapter, scope);
+              setting.currentValue = shown.currentValue;
+              setting.values = shown.values;
+              setting.description = describe(item, shown);
+            }
+            tui.requestRender();
+          };
+          return {
+            render: (width) => container.render(width),
+            invalidate: () => container.invalidate(),
+            handleInput(data) {
+              list.handleInput(data);
+              tui.requestRender();
+            }
+          };
+        });
+      }
+    }
+  };
+}
+var SearchableList = class {
+  constructor(choices, current, close, dim) {
+    this.choices = choices;
+    this.close = close;
+    this.dim = dim;
+    this.input.focused = true;
+    this.rebuild("");
+    this.list.setSelectedIndex(Math.max(0, choices.indexOf(current)));
+  }
+  choices;
+  close;
+  dim;
+  input = new Input();
+  list;
+  rebuild(query) {
+    const matches = query ? fuzzyFilter(this.choices, query, (c) => c) : this.choices;
+    this.list = new SelectList(matches.map((value) => ({ value, label: value })), 12, getSelectListTheme());
+    this.list.onSelect = (picked) => this.close(picked.value);
+    this.list.onCancel = () => this.close();
+  }
+  render(width) {
+    return [this.dim("Type to filter \xB7 \u2191\u2193 select \xB7 Enter confirm \xB7 Esc back"), ...this.input.render(width), ...this.list.render(width)];
+  }
+  invalidate() {
+    this.input.invalidate();
+    this.list.invalidate();
+  }
+  handleInput(data) {
+    const kb = getKeybindings();
+    if (["tui.select.up", "tui.select.down", "tui.select.confirm", "tui.select.cancel"].some((id) => kb.matches(data, id))) {
+      this.list.handleInput(data);
+      return;
+    }
+    const before = this.input.getValue();
+    this.input.handleInput(data);
+    const after = this.input.getValue();
+    if (after !== before) this.rebuild(after);
+  }
+};
+function inheritedNote(id, effective) {
+  const v2 = effective[id];
+  if (typeof v2 === "number") return `Inherited value: ${id === "maxContextLimit" ? pct2(v2) : k(v2)}.`;
+  if (typeof v2 === "string") return `Inherited value: ${v2}.`;
+  return "";
 }
 
 // src/update.ts
@@ -20597,8 +22860,9 @@ function createAcpExtension(adapter = {}) {
     };
     wireCompactionDisable(pi, runtime);
     wireSessionLifecycle(pi, runtime, standDownIfProxied);
-    wireContextTransform(pi, runtime, standDownIfProxied);
     wireBeforeProviderRequest(pi, runtime, standDownIfProxied);
+    const idle = wireIdleCompact(pi, runtime);
+    wireContextTransform(pi, runtime, standDownIfProxied, idle);
     wireSystemPrompt(pi, runtime);
     wireToolGuardrails(pi, runtime);
     wireOverflowSelfHeal(pi, runtime);
@@ -20609,7 +22873,7 @@ function createAcpExtension(adapter = {}) {
     pi.registerTool(makeSearchTool(runtime, toolSurface.search_context));
     pi.registerTool(makeStatusTool(runtime, toolSurface.acp_status));
     pi.registerTool(makeCacheTool(runtime, toolSurface.acp_cache));
-    for (const { name, options } of makeCommands(runtime, pi)) {
+    for (const { name, options } of [...makeCommands(runtime, pi), makeConfigCommand(runtime, idle)]) {
       pi.registerCommand(name, options);
     }
     wireNudgeRecords(pi);
@@ -20744,7 +23008,7 @@ function wireBeforeProviderRequest(pi, runtime, standDownIfProxied) {
     return;
   });
 }
-function wireContextTransform(pi, runtime, standDownIfProxied) {
+function wireContextTransform(pi, runtime, standDownIfProxied, idle) {
   pi.on("context", async (event, ctx) => {
     if (runtime.refused) return;
     if (standDownIfProxied(ctx)) return;
@@ -20842,6 +23106,7 @@ function wireContextTransform(pi, runtime, standDownIfProxied) {
       });
       const turn = runtime.core.processTurn({ messages: coreMessages, state, config, tokenCount });
       await runtime.save(turn.state, ctx);
+      idle?.noteNudge(sid, turn.nudge);
       const userGuard = protectLatestUserMessage(coreMessages, turn.messages, config, tokenCount);
       if (userGuard.restoredId) {
         turn.messages = userGuard.messages;
@@ -20967,6 +23232,7 @@ function wireContextTransform(pi, runtime, standDownIfProxied) {
         shownAt = tokenCount;
         runtime.markNudgeShown(sid, turnKey, tokenCount);
       }
+      let nudgeInjected = false;
       if (turn.nudge?.shouldInject) {
         const emergency = turn.nudge.breakdown?.emergencyOverride === 1;
         turn.nudge.compressibleRanges = viableRanges(turn.nudge.compressibleRanges);
@@ -20976,6 +23242,7 @@ function wireContextTransform(pi, runtime, standDownIfProxied) {
         if (!alreadyShown) {
           const prompts = nudgePrompts(runtime);
           rebuilt.push(nudgeMessage(turn.nudge, turn.state.blocks.filter((b2) => b2.active), prompts, activeNudgeSections(runtime, ctx)));
+          nudgeInjected = true;
           const rendered = renderNudgeText(turn.nudge, prompts, activeNudgeSections(runtime, ctx));
           const top = [...turn.nudge.compressibleRanges].sort((a, b2) => b2.tokens - a.tokens)[0];
           const example = top ? `
@@ -21000,6 +23267,14 @@ ${rendered.text}${example}`);
           }
         } else {
           debug.event("nudge-suppressed", { sid: ctx.sessionManager.getSessionId(), turnKey, reason: turn.nudge.reason, shownAt: shownAt ?? null, tokenCount, adaptiveGrowth, reInjectFloor });
+        }
+      }
+      if (idle?.takeForcedNudge(sid) && !nudgeInjected && turn.nudge) {
+        const ranges = viableRanges(turn.nudge.compressibleRanges);
+        if (ranges.length > 0) {
+          const forced = { ...turn.nudge, compressibleRanges: ranges };
+          rebuilt.push(nudgeMessage(forced, turn.state.blocks.filter((b2) => b2.active), nudgePrompts(runtime), activeNudgeSections(runtime, ctx)));
+          logInfo("idle-compact", { sid, event: "nudge-injected", ranges: ranges.length });
         }
       }
       if (outcome !== null && outcome.cappedNow) {
@@ -21070,7 +23345,7 @@ function wireSystemPrompt(pi, runtime) {
       const ignored = [
         // Only keys the user wrote: built-in packs (lean) ship promptSections
         // of their own, and warning about those would fire on every start.
-        ...Object.keys(runtime.adapter.promptSections ?? {}).map((k) => `promptSections.${k}`)
+        ...Object.keys(runtime.adapter.promptSections ?? {}).map((k2) => `promptSections.${k2}`)
       ].sort();
       const key = ignored.join(",");
       if (ignored.length > 0 && key !== lastIgnoredPromptKeys) {
@@ -21251,11 +23526,11 @@ function wireNudgeRecords(pi) {
   });
 }
 function formatNudgeRecord(nudge, emergency) {
-  const pct2 = Math.round(nudge.contextUsage * 100);
+  const pct3 = Math.round(nudge.contextUsage * 100);
   const tier = `T${nudge.tier ?? 1}`;
   const top = [...nudge.compressibleRanges].sort((a, b2) => b2.tokens - a.tokens)[0];
   const range = top ? ` \xB7 top range ${top.startRef}\u2013${top.endRef}` : "";
-  return `[ACP nudge]${emergency ? " EMERGENCY" : ""} ${pct2}% \xB7 ${tier}${range}`;
+  return `[ACP nudge]${emergency ? " EMERGENCY" : ""} ${pct3}% \xB7 ${tier}${range}`;
 }
 export {
   createAcpExtension,

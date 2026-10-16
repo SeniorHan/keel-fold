@@ -31,6 +31,8 @@ import { collapseAssistantDegeneration, degenerationNotice, lastAssistantRuns, r
 import { buildAcpSystemPrompt } from "./system-prompt.js";
 import { applyStripImages } from "./strip-images.js";
 import { wireToolGuardrails } from "./tool-guardrails.js";
+import { wireIdleCompact, type IdleCompactHandle } from "./idle-compact.js";
+import { makeConfigCommand } from "./config-panel.js";
 import { debug, logError, logInfo, logWarn, logThrow, closeLogStream } from "./log.js";
 import { collectCoveredMessageIds, estimateTokens, collectImageTokens, modelSupportsImages, sentViewTokenCount, sentViewMeterMatches, adoptedViewTokens, blockSignature, historyCanary } from "./tokens.js";
 import { lastTurnBoundaryId, lastTurnBoundaryIndex } from "./turn-boundary.js";
@@ -118,8 +120,11 @@ export function createAcpExtension(adapter: AdapterConfig = {}): ExtensionFactor
     };
     wireCompactionDisable(pi, runtime);
     wireSessionLifecycle(pi, runtime, standDownIfProxied);
-    wireContextTransform(pi, runtime, standDownIfProxied);
     wireBeforeProviderRequest(pi, runtime, standDownIfProxied);
+    // After the strip-images hook so its before_provider_request handler stays
+    // first; wireContextTransform registers only "context", so moving it is safe.
+    const idle = wireIdleCompact(pi, runtime);
+    wireContextTransform(pi, runtime, standDownIfProxied, idle);
     wireSystemPrompt(pi, runtime);
     wireToolGuardrails(pi, runtime);
     wireOverflowSelfHeal(pi, runtime);
@@ -130,7 +135,7 @@ export function createAcpExtension(adapter: AdapterConfig = {}): ExtensionFactor
     pi.registerTool(makeSearchTool(runtime, toolSurface.search_context));
     pi.registerTool(makeStatusTool(runtime, toolSurface.acp_status));
     pi.registerTool(makeCacheTool(runtime, toolSurface.acp_cache));
-    for (const { name, options } of makeCommands(runtime, pi)) {
+    for (const { name, options } of [...makeCommands(runtime, pi), makeConfigCommand(runtime, idle)]) {
       pi.registerCommand(name, options);
     }
     wireNudgeRecords(pi);
@@ -327,7 +332,7 @@ function wireBeforeProviderRequest(pi: ExtensionAPI, runtime: AcpRuntime, standD
 // The core integration: Pi's `context` event fires before every LLM call with the
 // messages about to be sent. We run acp-kernel's processTurn (prune + ref-tag +
 // nudge decision) and return the transformed AgentMessage[].
-function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIfProxied: (ctx: ExtensionContext) => boolean): void {
+function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIfProxied: (ctx: ExtensionContext) => boolean, idle?: IdleCompactHandle): void {
   pi.on("context", async (event, ctx) => {
     // Refused host (OMP / proxied baseUrl): leave the context completely
     // untouched — no ref tags, no compression, no nudge. Returning undefined
@@ -512,6 +517,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
 
       const turn = runtime.core.processTurn({ messages: coreMessages, state, config, tokenCount });
       await runtime.save(turn.state, ctx);
+      idle?.noteNudge(sid, turn.nudge);
       // Lean: emergency truncation must not cut the latest user message,
       // which compression already treats as protected.
       const userGuard = protectLatestUserMessage(coreMessages, turn.messages, config, tokenCount);
@@ -714,6 +720,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
       runtime.markNudgeShown(sid, turnKey, tokenCount);
     }
 
+    let nudgeInjected = false;
     if (turn.nudge?.shouldInject) {
       // Two independent channels for the nudge:
       //  1. CONTEXT injection (always on): the nudge is appended to the
@@ -755,6 +762,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
       if (!alreadyShown) {
         const prompts = nudgePrompts(runtime);
         rebuilt.push(nudgeMessage(turn.nudge, turn.state.blocks.filter((b) => b.active), prompts, activeNudgeSections(runtime, ctx)));
+        nudgeInjected = true;
         const rendered = renderNudgeText(turn.nudge, prompts, activeNudgeSections(runtime, ctx));
         const top = [...turn.nudge.compressibleRanges].sort((a, b) => b.tokens - a.tokens)[0];
         const example = top ? `\n\nExample: compress({ content: [{ startId: "${top.startRef}", endId: "${top.endRef}", summary: "..." }] })` : "";
@@ -781,6 +789,17 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
         }
       } else {
         debug.event("nudge-suppressed", { sid: ctx.sessionManager.getSessionId(), turnKey, reason: turn.nudge.reason, shownAt: shownAt ?? null, tokenCount, adaptiveGrowth, reInjectFloor });
+      }
+    }
+
+    // Lean idle check (src/idle-compact.ts): show the nudge once, even below
+    // the usual thresholds; the model decides whether to compress.
+    if (idle?.takeForcedNudge(sid) && !nudgeInjected && turn.nudge) {
+      const ranges = viableRanges(turn.nudge.compressibleRanges);
+      if (ranges.length > 0) {
+        const forced = { ...turn.nudge, compressibleRanges: ranges };
+        rebuilt.push(nudgeMessage(forced, turn.state.blocks.filter((b) => b.active), nudgePrompts(runtime), activeNudgeSections(runtime, ctx)));
+        logInfo("idle-compact", { sid, event: "nudge-injected", ranges: ranges.length });
       }
     }
 

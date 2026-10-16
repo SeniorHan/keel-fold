@@ -2,6 +2,7 @@ import { type Config, type Prompts } from "acp-kernel";
 import type { CompressReasoningConfig } from "./reasoning-drop.js";
 import type { DegenerationGuardConfig } from "./degeneration.js";
 import type { ThrottleRetryConfig } from "./throttle-retry.js";
+import type { IdleCompactConfig } from "./idle-compact.js";
 import type { PiPromptSections } from "./system-prompt.js";
 import type { NudgeSectionsConfig, ToolPromptsConfig } from "./surface.js";
 /** Compression tuning fields, shared by all three levels (global, provider,
@@ -171,6 +172,11 @@ export interface AdapterConfig {
      *  disables) or a ThrottleRetryConfig object. Default: enabled, 10 retries,
      *  60s exponential base capped at 300s per kick. */
     throttleRetry?: boolean | ThrottleRetryConfig;
+    /** Lean: idle compaction check (src/idle-compact.ts). After `idleMinutes`
+     *  (default 29) of idle time, one turn shows the main model the compress
+     *  nudge so it can compress while the prefix is still cached.
+     *  `true` or `{ enabled: true, idleMinutes: 29 }`. Default: off. */
+    idleCompact?: boolean | IdleCompactConfig;
     /** Cap on the output-headroom reservation as a fraction of the context
      *  window: reserved = min(model.maxTokens, pct * window). Accepts a ratio
      *  (0.25) or percent string ("25%"). Default: 0.25. Set 0 to disable the
