@@ -1,5 +1,5 @@
 // Host-adapter contract reachability (docs/host-adapter.md, issue #367): every
-// symbol under test is imported ONLY from the package name "billion-context-pi"
+// symbol under test is imported ONLY from the package name "billion-context-pi-lean"
 // (Node self-reference → dist/index.js), never from relative src paths. This
 // pins the documented entrypoint surface; acp-kernel is used for fixtures only.
 import { test, type TestContext } from "node:test";
@@ -11,7 +11,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInitialState, type CompressionBlock } from "acp-kernel";
 
-type Entrypoint = typeof import("billion-context-pi");
+type Entrypoint = typeof import("billion-context-pi-lean");
 
 const DIST_ENTRY = fileURLToPath(new URL("../dist/index.js", import.meta.url));
 
@@ -20,7 +20,7 @@ async function loadEntrypoint(t: TestContext): Promise<Entrypoint | undefined> {
     t.skip("dist/index.js not found — run `npm run build` first (CI builds before testing)");
     return undefined;
   }
-  return await import("billion-context-pi");
+  return await import("billion-context-pi-lean");
 }
 
 function makeBlock(id: string, active = true): CompressionBlock {

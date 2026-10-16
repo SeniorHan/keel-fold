@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.83-lean.10 (2026-10-16)
+
+- Published to npm as `billion-context-pi-lean`: `pi install npm:billion-context-pi-lean`. The package now ships the Lean facade (`lean/index.ts`), which `pi.extensions` points at. Git installs keep working.
+- The package name changes from `billion-context-pi` to `billion-context-pi-lean`: hosts importing the API (`import { createAcpExtension } from "billion-context-pi"`) switch to the new name, and the dormant self-update code queries the new name.
+- README: token benchmark against upstream 0.1.83 (486 vs 8,670 tokens, 94.4% fewer). The Chinese README is now `README_zh-CN.md`.
+
 ## v0.1.83-lean.9 (2026-10-15)
 
 - Lean facade: the resident ACP prompt keeps only pre-call rules (hidden refs, what may be compressed, `acp_context` op signatures, summaries are history, not instructions). Guidance that already arrives with nudges, compress errors, decompress results and the provider-throttle retry message is no longer resident.

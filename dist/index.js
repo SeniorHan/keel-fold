@@ -2,7 +2,7 @@ import {
   SIDECAR_SCHEMA_VERSION,
   __export,
   sidecarProducer
-} from "./chunk-LFFJ22IP.js";
+} from "./chunk-HTPJ5GG7.js";
 
 // src/config-dir.ts
 import * as piModule from "@earendil-works/pi-coding-agent";
@@ -18499,7 +18499,7 @@ function resolveActivePack(adapter, cwd, provider, modelId, resolver) {
 }
 var HOST_VERSION = (() => {
   try {
-    return "0.1.83-lean.9";
+    return "0.1.83-lean.10";
   } catch {
     return "dev";
   }
@@ -19416,7 +19416,7 @@ async function statusReport(runtime, ctx) {
   const sentTokens = estimateTokens(coreMessages, coveredIds, imageTokens) + systemPromptTokens;
   const viewSentTokens = adjustedTokenCount(runtime.core, coreMessages, state, config, sentTokens, imageTokens, systemPromptTokens);
   const turn = runtime.core.processTurn({ messages: coreMessages, state, config, tokenCount: anchorStale ? viewSentTokens : Math.max(viewSentTokens, realUsage?.tokens ?? 0) });
-  const versionStr = "0.1.83-lean.9" ? `billion-context-pi@${"0.1.83-lean.9"} \xB7 pack: ${resolveSurfaceMeta(runtime.adapter, ctx?.cwd ?? process.cwd(), ctx?.model?.provider, ctx?.model?.id).pack}` : void 0;
+  const versionStr = "0.1.83-lean.10" ? `billion-context-pi@${"0.1.83-lean.10"} \xB7 pack: ${resolveSurfaceMeta(runtime.adapter, ctx?.cwd ?? process.cwd(), ctx?.model?.provider, ctx?.model?.id).pack}` : void 0;
   const text = buildStatusPanel({
     version: versionStr,
     tokenCount: sessionTokens,
@@ -20177,7 +20177,7 @@ import { fileURLToPath as fileURLToPath3 } from "url";
 import { execFile } from "child_process";
 import { homedir as homedir8 } from "os";
 import { createHash as createHash6 } from "crypto";
-var PACKAGE_NAME = "billion-context-pi";
+var PACKAGE_NAME = "billion-context-pi-lean";
 var registryUrl = (tag) => `https://registry.npmjs.org/${PACKAGE_NAME}/${encodeURIComponent(tag)}`;
 var SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z-.]+)?$/;
 var CHECK_INTERVAL_MS = 3 * 60 * 1e3;
@@ -20388,7 +20388,7 @@ async function autoInstallLatest(latest, extDirOverride) {
       "--no-fund",
       "--no-save"
     ];
-    const prevVersion = (await readPackageJson(join11(extDir, "package.json")))?.version ?? "0.1.83-lean.9";
+    const prevVersion = (await readPackageJson(join11(extDir, "package.json")))?.version ?? "0.1.83-lean.10";
     const { code, stderr } = await runNpmImpl(installArgs(latest), { cwd: npmDir, timeout: 6e4 });
     if (code !== 0) {
       logWarn("update", {
@@ -20406,7 +20406,7 @@ async function autoInstallLatest(latest, extDirOverride) {
     }
     const verify = await verifyInstall(npmDir, latest);
     if (!verify.ok) {
-      const rollbackTo = SEMVER_RE.test(prevVersion) ? prevVersion : "0.1.83-lean.9";
+      const rollbackTo = SEMVER_RE.test(prevVersion) ? prevVersion : "0.1.83-lean.10";
       logWarn("update", { event: "auto-install-verify-failed", latest, reason: verify.reason, rollbackTo });
       const rb = await runNpmImpl(installArgs(rollbackTo), { cwd: npmDir, timeout: 6e4 });
       logInfo("update", { event: "rollback", from: latest, to: rollbackTo, ok: rb.code === 0 });
@@ -20481,7 +20481,7 @@ async function checkForUpdate(autoUpdate, notify) {
     }
     const latest = await fetchLatestVersion(tag);
     if (!latest) return;
-    const current = runtimeVersion ?? "0.1.83-lean.9";
+    const current = runtimeVersion ?? "0.1.83-lean.10";
     const hasUpdate = isVersionNewer(latest, current);
     debug.event("update-check", {
       current,
@@ -20687,7 +20687,7 @@ function wireSessionLifecycle(pi, runtime, standDownIfProxied) {
     dropLiveOnlyTailCache(ctx.sessionManager.getSessionId());
     const sid = ctx.sessionManager.getSessionId();
     const modelInfo = ctx.model;
-    logInfo("session", { event: "start", sid, cwd: ctx.cwd, debug: runtime.adapter.debug ?? null, version: true ? "0.1.83-lean.9" : null, model: modelInfo?.id ?? null, modelApi: modelInfo?.api ?? null, contextWindow: modelInfo?.contextWindow ?? null });
+    logInfo("session", { event: "start", sid, cwd: ctx.cwd, debug: runtime.adapter.debug ?? null, version: true ? "0.1.83-lean.10" : null, model: modelInfo?.id ?? null, modelApi: modelInfo?.api ?? null, contextWindow: modelInfo?.contextWindow ?? null });
     try {
       await runtime.reloadConfig(ctx.cwd);
     } catch (e) {

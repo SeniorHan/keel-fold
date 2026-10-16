@@ -1,8 +1,7 @@
 {
-	"name": "billion-context-pi",
-	"version": "0.1.83-lean.9",
-	"private": true,
-	"description": "Long-term fork of billion-context-pi 0.1.83 for Pi: cheap dedicated summary model, lean tool surface, request-rewrite fixes.",
+	"name": "billion-context-pi-lean",
+	"version": "0.1.83-lean.10",
+	"description": "Lean fork of billion-context-pi for Pi: long-session context compression with an optional cheap summary model — 486 initialization tokens, 94% fewer than the original.",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
 	"exports": {
@@ -24,6 +23,7 @@
 	"files": [
 		"dist",
 		"schema",
+		"lean/index.ts",
 		"README.md",
 		"LICENSE"
 	],
@@ -59,9 +59,14 @@
 		"compression",
 		"context-management",
 		"llm",
-		"pi-package"
+		"pi-package",
+		"pi-extension",
+		"token-efficient"
 	],
-	"author": "ranxianglei",
+	"author": "kunkun9527",
+	"contributors": [
+		"ranxianglei"
+	],
 	"license": "MIT",
 	"type": "module",
 	"peerDependencies": {

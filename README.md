@@ -5,7 +5,7 @@
 <!-- token-benchmark:summary:end -->
 > [See my full setup for Pi](https://github.com/kunkun9527/my-lean-pi-setup)
 
-[中文](README.zh-CN.md)
+[中文](https://github.com/kunkun9527/billion-context-pi-lean/blob/main/README_zh-CN.md)
 
 Context management for the [Pi coding agent](https://github.com/earendil-works/pi-coding-agent) that lets long sessions keep going: as context fills up, the model folds finished work into summary blocks, and the originals stay recoverable on demand.
 
@@ -17,7 +17,7 @@ With only this extension enabled, its recurring model-facing initialization cont
 
 | Variant | Tool and prompt contribution | Total |
 | --- | --- | ---: |
-| Lean `billion-context-pi-lean@0.1.83-lean.9` | `compress` (231) + `acp_context` (87) + prompt (168) | **486** |
+| Lean `billion-context-pi-lean@0.1.83-lean.10` | `compress` (231) + `acp_context` (87) + prompt (168) | **486** |
 | Upstream `billion-context-pi@0.1.83` with `promptPack: "lean"` | `compress` (389) + `decompress` (271) + `search_context` (90) + `acp_status` (227) + `acp_cache` (204) + `acp_delegate` (1,452) + `acp_delegate_wait` (342) + `acp_delegate_cancel` (83) + prompt (1,819) | **4,877** |
 | Upstream `billion-context-pi@0.1.83` | `compress` (549) + `decompress` (546) + `search_context` (210) + `acp_status` (339) + `acp_cache` (204) + `acp_delegate` (1,452) + `acp_delegate_wait` (342) + `acp_delegate_cancel` (83) + prompt (4,945) | **8,670** |
 
@@ -59,10 +59,10 @@ Details: [CHANGELOG.md](CHANGELOG.md), [MAINTENANCE.md](MAINTENANCE.md) (Chinese
 ## Install
 
 ```bash
-pi install git:github.com/kunkun9527/billion-context-pi-lean
+pi install npm:billion-context-pi-lean
 ```
 
-Append `@<tag>` to pin a version from [Releases](https://github.com/kunkun9527/billion-context-pi-lean/releases).
+Append `@<version>` to pin a version from [Releases](https://github.com/kunkun9527/billion-context-pi-lean/releases). Installing from git works too: `pi install git:github.com/kunkun9527/billion-context-pi-lean`.
 
 - The dedicated summary model needs Pi 1.x or later.
 - Do not enable it together with `billion-context-pi` or `billion-context`: tools and hooks would register twice.

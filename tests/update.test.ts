@@ -186,7 +186,7 @@ test("runNpm captures stderr on failure (unreachable registry, no retries)", { t
   if (!REAL_HOME) t.skip("HOME not set");
   return withRealHome(async () => {
     const r = await runNpm(
-      ["view", "billion-context-pi", "--registry", "http://127.0.0.1:9/", "--fetch-retries=0"],
+      ["view", "billion-context-pi-lean", "--registry", "http://127.0.0.1:9/", "--fetch-retries=0"],
       { timeout: 20_000 },
     );
     assert.equal(r.code, 1);
@@ -204,7 +204,7 @@ test("checkForUpdate queries npm view first with exact args", async () => {
   const notes: string[] = [];
   await checkForUpdate(true, (m) => notes.push(m));
   assert.equal(notes.length, 0);
-  assert.deepEqual(calls[0].args, ["view", "billion-context-pi", "version"]);
+  assert.deepEqual(calls[0].args, ["view", "billion-context-pi-lean", "version"]);
   assert.ok(calls[0].opts.timeout > 0);
   assert.match(readLog(), new RegExp(`event=check current=${REPO_VERSION} latest=0\\.0\\.1 hasUpdate=false`));
 });
@@ -221,7 +221,7 @@ test("checkForUpdate follows the installed channel: @stable → npm view --tag s
     const notes: string[] = [];
     await checkForUpdate(true, (m) => notes.push(m));
     assert.equal(notes.length, 0);
-    assert.deepEqual(calls[0].args, ["view", "billion-context-pi", "version", "--tag", "stable"]);
+    assert.deepEqual(calls[0].args, ["view", "billion-context-pi-lean", "version", "--tag", "stable"]);
   } finally {
     setInstalledSpecForTest(null);
   }
@@ -256,8 +256,8 @@ test("checkForUpdate: update available but not under node_modules → manual hin
   const notes: string[] = [];
   await checkForUpdate(true, (m) => notes.push(m));
   assert.equal(notes.length, 1);
-  assert.match(notes[0], new RegExp(`billion-context-pi 99\\.0\\.0 available \\(you have ${REPO_VERSION}\\)`));
-  assert.match(notes[0], /Run: pi update --extension npm:billion-context-pi/);
+  assert.match(notes[0], new RegExp(`billion-context-pi-lean 99\\.0\\.0 available \\(you have ${REPO_VERSION}\\)`));
+  assert.match(notes[0], /Run: pi update --extension npm:billion-context-pi-lean/);
   assert.match(readLog(), /event=install-skip reason=not-under-node-modules/);
 });
 
@@ -280,7 +280,7 @@ test("checkForUpdate: npm view fails → falls back to registry fetch", async ()
     globalThis.fetch = originalFetch;
   }
   assert.equal(fetchCalls.length, 1);
-  assert.match(fetchCalls[0], /registry\.npmjs\.org\/billion-context-pi\/latest/);
+  assert.match(fetchCalls[0], /registry\.npmjs\.org\/billion-context-pi-lean\/latest/);
   assert.equal(notes.length, 1);
   assert.match(notes[0], /88\.0\.0 available/);
 });
@@ -330,7 +330,7 @@ test("checkForUpdate: second call within the 3-minute window is throttled", asyn
 });
 
 test("findNpmRoot locates the package root when nested under node_modules", () => {
-  const ext = join(homedir(), "x", "node_modules", "billion-context-pi");
+  const ext = join(homedir(), "x", "node_modules", "billion-context-pi-lean");
   assert.equal(findNpmRoot(ext), join(homedir(), "x"));
 });
 
@@ -348,7 +348,7 @@ type Fixture = {
 
 function makeFixture(): Fixture {
   const root = mkdtempSync(join(tmpdir(), "acp-install-test-"));
-  const extDir = join(root, "node_modules", "billion-context-pi");
+  const extDir = join(root, "node_modules", "billion-context-pi-lean");
   return {
     root,
     extDir,
@@ -363,7 +363,7 @@ function makeFixture(): Fixture {
         join(extDir, "package.json"),
         JSON.stringify(
           {
-            name: "billion-context-pi",
+            name: "billion-context-pi-lean",
             version,
             main: "dist/index.js",
             exports: { ".": { import: "./dist/index.js" } },
@@ -395,7 +395,7 @@ test("autoInstallLatest: clean install verifies (real smoke import) and reports 
   const outcome = await autoInstallLatest("9.9.9", fx.extDir);
   assert.equal(outcome, "ok");
   assert.ok(
-    calls.some((c) => c.args.includes("billion-context-pi@9.9.9") && c.args.includes("--no-save")),
+    calls.some((c) => c.args.includes("billion-context-pi-lean@9.9.9") && c.args.includes("--no-save")),
   );
   rmSync(fx.root, { recursive: true, force: true });
 });
@@ -424,7 +424,7 @@ test("autoInstallLatest: syntax-broken entry fails verify → rolls back to prev
   const outcome = await autoInstallLatest("9.9.9", fx.extDir);
   assert.equal(outcome, "rolled-back");
   const versions = calls.filter((c) => c.args[0] === "install").map((c) => c.args[1]);
-  assert.deepEqual(versions, ["billion-context-pi@9.9.9", "billion-context-pi@1.2.3"]);
+  assert.deepEqual(versions, ["billion-context-pi-lean@9.9.9", "billion-context-pi-lean@1.2.3"]);
   // and the disk is back to the working previous version
   const pkg = JSON.parse(readFileSync(join(fx.extDir, "package.json"), "utf-8")) as {
     version: string;
@@ -501,5 +501,5 @@ test("checkForUpdate: read-only marker present → skips npm view entirely + not
   }
   assert.equal(npmCalls, 0, "no npm view when the install location is read-only");
   assert.equal(notes.length, 1, "notify emitted once per process, not once per check");
-  assert.match(notes[0], /npm i -g billion-context-pi/);
+  assert.match(notes[0], /npm i -g billion-context-pi-lean/);
 });

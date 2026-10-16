@@ -1,6 +1,6 @@
 # 维护说明
 
-本仓库是 [`ranxianglei/billion-context-pi`](https://github.com/ranxianglei/billion-context-pi) `v0.1.83` 的长期维护分支。用法和与上游的区别见 [README](README.zh-CN.md)；本文记录实现细节、改动原因和维护流程。
+本仓库是 [`ranxianglei/billion-context-pi`](https://github.com/ranxianglei/billion-context-pi) `v0.1.83` 的长期维护分支。用法和与上游的区别见 [README](README_zh-CN.md)；本文记录实现细节、改动原因和维护流程。
 
 ## 结构
 
@@ -80,7 +80,7 @@
    改了工具描述或注入的提示词后，运行 `npm run measure` 重测占用，并同步 README 对比表里的数字。它借用同级目录 `my-lean-pi-setup` 的 `measure-extension-worker.mjs`，在隔离的空白 Pi 会话里测量；设置 `PI_CODING_AGENT_MODULE` 可指定要测的 Pi 版本。
 3. 把 `dist/` 的变化和源码一起提交。
 4. 端到端验证：在临时目录里用 `pi --no-session --mode json -p ...` 读几个文件，再让模型 compress，确认结果里出现 `summaries written by ...`，`~/.pi/acp.log` 里没有 `compression-model-failed`。
-5. 发版：`npm version 0.1.83-lean.<n> --no-git-tag-version --ignore-scripts`，`npm run build`，提交后打 tag `v0.1.83-lean.<n>` 并推送。
+5. 发版：`npm version 0.1.83-lean.<n> --no-git-tag-version --ignore-scripts`，`npm run build`，提交后打 tag `v0.1.83-lean.<n>` 并推送，用 `gh release create` 发 GitHub Release，再在同一提交上 `npm publish --tag latest`（版本号带 `-lean.<n>` 属于预发布版本，npm 要求显式指定 tag）。发布前用 `npm pack --dry-run` 确认包里有 `lean/index.ts`。中文 README 命名为 `README_zh-CN.md`：npm 会强制打包 `README.*`，可能拿它当包主页。
 
 ## 挑上游修复
 

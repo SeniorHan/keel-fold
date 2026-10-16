@@ -17,7 +17,7 @@
 
 | 版本 | 工具与提示词构成 | 合计 |
 | --- | --- | ---: |
-| Lean `billion-context-pi-lean@0.1.83-lean.9` | `compress` (231) + `acp_context` (87) + 提示词 (168) | **486** |
+| Lean `billion-context-pi-lean@0.1.83-lean.10` | `compress` (231) + `acp_context` (87) + 提示词 (168) | **486** |
 | 上游 `billion-context-pi@0.1.83`，开 `promptPack: "lean"` | `compress` (389) + `decompress` (271) + `search_context` (90) + `acp_status` (227) + `acp_cache` (204) + `acp_delegate` (1,452) + `acp_delegate_wait` (342) + `acp_delegate_cancel` (83) + 提示词 (1,819) | **4,877** |
 | 上游 `billion-context-pi@0.1.83` | `compress` (549) + `decompress` (546) + `search_context` (210) + `acp_status` (339) + `acp_cache` (204) + `acp_delegate` (1,452) + `acp_delegate_wait` (342) + `acp_delegate_cancel` (83) + 提示词 (4,945) | **8,670** |
 
@@ -59,10 +59,10 @@
 ## 安装
 
 ```bash
-pi install git:github.com/kunkun9527/billion-context-pi-lean
+pi install npm:billion-context-pi-lean
 ```
 
-要固定版本，在末尾加 `@<tag>`，tag 见 [Releases](https://github.com/kunkun9527/billion-context-pi-lean/releases)。
+要固定版本，在末尾加 `@<版本号>`，版本见 [Releases](https://github.com/kunkun9527/billion-context-pi-lean/releases)。也可以从 git 安装：`pi install git:github.com/kunkun9527/billion-context-pi-lean`。
 
 - 专用摘要模型需要 Pi 1.x 及以上。
 - 不要和 `billion-context-pi` 或 `billion-context` 同时启用，工具和钩子会注册两次。

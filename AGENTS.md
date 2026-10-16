@@ -16,5 +16,5 @@ This repository is a long-term fork of `billion-context-pi` v0.1.83. Goals: stab
 - Keep the resident prompt small: the facade's tool surface and prompt budget are asserted in `lean/tests/facade.test.mjs`. Grow them only with a measured reason.
 - Every model-visible fallback must stay meaningful: when the dedicated summary model fails, keep the main model's fallback summary; never store a placeholder.
 - Upstream fixes are cherry-picked by hand (`git cherry-pick -x` when it applies) and noted in `MAINTENANCE.md`. Do not merge `upstream/master` wholesale.
-- Not published to npm (`"private": true`). Releases are git tags `v0.1.83-lean.<n>` on `main`.
+- Published to npm as `billion-context-pi-lean`. A release is one commit on `main`: tag `v0.1.83-lean.<n>`, GitHub release, `npm publish`; steps in `MAINTENANCE.md`.
 - Record user-visible changes in `CHANGELOG.md` under the top Lean section.

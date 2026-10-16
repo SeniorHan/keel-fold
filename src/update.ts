@@ -9,7 +9,7 @@ import { debug, logInfo, logWarn } from "./log.js";
 
 declare const CURRENT_VERSION: string;
 
-const PACKAGE_NAME = "billion-context-pi";
+const PACKAGE_NAME = "billion-context-pi-lean";
 const registryUrl = (tag: string) =>
   `https://registry.npmjs.org/${PACKAGE_NAME}/${encodeURIComponent(tag)}`;
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z-.]+)?$/;
@@ -549,7 +549,7 @@ async function getRuntimeVersion(): Promise<string | undefined> {
 
 // The spec the user installed with, as recorded in the host project's
 // package.json dependencies (e.g. `~/.pi/agent/npm/package.json` →
-// `"billion-context-pi": "^0.1.46"` or `"stable"`). This is what determines
+// `"billion-context-pi-lean": "^0.1.46"` or `"stable"`). This is what determines
 // which dist-tag channel the auto-updater follows.
 async function getInstalledSpec(): Promise<string | undefined> {
   if (installedSpecOverride !== null) return installedSpecOverride;
