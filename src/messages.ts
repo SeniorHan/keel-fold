@@ -44,9 +44,7 @@ export interface AcpNudgeRecord {
 }
 
 /** Custom-message types excluded from LLM-context projection (#255, #380):
- *  UI-only panels/docs that persist in the session but must not reach the model.
- *  Shared by isCustomMessageEntry below and the turn-boundary predicate in
- *  src/turn-boundary.ts so both views can never drift apart. */
+ *  UI-only panels/docs that persist in the session but must not reach the model. */
 const CONTEXT_EXCLUDED_CUSTOM_TYPES = new Set<string>([ACP_STATUS_CUSTOM_TYPE, ACP_EXPORT_CUSTOM_TYPE, ACP_RULE_CUSTOM_TYPE]);
 
 /** True for host-injected custom_message entries that participate in LLM
@@ -55,11 +53,7 @@ const CONTEXT_EXCLUDED_CUSTOM_TYPES = new Set<string>([ACP_STATUS_CUSTOM_TYPE, A
  *  acp-rule reports)
  *  (Pi-native projection semantics, session-manager.d.ts). The non-empty gate
  *  uses the exact same extractText check as the projection below, so an entry
- *  either enters context or it doesn't — and only entries that enter context
- *  can delimit a turn (#364 acceptance c: empty control signals start none).
- *  Shared by the turn-boundary predicate in src/turn-boundary.ts so the two
- *  views can never drift apart; defined here (not there) because it needs
- *  extractText — importing that back would create a cycle. */
+ *  either enters context or it doesn't. */
 export function isCustomMessageEntry(entry: TurnBoundaryEntry): entry is TurnBoundaryEntry & { type: "custom_message" } {
   if (entry.type !== "custom_message") return false;
   if (entry.customType !== undefined && CONTEXT_EXCLUDED_CUSTOM_TYPES.has(entry.customType)) return false;
@@ -294,70 +288,7 @@ export function countImageBlocks(content: unknown): number {
   }
   return n;
 }
-export function messageIdentity(message: unknown): string {
-  return JSON.stringify(normalizeIdentityValue(message, true));
-}
-
-export function messageRef(message: unknown): string | undefined {
-  if (message === null || typeof message !== "object" || !("content" in message)) return undefined;
-  const content = message.content;
-  const texts = typeof content === "string"
-    ? [content]
-    : Array.isArray(content)
-      ? content.flatMap((block) => {
-          const value = block as { type?: string; text?: string };
-          return value.type === "text" && typeof value.text === "string" ? [value.text] : [];
-        })
-      : [];
-  for (const text of texts) {
-    const tag = text.match(REF_TAG)?.[0] ?? text.match(TRAILING_REF_TAG)?.[0];
-    const ref = tag?.match(/m\d{1,7}/)?.[0];
-    if (ref) return ref;
-  }
-  return undefined;
-}
-
-function normalizeIdentityValue(value: unknown, message = false): unknown {
-  if (Array.isArray(value)) {
-    return value.flatMap((item) => {
-      if (!item || typeof item !== "object") return [normalizeIdentityValue(item)];
-      const block = item as { type?: unknown; text?: unknown };
-      if (block.type === "text" && typeof block.text === "string") {
-        const stripped = stripRefTag(block.text);
-        if (block.text !== stripped && stripped === "") return [];
-      }
-      return [normalizeIdentityValue(item)];
-    });
-  }
-  if (value === null || typeof value !== "object") return value;
-  const out: Record<string, unknown> = {};
-  for (const key of Object.keys(value).sort()) {
-    if (message && key === "timestamp") continue;
-    const item = (value as Record<string, unknown>)[key];
-    if (message && key === "content" && typeof item === "string") {
-      out[key] = [{ text: stripRefTag(item), type: "text" }];
-    } else if (key === "text" && typeof item === "string" && (value as { type?: unknown }).type === "text") {
-      out[key] = stripRefTag(item);
-    } else {
-      out[key] = normalizeIdentityValue(item);
-    }
-  }
-  return out;
-}
-
 export const TRUNCATION_MARKER = "[truncated for context space]";
-
-export function matchesStoredText(stored: string, visible: string): boolean {
-  const marker = `...${TRUNCATION_MARKER} — original ~`;
-  const markerStart = visible.indexOf(marker);
-  if (markerStart < 2 || visible.slice(markerStart - 2, markerStart) !== "\n\n") return false;
-  const suffixMarker = " tokens]...\n\n";
-  const suffixStart = visible.indexOf(suffixMarker, markerStart + marker.length);
-  if (suffixStart < 0 || !/^\d+$/.test(visible.slice(markerStart + marker.length, suffixStart))) return false;
-  const prefix = visible.slice(0, markerStart - 2);
-  const suffix = visible.slice(suffixStart + suffixMarker.length);
-  return prefix.length > 0 && suffix.length > 0 && stored.startsWith(prefix) && stored.endsWith(suffix);
-}
 
 function allToolCalls(content: unknown): { name: string; id: string; arguments?: unknown }[] {
   if (!Array.isArray(content)) return [];

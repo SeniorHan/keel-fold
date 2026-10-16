@@ -294,25 +294,6 @@ test("in-memory sessions: distinct sessionIds stay isolated", async () => {
   assert.equal(reB.nextBlockId, 3);
 });
 
-test("live ref origins remain isolated across interleaved sessions", async () => {
-  const dir = await tempDir();
-  const fileA = path.join(dir, "a.session.json");
-  const fileB = path.join(dir, "b.session.json");
-  const store = new SessionStateStore();
-  const stateA = await store.load(fileA, "a");
-  const stateB = await store.load(fileB, "b");
-  store.setLiveRefOrigins(fileA, "a", [{ rawId: "live-1", identity: "A" }]);
-  store.setLiveRefOrigins(fileB, "b", [{ rawId: "live-0", identity: "B" }]);
-  await store.save(stateA, fileA, "a");
-  await store.save(stateB, fileB, "b");
-  store.invalidate();
-  await store.load(fileA, "a");
-  await store.load(fileB, "b");
-  assert.deepEqual(store.getLiveRefOrigins(fileA, "a"), [{ rawId: "live-1", identity: "A" }]);
-  assert.deepEqual(store.getLiveRefOrigins(fileB, "b"), [{ rawId: "live-0", identity: "B" }]);
-  await rm(dir, { recursive: true, force: true });
-});
-
 test("SessionStateStore round-trips activePack through the sidecar", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "acp-state-pack-"));
   const file = path.join(dir, "session.jsonl");

@@ -48,7 +48,7 @@ function fakeCtx(tokens: number) {
     ui: { notify: () => {}, confirm: async () => true, select: async () => undefined, input: async () => "", setStatus: () => {} },
     model: { contextWindow: 180_000 },
     sessionManager: {
-      getBranch: () => branchEntries as any[],
+      buildContextEntries: () => branchEntries as any[],
       getSessionId: () => "sent-view-" + tokens,
       getSessionFile: () => `${STATE_FILE}.${tokens}`,
     },

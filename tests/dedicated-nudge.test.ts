@@ -45,7 +45,7 @@ async function nudgeText(name: string, compressionModelId: string): Promise<stri
     hasUI: false,
     ui: { notify: () => {}, confirm: async () => true, select: async () => undefined, input: async () => "", setStatus: () => {} },
     model: { contextWindow: LIMIT },
-    sessionManager: { getBranch: () => branch, getSessionId: () => name, getSessionFile: () => stateFile },
+    sessionManager: { buildContextEntries: () => branch, getSessionId: () => name, getSessionFile: () => stateFile },
     getContextUsage: () => ({ tokens: 140_000, percent: 140_000 / LIMIT, contextWindow: LIMIT }),
   };
   const out = await handlers.get("context")![0]!({ type: "context", messages: branch.map((e) => e.message) }, ctx);

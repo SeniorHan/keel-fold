@@ -4,7 +4,6 @@ import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { createAcpExtension } from "../src/index.js";
-import { createRuntime } from "../src/runtime.js";
 import { parseSessionLog, loadAncestorEntries } from "../src/session-log.js";
 
 function captureApi() {
@@ -40,7 +39,7 @@ function fakeCtx(entries: any[], stateFile: string, sessionId: string) {
     ui: { notify: () => {}, confirm: async () => true, select: async () => undefined, input: async () => "", setStatus: () => {} },
     model: { contextWindow: 200_000 },
     sessionManager: {
-      getBranch: () => entries,
+      buildContextEntries: () => entries,
       getEntries: () => entries,
       getSessionId: () => sessionId,
       getSessionFile: () => stateFile,
@@ -54,7 +53,7 @@ const filler = (n: string) => `filler ${n} `.repeat(400);
 
 /** Parent session compresses m00001 into block b1; returns handles for the
  *  child-side decompress plus the on-disk sidecar paths. */
-async function setupDerivedChild(dir: string, levels: 1 | 2) {
+async function setupForkedChild(dir: string, levels: 1 | 2) {
   const parentJsonl = path.join(dir, "parent.jsonl");
   const childJsonl = path.join(dir, "child.jsonl");
   const grandChildJsonl = path.join(dir, "grandchild.jsonl");
@@ -88,23 +87,6 @@ async function setupDerivedChild(dir: string, levels: 1 | 2) {
     undefined, undefined, parentCtx,
   );
 
-  const runtime = createRuntime({});
-  if (levels === 1) {
-    assert.equal(await runtime.deriveChildState(
-      { sessionId: "child-sid", sessionFile: childJsonl },
-      { sessionId: "parent-sid", sessionFile: parentJsonl },
-    ), true, "child derivation must succeed");
-  } else {
-    assert.equal(await runtime.deriveChildState(
-      { sessionId: "child-sid", sessionFile: childJsonl },
-      { sessionId: "parent-sid", sessionFile: parentJsonl },
-    ), true, "mid-level derivation must succeed");
-    assert.equal(await runtime.deriveChildState(
-      { sessionId: "grand-sid", sessionFile: grandChildJsonl },
-      { sessionId: "child-sid", sessionFile: childJsonl },
-    ), true, "depth-2 derivation must succeed");
-  }
-
   const leafJsonl = levels === 1 ? childJsonl : grandChildJsonl;
   const leafId = levels === 1 ? "child-sid" : "grand-sid";
   const leafEntries = levels === 1 ? childEntries : [userMsg("g1", filler("grand-one"))];
@@ -112,10 +94,10 @@ async function setupDerivedChild(dir: string, levels: 1 | 2) {
   return { decompressTool, leafJsonl, leafId, leafEntries, parentJsonl };
 }
 
-test("decompress restores an inherited block's content from the PARENT session log (derived child)", async () => {
+test("decompress restores an inherited block's content from the PARENT session log (forked child)", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "acp-decomp-anc1-"));
   try {
-    const { decompressTool, leafJsonl, leafId, leafEntries } = await setupDerivedChild(dir, 1);
+    const { decompressTool, leafJsonl, leafId, leafEntries } = await setupForkedChild(dir, 1);
     const leafCtx = fakeCtx(leafEntries, leafJsonl, leafId);
     const res = await decompressTool.execute("tc2", { blockId: "b1", inline: true }, undefined, undefined, leafCtx);
     const text = (res.content[0] as any).text as string;
@@ -130,7 +112,7 @@ test("decompress restores an inherited block's content from the PARENT session l
 test("decompress walks the chain to depth 2 (grandchild inherits a parent-compressed block)", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "acp-decomp-anc2-"));
   try {
-    const { decompressTool, leafJsonl, leafId, leafEntries } = await setupDerivedChild(dir, 2);
+    const { decompressTool, leafJsonl, leafId, leafEntries } = await setupForkedChild(dir, 2);
     const leafCtx = fakeCtx(leafEntries, leafJsonl, leafId);
     const res = await decompressTool.execute("tc2", { blockId: "b1", inline: true }, undefined, undefined, leafCtx);
     const text = (res.content[0] as any).text as string;
@@ -142,11 +124,11 @@ test("decompress walks the chain to depth 2 (grandchild inherits a parent-compre
   }
 });
 
-test("decompress by message ref finds a parent-only entry in a derived child", async () => {
+test("decompress by message ref finds a parent-only entry in a forked child", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "acp-decomp-anc3-"));
   try {
-    const { decompressTool, leafJsonl, leafId, leafEntries } = await setupDerivedChild(dir, 1);
-    const sidecar = JSON.parse(await readFile(`${leafJsonl}.acp.json`, "utf8")) as { blocks: Array<{ effectiveMessageIds: string[] }> };
+    const { decompressTool, leafJsonl, leafId, leafEntries, parentJsonl } = await setupForkedChild(dir, 1);
+    const sidecar = JSON.parse(await readFile(`${parentJsonl}.acp.json`, "utf8")) as { blocks: Array<{ effectiveMessageIds: string[] }> };
     const rawRef = sidecar.blocks[0]!.effectiveMessageIds[0]!;
     assert.ok(rawRef.length > 0, "inherited block carries a message ref");
 

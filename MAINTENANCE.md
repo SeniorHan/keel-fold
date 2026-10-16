@@ -59,7 +59,7 @@
 
 ### 移除子代理（Delegation）
 
-子代理不属于上下文管理，整套删除：`acp_delegate`/`acp_delegate_wait`/`acp_delegate_cancel` 工具、fleet 面板和 `/acp-fleet`、`/acp-subagents` 与 pi-subagents 检测、`ACP_DELEGATE NOTIFICATIONS` 系统提示附录、`acp_status` 里的 delegate 用量，以及配置键 `delegate.*`、顶层 `displayUsage`、`delegatePrompt` 和 `PI_ACP_DELEGATE_*` 环境变量。旧 acp.json 里的这些键按未知键忽略，不报错。需要子代理时用独立的子代理扩展；它的会话照常由 ACP 管理（`deriveChildState`/`hostSession` 保留，属于会话状态而不是子代理功能）。
+子代理不属于上下文管理，整套删除：`acp_delegate`/`acp_delegate_wait`/`acp_delegate_cancel` 工具、fleet 面板和 `/acp-fleet`、`/acp-subagents` 与 pi-subagents 检测、`ACP_DELEGATE NOTIFICATIONS` 系统提示附录、`acp_status` 里的 delegate 用量，以及配置键 `delegate.*`、顶层 `displayUsage`、`delegatePrompt` 和 `PI_ACP_DELEGATE_*` 环境变量。旧 acp.json 里的这些键按未知键忽略，不报错。需要子代理时用独立的子代理扩展；它的会话照常由 ACP 管理。
 
 ### Lean 外壳
 

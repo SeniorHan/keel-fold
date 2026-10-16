@@ -1,5 +1,5 @@
 import type { Prompts } from "acp-kernel";
-import type { AdapterConfig, CompressConfig, HostSessionConfig, RepetitionGuardConfig } from "./config.js";
+import type { AdapterConfig, CompressConfig, RepetitionGuardConfig } from "./config.js";
 import type { PiPromptSections } from "./system-prompt.js";
 import type { NudgeSectionsConfig, ToolPromptsConfig } from "./surface.js";
 import type { DegenerationGuardConfig } from "./degeneration.js";
@@ -29,7 +29,6 @@ export interface UserAcpConfig {
     promptSections?: PiPromptSections;
     nudgeSections?: NudgeSectionsConfig;
     toolPrompts?: ToolPromptsConfig;
-    hostSession?: boolean | HostSessionConfig;
     rules?: boolean;
     compressionModelId?: string;
 }

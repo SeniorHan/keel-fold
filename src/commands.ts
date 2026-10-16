@@ -4,7 +4,6 @@ import type { AcpRuntime } from "./runtime.js";
 import { ACP_STATUS_CUSTOM_TYPE, ACP_EXPORT_CUSTOM_TYPE, ACP_RULE_CUSTOM_TYPE } from "./messages.js";
 import { exportSession, parseExportArgs } from "./export.js";
 import { defaultCountTokens, parseBlockIdArg, collectBlockContent, listRules, addRule, removeRule, clearRules, formatRulesList, resolveRuleLimits } from "acp-kernel";
-import { getSystemPromptText } from "./compat.js";
 import { collectCoveredMessageIds, estimateTokens, collectImageTokens, modelSupportsImages, adjustedTokenCount } from "./tokens.js";
 import { usageAnchorPredatesCompression } from "./floor-stale.js";
 import { applyOutputHeadroom, resolveOutputHeadroomCap } from "./overflow-selfheal.js";
@@ -326,7 +325,7 @@ async function statusReport(runtime: AcpRuntime, ctx: ExtensionCommandContext): 
   // Nudge arbitration on the SENT-VIEW scale — must match the context
   // transform and acp_status: sent-view estimate floored at the host's real
   // context usage (issue #257).
-  const systemPromptText = getSystemPromptText(ctx);
+  const systemPromptText = ctx.getSystemPrompt?.() ?? "";
   const systemPromptTokens = systemPromptText ? defaultCountTokens(systemPromptText) : 0;
   const imageTokens = collectImageTokens(entries, modelSupportsImages(ctx.model));
   const imageTokensTotal = [...imageTokens.values()].reduce((a, b) => a + b, 0);
@@ -346,7 +345,7 @@ async function statusReport(runtime: AcpRuntime, ctx: ExtensionCommandContext): 
   // filtering, bars, block list with topic fallback). Host-specific inputs:
   // systemPromptTokens (measured) and unprunedTokens — the chars/4 estimate
   // of the full projection, so the kit derives Session-only on the same
-  // estimation scale as the sent view (never cross-scale; omp issue #18).
+  // estimation scale as the sent view (never cross-scale).
   const versionStr = CURRENT_VERSION
     ? `billion-context-pi@${CURRENT_VERSION} · pack: ${resolveSurfaceMeta(runtime.adapter, ctx?.cwd ?? process.cwd(), (ctx?.model as { provider?: string; id?: string } | undefined)?.provider, (ctx?.model as { provider?: string; id?: string } | undefined)?.id).pack}`
     : undefined;

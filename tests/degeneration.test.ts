@@ -304,12 +304,7 @@ async function makeCtx(entries: any[], sessionId: string) {
       ui: { notify: () => {} },
       model: { contextWindow: 200_000 },
       sessionManager: {
-        // buildContextEntries marks this as a pi host (isPiHost), so the
-        // handler reads entries from the branch and ignores event.messages —
-        // exactly how real pi behaves. Without it the OMP merge path would
-        // fold event.messages into the view and corrupt the assertions.
         buildContextEntries: () => entries,
-        getBranch: () => entries,
         getSessionId: () => sessionId,
         getSessionFile: () => stateFile,
       },

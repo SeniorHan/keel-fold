@@ -193,14 +193,6 @@ export interface AdapterConfig {
      *  boolean shorthand (`false` disables) or an object. Default: enabled,
      *  minRun=200. */
     degenerationGuard?: boolean | DegenerationGuardConfig;
-    /** Host multi-session turn-boundary policy (#364). Accepts a boolean
-     *  shorthand (`true` → count host-injected custom_message entries as turn
-     *  boundaries) or a HostSessionConfig object. Default: off — pi-native
-     *  behavior where only genuine user-role messages start a turn, so existing
-     *  single-session users' nudge cadence is unchanged. Enable for inline
-     *  multi-session hosts (Prime RLM & co.) whose injected agent messages must
-     *  delimit real turns. */
-    hostSession?: boolean | HostSessionConfig;
     /** Persistent-rules feature gate (#526): opt-in `rules: true` in acp.json.
      *  Gates the human `/acp-rule` command (list + record + remove + clear — kernel
      *  `listRules`/`addRule`/`removeRule`/`clearRules` against the session `.acp.json` sidecar state) and
@@ -257,31 +249,6 @@ export declare function resolveRepetitionGuard(adapter: AdapterConfig): {
     warn: number;
     abort: number;
 };
-/** Host multi-session turn-boundary policy (#364). See TurnBoundaryPolicy in
- *  src/turn-boundary.ts for the semantics this resolves. */
-export interface HostSessionConfig {
-    /** Count host-injected custom_message entries (agent_message) as turn
-     *  boundaries. Default: false (pi-native behavior). */
-    countCustomMessages?: boolean;
-    /** #578: optional customType allowlist refining countCustomMessages — when
-     *  set (with countCustomMessages:true), only injected entries whose
-     *  customType is listed start a turn, keeping metadata injections
-     *  (harness_digest, ipython_state) out of nudge/retry accounting. Ignored
-     *  unless countCustomMessages:true; malformed values warn and fall back to
-     *  "all injected types count". */
-    customMessageTypes?: string[];
-}
-export interface ResolvedHostSession {
-    countCustomMessages: boolean;
-    /** Present only when countCustomMessages is on and a valid allowlist was
-     *  configured (#578). */
-    customMessageTypes?: readonly string[];
-}
-/** Resolve the host-session turn-boundary policy from the adapter, handling
- *  the boolean shorthand (`true` enables countCustomMessages). Invalid values
- *  fall back to the pi-native default (off) with a logged warning — they never
- *  fail the session. */
-export declare function resolveHostSession(adapter: AdapterConfig): ResolvedHostSession;
 /** Per-field deepest-wins merge of the three compression levels (global →
  *  provider → model). An undefined field at a deeper level does NOT clear a
  *  value set at a shallower level — only a defined value overrides. */

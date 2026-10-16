@@ -49,7 +49,7 @@ function fakeCtx(tokens: number) {
     ui: { notify: () => {}, confirm: async () => true, select: async () => undefined, input: async () => "", setStatus: () => {} },
     model: { contextWindow: LIMIT },
     sessionManager: {
-      getBranch: () => branchEntries as any[],
+      buildContextEntries: () => branchEntries as any[],
       getSessionId: () => "reinject",
       getSessionFile: () => stateFile,
     },

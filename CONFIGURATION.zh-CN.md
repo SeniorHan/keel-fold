@@ -128,7 +128,6 @@
 | `throttleRetry` | boolean \| object | `true` | 🟢 ACTIVE | 自动重试 provider 侧 token 限流错误（递进退避）。 |
 | `repetitionGuard` | boolean \| object | `true` | 🟢 ACTIVE | 打断字节级完全相同的工具调用死循环（连续 3 次告警，连续 5 次拦截并中止本轮）。 |
 | `degenerationGuard` | boolean \| object | `true` | 🟢 ACTIVE | 折叠出站视图中 assistant text/thinking 里的单字符退化连击（如 4655×「【」）并注入一次性恢复通知——打破 pi 每轮请求都回传退化 thinking 导致的连环 abort 死循环。 |
-| `hostSession` | boolean \| object | `false` | 🟢 ACTIVE | 多会话宿主的回合边界策略：是否把注入的 `custom_message` 计为回合起点。默认关闭（pi 原生行为）。 |
 | `rules` | boolean | `false` | 🟢 ACTIVE | 注册可选的 `acp_rule` 记录工具：简短、原则性的提醒，硬保护免于压缩。默认关闭。 |
 
 **provider 限流重试键**
@@ -180,7 +179,6 @@
 | `ACP_MODEL_CONTEXT_LIMIT` | 覆盖上下文窗口大小（优先级最高）。 |
 | `ACP_DEBUG` | 设为 `1` / `true` 开启调试日志。 |
 | `ACP_LOG_FILE` | 覆盖日志文件路径（默认 `~/.pi/acp.log`）。 |
-| `PI_ACP_FORK_HOST` | 设为 `1` / `true` 声明当前宿主是兼容 Pi 的 fork（无 `buildContextEntries()`），使其被识别为受支持宿主。OMP 默认仍被拒绝。 |
 
 > **只有文档中列出的键才会从 `acp.json` 读取。** 其他调优参数（`preserveRecentMessages`）是代码级别的，不开放给用户。三个压缩阈值构成三级递进：基于增长的软 nudge → 越过 `compress.maxContextLimit` 后的强制 nudge → 越过 `compress.emergencyThresholdPercent` 后的紧急截断。
 
@@ -228,7 +226,7 @@
 - **类型：** `string[]`
 - **默认值：** `无`（空）
 - **状态：** 🟢 ACTIVE
-- **说明：** 工具名模式（支持 glob 后缀，如 `"skill"`、`"read_*"`）——匹配的**所有** call+result 对都被硬排除在压缩之外：这些 ref 在任何视图中都渲染为 `BLOCKED`，两种压缩模式、所有 wire 均生效。适用于低频、高价值、输出为**独立内容**而非累积快照的工具（例如 opencode/pi 的 `skill` 加载、一次性引用）。格式错误的值（非数组、空数组、非字符串或空白项）会被大声警告并忽略——绝不会导致会话失败。
+- **说明：** 工具名模式（支持 glob 后缀，如 `"skill"`、`"read_*"`）——匹配的**所有** call+result 对都被硬排除在压缩之外：这些 ref 在任何视图中都渲染为 `BLOCKED`，两种压缩模式、所有 wire 均生效。适用于低频、高价值、输出为**独立内容**而非累积快照的工具（例如 Pi 的 `skill` 加载、一次性引用）。格式错误的值（非数组、空数组、非字符串或空白项）会被大声警告并忽略——绝不会导致会话失败。
 - **⚠ 两个旋钮何时用哪个：** 对高频刷屏工具做全历史保护会让上下文无限膨胀——绝不要把高频工具放在这里。独立内容型工具 → `protectedTools`；累积快照型工具（每次调用取代上一次）→ `protectedLatestTools`；高频工具 → 都不要放（依赖软近期区即可）。经验法则：如果你会厌烦于永远保留它的每一次输出，就不要对它做全历史保护。
 
 ### `protectedLatestTools`
@@ -443,46 +441,6 @@
 - **默认值：** `200`
 - **状态：** 🟢 ACTIVE
 - **说明：** 单 codepoint 连击（按 codepoint 计数，代理对安全）达到该长度才判定为退化。编码会话中的合法连击（markdown 分隔线、点线引导符）远低于此值；实测退化前漂移最大约 60，随后才是 4655 的灾难性连击。小于 8 的值会被抬到 8（保证折叠标记自身不会被二次扫描命中）；非法值回退 200 并记日志警告。
-
----
-
-## 宿主多会话
-
-`hostSession` 键控制**回合边界判定**，面向在单进程内运行多个会话的宿主。宿主可用导出的 `deriveChildState` 派生子会话状态。
-
-**背景。** ACP 的按回合账本（nudge 已展示追踪、compress 重试上限、结果归口）以"当前回合起点"为键。pi 原生语义下，只有真正的 user-role 消息开启新回合。内联多会话宿主还会把 agent 回合以 `custom_message` 条目注入会话日志；这些条目会进入 LLM 上下文（pi 原生投影），但在默认策略下**不开启回合**——多个真实宿主回合塌缩进同一个 turnKey：nudge 节奏格子错位、按回合 compress 重试上限跨回合失真、节流/溢出周期统计失真。适配器中所有回合边界判定都走同一谓词 `isTurnBoundary(entry, policy)`（`src/turn-boundary.ts`）。
-
-### `hostSession`
-
-- **类型：** boolean \| object
-- **默认值：** `false`（关闭）
-- **状态：** 🟢 ACTIVE
-- **说明：** 宿主注入消息的回合边界策略。`hostSession: true` 等价于 `{ "countCustomMessages": true }`。object 形式（任意子集）：
-
-  ```json
-  {
-    "hostSession": {
-      "countCustomMessages": true,
-      "customMessageTypes": ["agent_message", "async_bash_completion", "rlm_child_terminal_notice", "heartbeat_prompt"]
-    }
-  }
-  ```
-
-  **默认关闭保证存量单会话行为逐字节不变**——只有当你的宿主确实向会话日志注入 agent 回合时才启用。
-
-### `hostSession.countCustomMessages`
-
-- **类型：** boolean
-- **默认值：** `false`
-- **状态：** 🟢 ACTIVE
-- **说明：** 把宿主注入的非空文本 `custom_message` 条目（UI-only 的 `acp-status` 面板除外）计为所有按回合账本的回合起点；空内容注入是纯控制信号，不开启回合。不改变 LLM 上下文投影——这些条目的 user-role 投影本就是 pi 原生行为。
-
-### `hostSession.customMessageTypes`
-
-- **类型：** string[]
-- **默认值：** 未设置（开启 `countCustomMessages` 后，一切非空注入类型都计为回合起点）
-- **状态：** 🟢 ACTIVE
-- **说明：** 可选的 `customType` 白名单，细化 `countCustomMessages`：设置后（且 `countCustomMessages: true`），只有 `customType` 在列表内的注入 `custom_message` 条目才开启回合——进入 LLM 上下文但并非真实宿主回合的元数据注入不再重置 nudge/重试账本。无 `customType` 的条目永不匹配；UI-only 类型（`acp-status`、`acp-export`、`acp-rule`）即使列出也保持排除。未开 `countCustomMessages: true` 时忽略；非法值（非数组、非字符串或空字符串成员）告警并回退到「全部注入类型都计数」。空数组表示显式「一个都不计」。
 
 ---
 

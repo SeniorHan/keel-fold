@@ -54,7 +54,7 @@ function harness(idleCompact: unknown, opts: { mode?: string; entries?: any[] } 
     model: MODEL,
     isIdle: () => idle,
     sessionManager: {
-      getBranch: () => entries,
+      buildContextEntries: () => entries,
       getEntries: () => entries,
       getSessionId: () => "idle-sid",
       getSessionFile: () => stateFile,

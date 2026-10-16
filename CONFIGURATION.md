@@ -129,7 +129,6 @@ All keys below are currently **ACTIVE**.
 | `throttleRetry` | boolean \| object | `true` | 🟢 ACTIVE | Auto-retry provider token rate-limit errors with progressive backoff. |
 | `repetitionGuard` | boolean \| object | `true` | 🟢 ACTIVE | Break infinite loops of byte-identical tool calls (warn at 3 consecutive, block + abort at 5). |
 | `degenerationGuard` | boolean \| object | `true` | 🟢 ACTIVE | Collapse degenerate single-codepoint runs (e.g. 4655×「【」) in assistant text/thinking of the outgoing view and inject a one-shot recovery notice — breaks the abort loop where pi replays degenerated thinking back to the provider on every request. |
-| `hostSession` | boolean \| object | `false` | 🟢 ACTIVE | Turn-boundary policy for multi-session hosts: count injected `custom_message` entries as turn starts. Off by default (pi-native behavior). |
 | `rules` | boolean | `false` | 🟢 ACTIVE | Register the opt-in `acp_rule` record tool: short, principle-level reminders hard-protected from compression. Off by default. |
 | `compressionModelId` | string | _(unset)_ | 🟠 LOCAL FORK | Dedicated summary model. `"session"` = the active model in a separate call that reuses the captured prompt prefix (system prompt + active tools + sent messages); `"provider/id"` or a unique bare id = any model in Pi's live model registry (including extension-registered providers), fed the extracted range transcript. The main model still writes a short fallback summary per range: it guides the summary model, and is folded only when the model cannot be resolved or the host lacks nested completion. A range whose side call fails is not folded (retry later). Needs Pi >= 1.x (`ctx.modelRegistry.complete`). Manage with `/acp compact [session\|provider/id\|reset]` (writes the global `acp.json`; a project `acp.json` value still wins). |
 
@@ -179,7 +178,6 @@ All keys below are currently **ACTIVE**.
 | `ACP_MODEL_CONTEXT_LIMIT` | Override the context limit (takes highest precedence). |
 | `ACP_DEBUG` | Set to `1` / `true` to enable debug logging. |
 | `ACP_LOG_FILE` | Override the log file path (default `~/.pi/acp.log`). |
-| `PI_ACP_FORK_HOST` | Set to `1` / `true` to declare a Pi-compatible fork host (no `buildContextEntries()`) as supported. OMP stays refused by default. |
 
 > **Only the documented keys are read from `acp.json`.** Other tuning knobs (`preserveRecentMessages`) are code-level and not user-overridable. The three compression thresholds form a three-tier escalation: growth-driven soft nudges → forced nudges at `compress.maxContextLimit` → emergency truncation at `compress.emergencyThresholdPercent`.
 
@@ -234,7 +232,7 @@ All keys below are currently **ACTIVE**.
 - **Type:** `string[]`
 - **Default:** `none` (empty)
 - **Status:** 🟢 ACTIVE
-- **Description:** Tool-name patterns (glob suffix allowed, e.g. `"skill"`, `"read_*"`) whose **every** call+result pair is hard-excluded from compression: matching refs render as `BLOCKED` in every view, in both compression modes and across all wires. Intended for low-frequency, high-value tools whose outputs are **independent content** rather than cumulative snapshots (e.g. opencode/pi `skill` loads, one-shot references). Malformed values (non-array, empty array, non-string or blank entries) are rejected with a loud warning and ignored — they never fail the session.
+- **Description:** Tool-name patterns (glob suffix allowed, e.g. `"skill"`, `"read_*"`) whose **every** call+result pair is hard-excluded from compression: matching refs render as `BLOCKED` in every view, in both compression modes and across all wires. Intended for low-frequency, high-value tools whose outputs are **independent content** rather than cumulative snapshots (e.g. Pi `skill` loads, one-shot references). Malformed values (non-array, empty array, non-string or blank entries) are rejected with a loud warning and ignored — they never fail the session.
 - **⚠ When to use which knob:** protecting ALL instances of a chatty tool grows context unboundedly — never put high-frequency tools here. Independent-content tools → `protectedTools`; cumulative-snapshot tools (each call supersedes the last) → `protectedLatestTools`; chatty tools → neither (rely on the soft recent-zone instead). Rule of thumb: if you would be annoyed to keep every single output forever, do not protect it fully.
 
 ### `protectedLatestTools`
@@ -449,46 +447,6 @@ Tool-call arguments are never rewritten (rewriting them would desync the model's
 - **Default:** `200`
 - **Status:** 🟢 ACTIVE
 - **Description:** Minimum length of a single-codepoint run (counted in codepoints, surrogate-pair safe) before it is treated as degeneration. Legitimate runs in coding sessions (markdown hrules, dotted leaders) stay well below this; observed pre-degeneration drift maxed at ~60 before the catastrophic 4655 run. Values below 8 are raised to 8 (keeps the collapse marker itself re-scan safe); invalid values fall back to 200 with a logged warning.
-
----
-
-## Host Multi-Session
-
-The `hostSession` key controls **turn-boundary detection** for hosts that run several sessions inside one process. Hosts can derive child-session state with the exported `deriveChildState`.
-
-**Background.** ACP's per-turn ledgers (nudge-shown tracking, compress retry caps, outcome scoping) are keyed by the start of the current *turn*. Under Pi-native semantics a turn starts only at a genuine user-role message. Inline multi-session hosts additionally inject agent turns into the session log as `custom_message` entries; those are projected into LLM context (Pi-native semantics) but — under the default policy — start no turn, so several real host turns collapse into one turn key: nudge cadence cells misalign and retry-cap/throttle cycle statistics distort. Every turn-boundary decision in the adapter goes through the single predicate `isTurnBoundary(entry, policy)` (`src/turn-boundary.ts`).
-
-### `hostSession`
-
-- **Type:** boolean \| object
-- **Default:** `false` (off)
-- **Status:** 🟢 ACTIVE
-- **Description:** Turn-boundary policy for host-injected messages. `hostSession: true` is shorthand for `{ "countCustomMessages": true }`. Object form (any subset):
-
-  ```json
-  {
-    "hostSession": {
-      "countCustomMessages": true,
-      "customMessageTypes": ["agent_message", "async_bash_completion", "rlm_child_terminal_notice", "heartbeat_prompt"]
-    }
-  }
-  ```
-
-  **Default-off keeps existing single-session behavior byte-for-byte** — enable this only if your host actually injects agent turns into session logs.
-
-### `hostSession.countCustomMessages`
-
-- **Type:** boolean
-- **Default:** `false`
-- **Status:** 🟢 ACTIVE
-- **Description:** Count host-injected `custom_message` entries with non-empty text (except UI-only `acp-status` panels) as turn boundaries for all per-turn ledgers; empty injections are pure control signals and start no turn. Does not change LLM-context projection — those entries were already projected as user-role messages under Pi-native semantics.
-
-### `hostSession.customMessageTypes`
-
-- **Type:** string[]
-- **Default:** unset (every non-empty injected type counts when opted in)
-- **Status:** 🟢 ACTIVE
-- **Description:** Optional `customType` allowlist refining `countCustomMessages`: when set (with `countCustomMessages: true`), only injected `custom_message` entries whose `customType` is listed start a turn — metadata injections that enter LLM context without being a real host turn no longer reset nudge/retry accounting. Entries without a `customType` never match; UI-only types (`acp-status`, `acp-export`, `acp-rule`) stay excluded even when listed. Ignored unless `countCustomMessages: true`; malformed values (non-array, non-string or empty-string members) warn and fall back to "all injected types count". An empty array is explicit "count none".
 
 ---
 

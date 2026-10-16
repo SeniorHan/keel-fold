@@ -3,7 +3,7 @@ import { acpJsonFiles, userConfigPath } from "./config-dir.js";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 import type { Prompts } from "acp-kernel";
-import type { AdapterConfig, CompressConfig, HostSessionConfig, RepetitionGuardConfig } from "./config.js";
+import type { AdapterConfig, CompressConfig, RepetitionGuardConfig } from "./config.js";
 import type { PiPromptSections } from "./system-prompt.js";
 import type { NudgeSectionsConfig, ToolPromptsConfig } from "./surface.js";
 import type { DegenerationGuardConfig } from "./degeneration.js";
@@ -35,7 +35,6 @@ export interface UserAcpConfig {
   promptSections?: PiPromptSections;
   nudgeSections?: NudgeSectionsConfig;
   toolPrompts?: ToolPromptsConfig;
-  hostSession?: boolean | HostSessionConfig;
   rules?: boolean;
   compressionModelId?: string;
 }
@@ -138,7 +137,7 @@ const KNOWN = new Set([
   "repetitionGuard", "degenerationGuard",
   "prompts", "acknowledgePromptsRisk",
   "promptSections", "nudgeSections", "toolPrompts",
-  "hostSession", "rules", "compressionModelId",
+  "rules", "compressionModelId",
 ]);
 
 function pickKnown(parsed: Record<string, unknown>): UserAcpConfig {

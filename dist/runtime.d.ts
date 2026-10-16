@@ -7,35 +7,17 @@ import { entriesToCoreMessages } from "./messages.js";
 import { SessionStateStore } from "./state.js";
 import { ThrottleEpisode } from "./throttle-retry.js";
 import { OverflowEpisode } from "./overflow-selfheal.js";
-import { type TurnBoundaryPolicy } from "./turn-boundary.js";
 type AgentMessage = SessionMessageEntry["message"];
-export declare function readContextEntries(sm: ExtensionContext["sessionManager"]): SessionEntry[];
-export declare function isPiHost(sm: ExtensionContext["sessionManager"]): boolean;
-/** #453: key for the compress-retry circuit breaker, derived from PERSISTED
- *  entries only. Live-merged tail ids (content-addressed since #459) can still
- *  churn when the host's view of a not-yet-persisted message drifts, so a
- *  breaker keyed on the merged view could reset failCount mid-episode (#452
- *  log: cap → inject loop). Persisted entry ids are immutable; this key
- *  changes only when a genuine new user message reaches the session log.
- *  pi-native hosts see no change. */
-export declare function retryBreakerKey(sm: ExtensionContext["sessionManager"], policy?: TurnBoundaryPolicy): string | undefined;
-/** Minimal identity of a session for state operations that don't need a live
- *  ExtensionContext (hosts deriving inline child sessions build these from
- *  whatever session handles they hold). */
-export interface SessionRef {
-    sessionId: string;
-    sessionFile?: string;
-}
 export interface AcpRuntime {
     core: CompressionCore;
-    /** Set when the host is unsupported (currently: OMP / oh-my-pi) or when the
-     *  model's baseUrl routes through the billion-context wire proxy (#296).
+    /** Set when the model's traffic routes through the billion-context wire
+     *  proxy (#296), which then owns compression.
      *  Once true, the extension stands down: the context transform, system-prompt
      *  injection, compaction-cancel and ACP tools all no-op so the host runs
      *  untouched. Set at session_start (first context event as fallback). */
     refused: boolean;
-    /** User-facing reason shown when a refused ACP tool is invoked; null means
-     *  the default OMP refusal text applies. Set together with `refused`. */
+    /** User-facing reason shown when a refused ACP tool is invoked. Set
+     *  together with `refused`. */
     refusalMessage: string | null;
     /** Per-session provider-throttle retry episode (attempt budget + kick
      *  pacing), keyed by session id so concurrent sessions in one extension
@@ -71,9 +53,7 @@ export interface AcpRuntime {
     nudgeRecordedFor(sid: string, turnKey: string): boolean;
     /** Process compress toolResults for the CURRENT user turn only (the caller
      *  scopes the list — see collectCompressOutcomes in src/index.ts); idempotent
-     *  per toolCallId. turnKey MUST be the stable persisted-boundary key
-     *  (retryBreakerKey) — a key derived from live-merged entries churns under
-     *  fork hosts and resets the counter mid-episode (#453). Outcome classes:
+     *  per toolCallId. turnKey is the last user-turn boundary. Outcome classes:
      *  isError or noop (0-block panel) → failure (count++), success panel
      *  (>= 1 block) → reset, other non-error text → neutral (count unchanged).
      *  Returns the failure count and whether the cap was just reached. */
@@ -108,7 +88,7 @@ export interface AcpRuntime {
      *  config when the contents change. Cheap no-op when unchanged. Called at
      *  session_start and on every context event so config edits apply live. */
     reloadConfig(cwd: string): Promise<void>;
-    stateFor(ctx: ExtensionContext, liveMessages?: AgentMessage[]): Promise<{
+    stateFor(ctx: ExtensionContext): Promise<{
         state: CompressionState;
         coreMessages: ReturnType<typeof entriesToCoreMessages>;
         entries: SessionEntry[];
@@ -129,16 +109,6 @@ export interface AcpRuntime {
      *  holds the full projected CoreMessage[] for the session history. */
     dropProjectionCache(sid: string): void;
     save(state: CompressionState, ctx: ExtensionContext): Promise<void>;
-    /** #364 inline child sessions (same process, e.g. Prime RLM): derive the
-     *  child's compression state from another session's. Inherits blocks /
-     *  message refs / token snapshot so decompress + search_context keep working
-     *  on inherited blocks; resets every rhythm ledger (nudge cadence, stats,
-     *  absorb). One-time: writes a derivation marker into the child sidecar and
-     *  refuses to run again; also refuses when the child already owns real
-     *  (non-derived) blocks or when the parent has no blocks. Separate-process
-     *  pi-native delegates must NOT call this — their parentSession header
-     *  already inherits verbatim. Returns true when the child state was derived. */
-    deriveChildState(child: SessionRef, parent: SessionRef): Promise<boolean>;
     acquireLock(sid: string): Promise<() => void>;
     /** Per-session overflow self-heal state (learned window + armed emergency).
      *  Keyed by session id so concurrent sessions cannot share an episode. */

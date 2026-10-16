@@ -41,7 +41,7 @@ function fakeCtx() {
     model: { contextWindow: L, id: "test-model" },
     getContextUsage: () => null,
     sessionManager: {
-      getBranch: () => branchEntries as any[],
+      buildContextEntries: () => branchEntries as any[],
       getSessionId: () => "view-recount",
       getSessionFile: () => STATE_FILE,
     },

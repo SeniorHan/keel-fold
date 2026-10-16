@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { entriesToCoreMessages, coreOutToAgentMessages, isCustomMessageEntry, matchesStoredText, messageIdentity, messageRef, ACP_STATUS_CUSTOM_TYPE, ACP_EXPORT_CUSTOM_TYPE, ACP_RULE_CUSTOM_TYPE } from "../src/messages.js";
+import { entriesToCoreMessages, coreOutToAgentMessages, isCustomMessageEntry, extractText, ACP_STATUS_CUSTOM_TYPE, ACP_EXPORT_CUSTOM_TYPE, ACP_RULE_CUSTOM_TYPE } from "../src/messages.js";
 import { isTurnBoundary } from "../src/turn-boundary.js";
 import { indexToRef, type CoreMessage } from "acp-kernel";
 import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
@@ -174,13 +174,13 @@ test("entriesToCoreMessages drops custom_message with empty content", () => {
   assert.deepEqual(core.map((m) => m.id), ["a", "c"], "empty custom_message skipped");
 });
 
-test("empty custom_message neither projects nor starts a turn (#364 acceptance c)", () => {
+test("custom_message projects only when non-empty and never starts a turn", () => {
   const empty = customEntry("b", "subagent_result", "");
   assert.equal(isCustomMessageEntry(empty), false, "not a context-participating entry");
-  assert.equal(isTurnBoundary(empty, { countCustomMessages: true }), false, "empty control signal starts no turn");
+  assert.equal(isTurnBoundary(empty), false);
   const full = customEntry("d", "subagent_result", "injected agent turn");
   assert.equal(isCustomMessageEntry(full), true);
-  assert.equal(isTurnBoundary(full, { countCustomMessages: true }), true, "non-empty injected turn starts a turn");
+  assert.equal(isTurnBoundary(full), false, "only user messages start a turn");
 });
 
 test("entriesToCoreMessages extracts only text blocks from array content", () => {
@@ -272,7 +272,7 @@ test("entriesToCoreMessages still skips compaction and model_change", () => {
   assert.deepEqual(core.map((m) => m.id), ["a", "b"]);
 });
 
-test("entriesToCoreMessages preserves omp execution roles (bashExecution/pythonExecution) as user text instead of dropping them", () => {
+test("entriesToCoreMessages preserves execution roles (bashExecution and other command/output roles) as user text instead of dropping them", () => {
   const entries: SessionEntry[] = [
     msgEntry("a", { role: "user", content: "run ls", timestamp: Date.now() }),
     msgEntry("b", { role: "bashExecution", command: "ls -la", output: [{ type: "text", text: "file1\nfile2" }], exitCode: 0, timestamp: Date.now() } as object),
@@ -291,7 +291,7 @@ test("entriesToCoreMessages preserves omp execution roles (bashExecution/pythonE
   assert.ok(c.text!.includes("hi"));
 });
 
-test("entriesToCoreMessages prefers content over fallback fields when an omp role carries both", () => {
+test("entriesToCoreMessages prefers content over fallback fields when an execution role carries both", () => {
   const entries: SessionEntry[] = [
     msgEntry("a", { role: "bashExecution", content: [{ type: "text", text: "primary text" }], command: "should-not-appear", output: "neither", timestamp: Date.now() } as object),
   ];
@@ -378,12 +378,6 @@ test("coreOutToAgentMessages honors kernel-truncated body for string-content too
   assert.ok(msg.content.includes("m00004"), "ref tag preserved");
 });
 
-test("truncation matching requires the OMP marker", () => {
-  assert.equal(matchesStoredText("a\nb", "a\nb"), false);
-  assert.equal(matchesStoredText("a\nb", "a\nb\nc"), false);
-  assert.equal(matchesStoredText("a\nb", "a\n\nb"), false);
-});
-
 test("coreOutToAgentMessages returns original unchanged when no ref tag is present", () => {
   const original = msgEntry("a", user("hello")).message;
   const originalById = new Map([["a", original]]);
@@ -453,25 +447,13 @@ test("coreOutToAgentMessages drops pruned tool-call blocks when only some surviv
   assert.deepEqual(toolCalls.map((b) => b.id), ["call_a", "call_c"]);
 });
 
-test("message identity ignores tag-only text blocks but preserves original empty blocks", () => {
-  const image = { type: "image", data: "same", mimeType: "image/png" };
-  const tag = acpRef("m00042");
-  const taggedImage = { role: "user", content: [image, { type: "text", text: tag }], timestamp: 1 };
-  const imageOnly = { role: "user", content: [image], timestamp: 2 };
-  const emptyText = { role: "user", content: [image, { type: "text", text: "" }], timestamp: 3 };
-  assert.equal(messageIdentity(taggedImage), messageIdentity(imageOnly));
-  assert.notEqual(messageIdentity(emptyText), messageIdentity(imageOnly));
-});
-
 test("Lean: widened refs (kernel >= 0.0.101: m100000 … m9999999) are recognized like 5-digit ones", () => {
   for (const index of [99_999, 100_000, 9_999_999]) {
     const ref = indexToRef(index);
     const leading = { role: "user", content: [{ type: "text", text: `${acpRef(ref)}\nhello` }], timestamp: 1 };
     const trailing = { role: "user", content: [{ type: "text", text: `hello\n\n${acpRef(ref)}` }], timestamp: 1 };
     const plain = { role: "user", content: [{ type: "text", text: "hello" }], timestamp: 1 };
-    assert.equal(messageRef(leading), ref, `leading ${ref}`);
-    assert.equal(messageRef(trailing), ref, `trailing ${ref}`);
-    assert.equal(messageIdentity(leading), messageIdentity(plain), `tag stripped from identity (${ref})`);
-    assert.equal(messageIdentity(trailing), messageIdentity(plain), `trailing tag stripped from identity (${ref})`);
+    assert.equal(extractText(leading.content), extractText(plain.content), `leading tag stripped (${ref})`);
+    assert.equal(extractText(trailing.content), extractText(plain.content), `trailing tag stripped (${ref})`);
   }
 });

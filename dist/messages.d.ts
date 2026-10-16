@@ -26,11 +26,7 @@ export interface AcpNudgeRecord {
  *  acp-rule reports)
  *  (Pi-native projection semantics, session-manager.d.ts). The non-empty gate
  *  uses the exact same extractText check as the projection below, so an entry
- *  either enters context or it doesn't — and only entries that enter context
- *  can delimit a turn (#364 acceptance c: empty control signals start none).
- *  Shared by the turn-boundary predicate in src/turn-boundary.ts so the two
- *  views can never drift apart; defined here (not there) because it needs
- *  extractText — importing that back would create a cycle. */
+ *  either enters context or it doesn't. */
 export declare function isCustomMessageEntry(entry: TurnBoundaryEntry): entry is TurnBoundaryEntry & {
     type: "custom_message";
 };
@@ -64,10 +60,7 @@ export declare class EntryProjectionCache {
 export declare function extractText(content: unknown): string;
 export declare function thinkingTokenCount(content: unknown): number;
 export declare function countImageBlocks(content: unknown): number;
-export declare function messageIdentity(message: unknown): string;
-export declare function messageRef(message: unknown): string | undefined;
 export declare const TRUNCATION_MARKER = "[truncated for context space]";
-export declare function matchesStoredText(stored: string, visible: string): boolean;
 export declare function coreOutToAgentMessages(coreOut: CoreMessage[], originalById: Map<string, AgentMessage>): AgentMessage[];
 export interface LatestUserGuardResult {
     messages: CoreMessage[];

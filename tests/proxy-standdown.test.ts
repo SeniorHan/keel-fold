@@ -37,7 +37,7 @@ function piCtx(notify: Notify, baseUrl: string | undefined, hasUI = true) {
     model: baseUrl === undefined ? { contextWindow: 200_000 } : { contextWindow: 200_000, baseUrl },
     sessionManager: {
       buildContextEntries: () => [],
-      getBranch: () => [],
+      buildContextEntries: () => [],
       getSessionId: () => "pi-session",
       getSessionFile: () => "/tmp/pi-proxy.session.json",
     },

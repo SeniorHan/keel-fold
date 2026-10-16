@@ -7,9 +7,8 @@ import { buildStatusReport, defaultCountTokens, formatRanges, viableRanges } fro
 import { estimateTokens, collectCoveredMessageIds, collectImageTokens, modelSupportsImages, adjustedTokenCount } from "./tokens.js";
 import { usageAnchorPredatesCompression } from "./floor-stale.js";
 import { applyOutputHeadroom, resolveOutputHeadroomCap } from "./overflow-selfheal.js";
-import { getSystemPromptText } from "./compat.js";
 import { logThrow } from "./log.js";
-import { UNSUPPORTED_HOST_MESSAGE } from "./omp.js";
+import { PROXY_STAND_DOWN_MESSAGE } from "./proxy-detect.js";
 
 const StatusParams = Type.Object({
   scope: Type.Optional(Type.Union([Type.Literal("compressed"), Type.Literal("uncompressed")], { description: '"compressed" = drill into blocks; "uncompressed" = show visible messages/ranges. Default: overview.' })),
@@ -35,7 +34,7 @@ export function makeStatusTool(runtime: AcpRuntime, overrides?: ToolPromptOverri
     ],
     parameters: StatusParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<AgentToolResult<unknown>> {
-      if (runtime.refused) return { details: undefined, content: [{ type: "text", text: runtime.refusalMessage ?? UNSUPPORTED_HOST_MESSAGE }] };
+      if (runtime.refused) return { details: undefined, content: [{ type: "text", text: runtime.refusalMessage ?? PROXY_STAND_DOWN_MESSAGE }] };
       let result: string;
       try {
         result = await handleStatus(params as StatusArgs, runtime, ctx);
@@ -61,7 +60,7 @@ async function handleStatus(args: StatusArgs, runtime: AcpRuntime, ctx: Extensio
   const coveredIds = collectCoveredMessageIds(state);
   // Sent-view arbitration (same scale as the context transform), floored at
   // the host's real context usage (issue #257; see src/index.ts).
-  const systemPromptText = getSystemPromptText(ctx);
+  const systemPromptText = ctx.getSystemPrompt?.() ?? "";
   const systemPromptTokens = systemPromptText ? defaultCountTokens(systemPromptText) : 0;
   const imageTokens = collectImageTokens(entries, modelSupportsImages(ctx.model));
   const sentTokens = estimateTokens(coreMessages, coveredIds, imageTokens) + systemPromptTokens;

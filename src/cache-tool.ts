@@ -4,7 +4,7 @@ import type { AcpRuntime } from "./runtime.js";
 import { applyToolPromptOverrides, type ToolPromptOverrides } from "./surface.js";
 import { buildCacheReport, defaultCountTokens, formatCacheReport, type CacheSample, type CompressionState, type FoldEvent } from "acp-kernel";
 import { logThrow } from "./log.js";
-import { UNSUPPORTED_HOST_MESSAGE } from "./omp.js";
+import { PROXY_STAND_DOWN_MESSAGE } from "./proxy-detect.js";
 
 const CacheParams = Type.Object({
   detail: Type.Optional(Type.Union([Type.Literal("summary"), Type.Literal("full")], { description: '"summary" (default): totals, verdicts, notable folds, anomalous requests only. "full": every retained fold and line item.' })),
@@ -76,7 +76,7 @@ export function makeCacheTool(runtime: AcpRuntime, overrides?: ToolPromptOverrid
     ],
     parameters: CacheParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<AgentToolResult<unknown>> {
-      if (runtime.refused) return { details: undefined, content: [{ type: "text", text: runtime.refusalMessage ?? UNSUPPORTED_HOST_MESSAGE }] };
+      if (runtime.refused) return { details: undefined, content: [{ type: "text", text: runtime.refusalMessage ?? PROXY_STAND_DOWN_MESSAGE }] };
       try {
         const text = await cacheReportText(runtime, ctx, params.detail === "full" ? "full" : "summary");
         return { details: undefined, content: [{ type: "text", text }] };

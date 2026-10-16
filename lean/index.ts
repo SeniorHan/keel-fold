@@ -29,7 +29,7 @@ function decorateWithCollapsedDisplay<T extends CollapsedDisplayTool>(tool: T): 
 
 // Resident rules only: what the model must know before any ACP call. Guidance
 // needed after a call already arrives with it — nudges (what/how to compress),
-// compress errors (live refs, acp_status), decompress results (file path),
+// compress errors (valid refs, acp_status), decompress results (file path),
 // the throttle retry message, acp_context help and arg errors. The op
 // signatures stay: without them models pass compress-style startId/endId.
 const LEAN_SYSTEM_PROMPT = `ACP context management

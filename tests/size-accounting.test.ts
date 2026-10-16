@@ -65,7 +65,7 @@ function setup(stateFile: string, logFile: string, sid: string, limit: number) {
       hasUI: false,
       ui: { notify: () => {}, confirm: async () => true, select: async () => undefined, input: async () => "", setStatus: () => {} },
       model: { contextWindow: limit },
-      sessionManager: { getBranch: () => branchEntries as any[], getSessionId: () => sid, getSessionFile: () => stateFile },
+      sessionManager: { buildContextEntries: () => branchEntries as any[], getSessionId: () => sid, getSessionFile: () => stateFile },
       getContextUsage: () => ({ tokens, percent: tokens / limit, contextWindow: limit }),
     };
     await handlers.get("context")![0]!({ type: "context", messages: entries.map((e) => e.message) }, ctx);

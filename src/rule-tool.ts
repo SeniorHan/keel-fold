@@ -2,7 +2,7 @@ import { Type } from "typebox";
 import type { AgentToolResult, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { AcpRuntime } from "./runtime.js";
 import { logInfo, logThrow } from "./log.js";
-import { UNSUPPORTED_HOST_MESSAGE } from "./omp.js";
+import { PROXY_STAND_DOWN_MESSAGE } from "./proxy-detect.js";
 import { RULE_TOOL_NAME, addRule, formatRulesList, listRules, resolveRuleLimits } from "acp-kernel";
 
 const RuleParams = Type.Object({
@@ -21,7 +21,7 @@ export function makeRuleTool(runtime: AcpRuntime): ToolDefinition<typeof RulePar
       "Record a short, principle-level reminder that must survive context compression. Use it for behavioral corrections the user has had to repeat more than once, project invariants the user explicitly asked you to remember, and pitfalls you ran into once and must not run into again. Keep each rule short and principle-level. Recorded rules are hard-protected from compression and stay visible in the conversation. Omit the rule argument to list recorded rules.",
     parameters: RuleParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<AgentToolResult<unknown>> {
-      if (runtime.refused) return { details: undefined, content: [{ type: "text", text: runtime.refusalMessage ?? UNSUPPORTED_HOST_MESSAGE }] };
+      if (runtime.refused) return { details: undefined, content: [{ type: "text", text: runtime.refusalMessage ?? PROXY_STAND_DOWN_MESSAGE }] };
       try {
         const release = await runtime.acquireLock(ctx.sessionManager.getSessionId());
         let text: string;

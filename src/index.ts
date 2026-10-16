@@ -10,8 +10,8 @@ import { Box, Text } from "@earendil-works/pi-tui";
 import { readFileSync } from "node:fs";
 import type { CoreMessage, NudgeDecision, CompressionBlock, Prompts } from "acp-kernel";
 import { renderNudgeText, resolvePrompts, defaultPrompts, viableRanges } from "acp-kernel";
-import { type AdapterConfig, resolveHostSession } from "./config.js";
-import { createRuntime, isPiHost, retryBreakerKey, type AcpRuntime } from "./runtime.js";
+import type { AdapterConfig } from "./config.js";
+import { createRuntime, type AcpRuntime } from "./runtime.js";
 import { makeCompressTool, isCompressSuccessText, isCompressNoopText, inlineBlockSummaries } from "./compress-tool.js";
 import { SESSION_MODEL_REF } from "./compress-model.js";
 import { makeDecompressTool } from "./decompress-tool.js";
@@ -47,19 +47,8 @@ import {
   throttleDelayMs,
 } from "./throttle-retry.js";
 import { defaultCountTokens } from "acp-kernel";
-import { formatSystemPromptForEvent, getSystemPromptText } from "./compat.js";
 import { applyOutputHeadroom, inspectOverflowMessage, isNoBody4xxError, resolveOutputHeadroomCap } from "./overflow-selfheal.js";
-import { FORK_HOST_WARNING_MESSAGE, UNSUPPORTED_HOST_MESSAGE } from "./omp.js";
-import { isDeclaredForkHost, isUnsupportedHost } from "./host.js";
 import { isBiliProxyBaseUrl, PROXY_STAND_DOWN_MESSAGE, nativeStandDownMessage } from "./proxy-detect.js";
-
-// Host-facing API for multi-session hosts (#367): the
-// extension keeps its own runtime instance private; hosts build their own via
-// createRuntime — derivation works across instances because it only touches
-// on-disk sidecars through session refs.
-export { createRuntime } from "./runtime.js";
-export type { AcpRuntime, SessionRef } from "./runtime.js";
-export { deriveChildState } from "./state.js";
 
 type AgentMessage = SessionMessageEntry["message"];
 
@@ -97,7 +86,7 @@ export function createAcpExtension(adapter: AdapterConfig = {}): ExtensionFactor
     // The env vars are re-read on every call — an async bootstrap writes them
     // after extensions load, so a one-shot factory read misses them (#461).
     // Checked lazily because ctx.model only exists on events, not in the
-    // factory; warn once per process like the OMP refusal.
+    // factory; warn once per process.
     let standDownWarned = false;
     const standDownIfProxied = (ctx: ExtensionContext): boolean => {
       const nativeHost = process.env.BILLION_CONTEXT_NATIVE || undefined;
@@ -184,9 +173,8 @@ function userConfigDisabled(cwd: string): boolean {
   return disabled === false;
 }
 
-// ACP owns compression; cancel Pi's built-in auto-compaction entirely (mirrors
-// opencode-acp requiring opencode's compaction.auto = false). On a refused host
-// (OMP) we stand down and let the host compact normally instead.
+// ACP owns compression; cancel Pi's built-in auto-compaction entirely. When ACP
+// stands down for the billion-context proxy, Pi compacts normally instead.
 function wireCompactionDisable(pi: ExtensionAPI, runtime: AcpRuntime): void {
   pi.on("session_before_compact", () => {
     if (runtime.refused) return;
@@ -195,44 +183,7 @@ function wireCompactionDisable(pi: ExtensionAPI, runtime: AcpRuntime): void {
 }
 
 function wireSessionLifecycle(pi: ExtensionAPI, runtime: AcpRuntime, standDownIfProxied: (ctx: ExtensionContext) => boolean): void {
-  let ompWarned = false;
-  let forkWarned = false;
   pi.on("session_start", async (_event, ctx) => {
-    // Unsupported hosts stand down (#234 / #364): any host without Pi's
-    // buildContextEntries() API is refused unless it declared itself a
-    // Pi-compatible fork via PI_ACP_FORK_HOST=1. OMP (oh-my-pi) stays blocked
-    // by default — its in-process live-entries integration diverges the nudge's
-    // example refs from the session's real refs, so compress calls fail with
-    // "does not exist in this session". Refuse service and point the user at
-    // the fork opt-in or the billion-context proxy. session_start always
-    // precedes the first context/before_agent_start event, so setting `refused`
-    // here reliably gates every downstream handler for the session.
-    if (isUnsupportedHost(ctx.sessionManager)) {
-      runtime.refused = true;
-      if (!ompWarned) {
-        ompWarned = true;
-        const sid = ctx.sessionManager.getSessionId();
-        logWarn("host", { event: "host-unsupported", sid, action: "refused" });
-        if (ctx.hasUI) ctx.ui.notify(UNSUPPORTED_HOST_MESSAGE, "warning");
-        else console.error(UNSUPPORTED_HOST_MESSAGE);
-      }
-      return;
-    }
-    // Declared fork hosts are admitted with a caveat (#454/#459): live-tail
-    // refs are content-stable while the host's view grows append-only; a host
-    // that rewrites in-flight messages can still drift them, so warn at
-    // admission and point long sessions at the proxy. Log per session (support
-    // logs need the attribution), notify once per process like the refusal
-    // path above.
-    if (isDeclaredForkHost() && !isPiHost(ctx.sessionManager)) {
-      const sid = ctx.sessionManager.getSessionId();
-      logWarn("host", { event: "fork-host-admitted", sid, hardening: "#459", proxy: "billion-context" });
-      if (!forkWarned) {
-        forkWarned = true;
-        if (ctx.hasUI) ctx.ui.notify(FORK_HOST_WARNING_MESSAGE, "warning");
-        else console.error(FORK_HOST_WARNING_MESSAGE);
-      }
-    }
     if (standDownIfProxied(ctx)) return;
     runtime.store.invalidate();
     runtime.clearNudgeTracking(ctx.sessionManager.getSessionId());
@@ -292,7 +243,7 @@ function wireSessionLifecycle(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
 // same notify would spam the terminal on every event while the degenerated
 // turn stays the most recent one. Keyed by session + top run so a NEW
 // degeneration (different count/char) re-notifies. Per-process, like the
-// other one-shot warn flags (ompWarned, proxyStandDownWarned).
+// other one-shot warn flags (standDownWarned).
 let lastDegNoticeKey: string | null = null;
 
 // Opt-in wire-level strip of historical image payloads (issue #321, kernel
@@ -326,7 +277,7 @@ function wireBeforeProviderRequest(pi: ExtensionAPI, runtime: AcpRuntime, standD
 // nudge decision) and return the transformed AgentMessage[].
 function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIfProxied: (ctx: ExtensionContext) => boolean, idle?: IdleCompactHandle): void {
   pi.on("context", async (event, ctx) => {
-    // Refused host (OMP / proxied baseUrl): leave the context completely
+    // Stood down for the proxy: leave the context completely
     // untouched — no ref tags, no compression, no nudge. Returning undefined
     // makes pi send the original messages verbatim.
     if (runtime.refused) return;
@@ -338,7 +289,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
     try {
       await runtime.reloadConfig(ctx.cwd);
       const modelId = (ctx.model as { id?: string } | undefined)?.id ?? "default";
-      const { state, coreMessages, entries } = await runtime.stateFor(ctx, event.messages);
+      const { state, coreMessages, entries } = await runtime.stateFor(ctx);
       const configBase = runtime.configFor(ctx);
       const ov = runtime.overflowFor(sid);
       // Self-heal: a prior upstream overflow may have taught us the real window
@@ -375,7 +326,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
       // assistant's provider-reported usage when available; it is also logged
       // for diagnostics.
       const realUsage = ctx.getContextUsage?.();
-      const systemPromptText = getSystemPromptText(ctx);
+      const systemPromptText = ctx.getSystemPrompt?.() ?? "";
       const systemPromptTokens = systemPromptText ? defaultCountTokens(systemPromptText) : 0;
       const imageTokens = collectImageTokens(entries, modelSupportsImages(ctx.model));
       // Lean: compress cores are skipped by estimateTokens, but their thinking
@@ -610,7 +561,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
     // block's full summary in its compress-call arguments instead of the
     // kernel's 200-char stub (see inlineBlockSummaries).
     let rebuilt = inlineBlockSummaries(coreOutToAgentMessages(turn.messages, originalById), turn.state.blocks);
-    // [#336] Request-time reasoning drop, aligned with opencode-acp #377:
+    // [#336] Request-time reasoning drop:
     // compress calls are hard-exempt from compression, so their thinking
     // rides along every request as an unreclaimable floor. Round closure is
     // judged on tool-result evidence [#348]; applied BEFORE the nudge push
@@ -661,16 +612,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
     }
     const debugOn = debug.enabled;
 
-    // #364: one policy for all turn-boundary decisions this event (turnKey +
-    // outcome scoping); default-off keeps pi-native boundaries.
-    const turnPolicy = resolveHostSession(runtime.adapter);
-    const turnKey = lastTurnBoundaryId(entries, turnPolicy) ?? sid;
-    // #453: the retry breaker keys off PERSISTED boundaries only — under fork
-    // hosts the merged `entries` carry content-addressed live-* ids (#459) for
-    // the not-yet-persisted tail, which can still churn when the host's view
-    // of a message drifts between context fires and would reset failCount
-    // mid-episode (cap never latches, emergency-inject loops).
-    const retryTurnKey = retryBreakerKey(ctx.sessionManager, turnPolicy) ?? sid;
+    const turnKey = lastTurnBoundaryId(entries) ?? sid;
 
     // Compress-outcome tracking feeds ONLY the nudge circuit breaker below:
     // failed/no-op attempts are counted (capped at MAX_COMPRESS_ATTEMPTS per
@@ -682,8 +624,8 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
     // CURRENT user turn are considered; processed BEFORE the nudge block so
     // the cap suppression sees the newest outcome (a success on this fire
     // must lift the cap on this same fire).
-    const compressOutcomes = collectCompressOutcomes(entries, lastTurnBoundaryIndex(entries, turnPolicy));
-    const outcome = compressOutcomes.length > 0 ? runtime.noteCompressOutcomes(sid, retryTurnKey, compressOutcomes) : null;
+    const compressOutcomes = collectCompressOutcomes(entries, lastTurnBoundaryIndex(entries));
+    const outcome = compressOutcomes.length > 0 ? runtime.noteCompressOutcomes(sid, turnKey, compressOutcomes) : null;
 
     // Growth-aware re-inject bookkeeping (issue #269) runs on EVERY context
     // event, not only when the kernel wants to inject: the drop re-anchor
@@ -748,7 +690,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
       // keeps usage pinned at emergency). Once this turn burned
       // MAX_COMPRESS_ATTEMPTS attempts, stop re-injecting the nudge — the
       // kernel's emergency truncation still shrinks context mechanically.
-      const retryCapped = runtime.compressRetryCappedFor(sid, retryTurnKey);
+      const retryCapped = runtime.compressRetryCappedFor(sid, turnKey);
       const reInjectReady = shownAt === undefined || tokenCount - shownAt >= reInjectFloor;
       const alreadyShown = retryCapped || (!emergency && runtime.nudgeShownFor(sid, turnKey) && !reInjectReady);
       if (!alreadyShown) {
@@ -857,8 +799,7 @@ let lastIgnoredPromptKeys = "";
 
 function wireSystemPrompt(pi: ExtensionAPI, runtime: AcpRuntime): void {
   pi.on("before_agent_start", (event, ctx) => {
-    // Refused host (OMP): don't inject the ACP system prompt — the model must
-    // not learn about compress/decompress on a host where they can't work.
+    // Stood down for the proxy: don't inject the ACP system prompt.
     if (runtime.refused) return;
     const m = ctx?.model as { provider?: string; id?: string } | undefined;
     const cwd = ctx?.cwd ?? process.cwd();
@@ -900,7 +841,7 @@ function wireSystemPrompt(pi: ExtensionAPI, runtime: AcpRuntime): void {
       lastIgnoredPromptKeys = key;
     }
     const prompt = buildAcpSystemPrompt(runtime.prompts, merged.promptSections);
-    return { systemPrompt: formatSystemPromptForEvent(event.systemPrompt, prompt) };
+    return { systemPrompt: `${event.systemPrompt}\n\n${prompt}` };
   });
 }
 

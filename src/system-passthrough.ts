@@ -14,8 +14,8 @@ type AgentMessage = SessionMessageEntry["message"];
 //   - rebuilt has some  → fill each missing host field on the k-th rebuilt
 //     system message from the k-th input one, never overwriting existing values.
 // Strict no-op (same reference returned) when the input carries no system
-// message — hosts whose context array has none (pi < 0.86, OMP, fork hosts)
-// see zero change, keeping those turns byte-for-byte identical.
+// message — Pi < 0.86 has none and sees zero change, keeping those turns
+// byte-for-byte identical.
 function isSystem(message: unknown): boolean {
   return typeof message === "object" && message !== null && (message as { role?: unknown }).role === "system";
 }

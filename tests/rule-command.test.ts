@@ -31,7 +31,7 @@ function fakeCtx(entries: any[], stateFile: string, notifies: Array<{ msg: strin
     ui: { notify: (t: string, type?: string) => { notifies.push({ msg: t, type }); }, confirm: async () => true, select: async () => undefined, input: async () => "", setStatus: () => {} },
     model: { contextWindow: 200_000 },
     sessionManager: {
-      getBranch: () => entries,
+      buildContextEntries: () => entries,
       getSessionId: () => "test-session",
       getSessionFile: () => stateFile,
     },

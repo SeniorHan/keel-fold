@@ -1,7 +1,7 @@
 import type { SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 type AgentMessage = SessionMessageEntry["message"];
 /** [#336] Config for dropping oversized reasoning (thinking) parts from
- *  historical `compress` tool calls — exact alignment with opencode-acp #377.
+ *  historical `compress` tool calls.
  *  `compress` calls are hard-exempt from compression (their tool results are
  *  the anchors that keep block summaries addressable), so their thinking
  *  rides along every request as an unreclaimable context floor. This pass
@@ -42,7 +42,7 @@ export declare function isStrictReasoningEcho(provider?: string, baseUrl?: strin
  *  no `thinking` parts, so the pass would be a no-op regardless. */
 export declare function applyStrictReasoningGate(cfg: Required<CompressReasoningConfig>, provider?: string, baseUrl?: string): Required<CompressReasoningConfig>;
 export declare function countThinkingChars(messages: AgentMessage[]): number;
-/** Request-time pass aligned with opencode-acp #377: remove `thinking` parts
+/** Request-time pass: remove `thinking` parts
  *  from a message only when ALL gates hold —
  *  1. closed round [#348]: EVERY `compress` toolCall in the message has its
  *     tool-result message (role `toolResult`, matching `toolCallId`) at a

@@ -5,43 +5,11 @@ import {
 } from "./chunk-PPYOZRUP.js";
 
 // src/config-dir.ts
-import * as piModule from "@earendil-works/pi-coding-agent";
-import { existsSync } from "fs";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { homedir } from "os";
 import * as path from "path";
-var PI_CONFIG_DIR_NAME = ".pi";
-function isDirName(value) {
-  return typeof value === "string" && value.length > 0 && value !== "." && value !== ".." && !/[\\/]/.test(value);
-}
-function dirNameFromAgentDir(getAgentDir, home) {
-  if (typeof getAgentDir !== "function") return void 0;
-  let agentDir;
-  try {
-    agentDir = getAgentDir();
-  } catch {
-    return void 0;
-  }
-  if (typeof agentDir !== "string" || agentDir.length === 0) return void 0;
-  const resolved = path.resolve(agentDir);
-  if (path.basename(resolved) !== "agent") return void 0;
-  const root = path.dirname(resolved);
-  if (path.dirname(root) !== path.resolve(home)) return void 0;
-  const name = path.basename(root);
-  return isDirName(name) ? name : void 0;
-}
-function resolveConfigDirName(host, home) {
-  if (isDirName(host.CONFIG_DIR_NAME)) return host.CONFIG_DIR_NAME;
-  return dirNameFromAgentDir(host.getAgentDir, home) ?? PI_CONFIG_DIR_NAME;
-}
-var CONFIG_DIR_NAME = resolveConfigDirName(piModule, homedir());
-function userConfigPathIn(name, root, ...segments) {
-  const own = path.join(root, name, ...segments);
-  if (name === PI_CONFIG_DIR_NAME || existsSync(own)) return own;
-  const legacy = path.join(root, PI_CONFIG_DIR_NAME, ...segments);
-  return existsSync(legacy) ? legacy : own;
-}
 function userConfigPath(root, ...segments) {
-  return userConfigPathIn(CONFIG_DIR_NAME, root, ...segments);
+  return path.join(root, CONFIG_DIR_NAME, ...segments);
 }
 function acpJsonFiles(cwd) {
   return [userConfigPath(homedir(), "acp.json"), userConfigPath(cwd, "acp.json")];
@@ -50,10 +18,10 @@ function acpJsonFiles(cwd) {
 // src/user-config.ts
 import { promises as fs } from "fs";
 import { homedir as homedir3 } from "os";
-import { dirname as dirname3 } from "path";
+import { dirname as dirname2 } from "path";
 
 // src/log.ts
-import { appendFileSync, mkdirSync, statSync, renameSync, existsSync as existsSync2 } from "fs";
+import { appendFileSync, mkdirSync, statSync, renameSync, existsSync } from "fs";
 import * as path2 from "path";
 import { homedir as homedir2 } from "os";
 var MAX_BYTES = 10 * 1024 * 1024;
@@ -86,7 +54,7 @@ function ts() {
 function writeLine(level, scope, fields) {
   const file = resolveLogFile();
   try {
-    if (existsSync2(file) && statSync(file).size >= MAX_BYTES) {
+    if (existsSync(file) && statSync(file).size >= MAX_BYTES) {
       renameSync(file, file + ".old");
     }
   } catch {
@@ -222,7 +190,6 @@ var KNOWN = /* @__PURE__ */ new Set([
   "promptSections",
   "nudgeSections",
   "toolPrompts",
-  "hostSession",
   "rules",
   "compressionModelId"
 ]);
@@ -306,7 +273,7 @@ async function writeGlobalAcpConfig(mutate) {
     if (e.code !== "ENOENT") throw e;
   }
   mutate(current);
-  await fs.mkdir(dirname3(file), { recursive: true });
+  await fs.mkdir(dirname2(file), { recursive: true });
   await fs.writeFile(file, `${JSON.stringify(current, null, 2)}
 `, "utf8");
 }
@@ -4308,7 +4275,7 @@ var DESIRED_KITTY_KEYBOARD_PROTOCOL_FLAGS = 7;
 var KITTY_KEYBOARD_PROTOCOL_QUERY = `\x1B[>${DESIRED_KITTY_KEYBOARD_PROTOCOL_FLAGS}u\x1B[?u\x1B[c`;
 
 // src/index.ts
-import { readFileSync as readFileSync5 } from "fs";
+import { readFileSync as readFileSync4 } from "fs";
 
 // node_modules/acp-kernel/dist/chunk-Q3P5Z2PV.js
 import { createRequire as createRequire3 } from "module";
@@ -10251,7 +10218,7 @@ function readPackFile(file) {
   }
 }
 function createDirPackSource(id, dir) {
-  const resolve4 = (name) => {
+  const resolve3 = (name) => {
     if (!isValidPackName(name)) return null;
     const file = path6.join(dir, `${name}.json`);
     const raw = readPackFile(file);
@@ -10266,7 +10233,7 @@ function createDirPackSource(id, dir) {
   };
   return {
     id,
-    resolve: resolve4,
+    resolve: resolve3,
     list() {
       let names;
       try {
@@ -10276,7 +10243,7 @@ function createDirPackSource(id, dir) {
       }
       const out = [];
       for (const f of names) {
-        const pack = resolve4(f.slice(0, -5));
+        const pack = resolve3(f.slice(0, -5));
         if (pack) out.push(pack);
       }
       return out;
@@ -12171,33 +12138,6 @@ function resolveRepetitionGuard(adapter) {
   }
   return { enabled: true, warn: REPETITION_GUARD_DEFAULTS.warn, abort: REPETITION_GUARD_DEFAULTS.abort };
 }
-function resolveHostSession(adapter) {
-  const h = adapter.hostSession;
-  if (h === true) return { countCustomMessages: true };
-  if (h && typeof h === "object") {
-    if (typeof h.countCustomMessages !== "boolean") {
-      logWarn("config", { event: "host-session-invalid", field: "countCustomMessages", value: String(h.countCustomMessages), fallback: "false" });
-    }
-    const count = h.countCustomMessages === true;
-    let types;
-    if (h.customMessageTypes !== void 0) {
-      const raw = h.customMessageTypes;
-      const valid = Array.isArray(raw) && raw.every((t) => typeof t === "string" && t.length > 0);
-      if (!valid) {
-        logWarn("config", { event: "host-session-invalid", field: "customMessageTypes", value: JSON.stringify(raw), fallback: "unset" });
-      } else if (!count) {
-        logWarn("config", { event: "host-session-invalid", field: "customMessageTypes", value: JSON.stringify(raw), fallback: "ignored", reason: "requires-countCustomMessages" });
-      } else {
-        types = raw;
-      }
-    }
-    return types === void 0 ? { countCustomMessages: count } : { countCustomMessages: count, customMessageTypes: types };
-  }
-  if (h !== void 0 && h !== false) {
-    logWarn("config", { event: "host-session-invalid", value: String(h), fallback: "off" });
-  }
-  return { countCustomMessages: false };
-}
 function mergeCompress(global, provider, model) {
   return {
     maxContextLimit: model?.maxContextLimit ?? provider?.maxContextLimit ?? global?.maxContextLimit,
@@ -12255,10 +12195,6 @@ function parsePercent(v2) {
   if (s.endsWith("%")) return Number(s.slice(0, -1)) / 100;
   return Number(s);
 }
-
-// src/runtime.ts
-import { createHash as createHash2 } from "crypto";
-import { readFileSync as readFileSync3 } from "fs";
 
 // src/tag-tokens.ts
 function formatTokens3(tokens) {
@@ -12458,62 +12394,7 @@ function countImageBlocks(content) {
   }
   return n;
 }
-function messageIdentity(message) {
-  return JSON.stringify(normalizeIdentityValue(message, true));
-}
-function messageRef(message) {
-  if (message === null || typeof message !== "object" || !("content" in message)) return void 0;
-  const content = message.content;
-  const texts = typeof content === "string" ? [content] : Array.isArray(content) ? content.flatMap((block) => {
-    const value = block;
-    return value.type === "text" && typeof value.text === "string" ? [value.text] : [];
-  }) : [];
-  for (const text of texts) {
-    const tag = text.match(REF_TAG)?.[0] ?? text.match(TRAILING_REF_TAG)?.[0];
-    const ref = tag?.match(/m\d{1,7}/)?.[0];
-    if (ref) return ref;
-  }
-  return void 0;
-}
-function normalizeIdentityValue(value, message = false) {
-  if (Array.isArray(value)) {
-    return value.flatMap((item) => {
-      if (!item || typeof item !== "object") return [normalizeIdentityValue(item)];
-      const block = item;
-      if (block.type === "text" && typeof block.text === "string") {
-        const stripped = stripRefTag(block.text);
-        if (block.text !== stripped && stripped === "") return [];
-      }
-      return [normalizeIdentityValue(item)];
-    });
-  }
-  if (value === null || typeof value !== "object") return value;
-  const out = {};
-  for (const key of Object.keys(value).sort()) {
-    if (message && key === "timestamp") continue;
-    const item = value[key];
-    if (message && key === "content" && typeof item === "string") {
-      out[key] = [{ text: stripRefTag(item), type: "text" }];
-    } else if (key === "text" && typeof item === "string" && value.type === "text") {
-      out[key] = stripRefTag(item);
-    } else {
-      out[key] = normalizeIdentityValue(item);
-    }
-  }
-  return out;
-}
 var TRUNCATION_MARKER2 = "[truncated for context space]";
-function matchesStoredText(stored, visible) {
-  const marker = `...${TRUNCATION_MARKER2} \u2014 original ~`;
-  const markerStart = visible.indexOf(marker);
-  if (markerStart < 2 || visible.slice(markerStart - 2, markerStart) !== "\n\n") return false;
-  const suffixMarker = " tokens]...\n\n";
-  const suffixStart = visible.indexOf(suffixMarker, markerStart + marker.length);
-  if (suffixStart < 0 || !/^\d+$/.test(visible.slice(markerStart + marker.length, suffixStart))) return false;
-  const prefix = visible.slice(0, markerStart - 2);
-  const suffix = visible.slice(suffixStart + suffixMarker.length);
-  return prefix.length > 0 && suffix.length > 0 && stored.startsWith(prefix) && stored.endsWith(suffix);
-}
 function allToolCalls(content) {
   if (!Array.isArray(content)) return [];
   const calls = [];
@@ -12893,8 +12774,6 @@ var SessionStateStore = class {
     const cached = this.cache.get(key);
     if (cached) return cached.state;
     let state = createInitialState();
-    let liveRefOrigins = [];
-    let derivedFrom = null;
     let activePack;
     if (file) {
       try {
@@ -12905,8 +12784,6 @@ var SessionStateStore = class {
         }
         if (parsed && Array.isArray(parsed.blocks)) {
           state = mergeInitialState(parsed);
-          liveRefOrigins = parseLiveRefOrigins(parsed.liveRefOrigins);
-          derivedFrom = parseDerivedFrom(parsed.derivedFrom);
           if (typeof parsed.activePack === "string" && parsed.activePack) activePack = parsed.activePack;
         }
       } catch (e) {
@@ -12920,7 +12797,7 @@ var SessionStateStore = class {
         if (parentState) state = parentState;
       }
     }
-    this.cache.set(key, { state, liveRefOrigins, derivedFrom, activePack });
+    this.cache.set(key, { state, activePack });
     return state;
   }
   /** Stamp the effective prompt pack for the live session (audit trail:
@@ -12937,19 +12814,15 @@ var SessionStateStore = class {
     const file = stateFileFor(sessionFile);
     const key = cacheKey(sessionFile, sessionId);
     const prev = this.cache.get(key);
-    const liveRefOrigins = prev?.liveRefOrigins ?? [];
-    const derivedFrom = prev?.derivedFrom ?? null;
     const activePack = prev?.activePack;
-    this.cache.set(key, { state, liveRefOrigins, derivedFrom, activePack });
+    this.cache.set(key, { state, activePack });
     if (!file) return;
     const dir = path7.dirname(file);
     const payload = {
       ...state,
-      liveRefOrigins,
       schemaVersion: SIDECAR_SCHEMA_VERSION,
       producer: sidecarProducer()
     };
-    if (derivedFrom) payload.derivedFrom = derivedFrom;
     if (activePack) payload.activePack = activePack;
     const body = JSON.stringify(payload);
     const prevWrite = this.writes.get(file) ?? Promise.resolve();
@@ -12972,22 +12845,6 @@ var SessionStateStore = class {
     } finally {
       if (this.writes.get(file) === write) this.writes.delete(file);
     }
-  }
-  getLiveRefOrigins(sessionFile, sessionId) {
-    return [...this.cache.get(cacheKey(sessionFile, sessionId))?.liveRefOrigins ?? []];
-  }
-  setLiveRefOrigins(sessionFile, sessionId, origins) {
-    const key = cacheKey(sessionFile, sessionId);
-    const slot = this.cache.get(key);
-    if (slot) this.cache.set(key, { state: slot.state, liveRefOrigins: [...origins], derivedFrom: slot.derivedFrom });
-  }
-  getDerivedFrom(sessionFile, sessionId) {
-    return this.cache.get(cacheKey(sessionFile, sessionId))?.derivedFrom ?? null;
-  }
-  setDerivedFrom(sessionFile, sessionId, mark) {
-    const key = cacheKey(sessionFile, sessionId);
-    const slot = this.cache.get(key);
-    if (slot) this.cache.set(key, { state: slot.state, liveRefOrigins: slot.liveRefOrigins, derivedFrom: mark });
   }
   invalidate() {
     this.cache.clear();
@@ -13020,42 +12877,6 @@ var SessionStateStore = class {
     return void 0;
   }
 };
-function parseDerivedFrom(value) {
-  if (!value || typeof value !== "object") return null;
-  const mark = value;
-  if (typeof mark.parentSessionId !== "string" || typeof mark.derivedAt !== "number") return null;
-  return { parentSessionId: mark.parentSessionId, derivedAt: mark.derivedAt };
-}
-function deriveChildState(parent) {
-  const fresh = createInitialState();
-  return {
-    blocks: structuredClone(parent.blocks),
-    messageRefs: { byRaw: { ...parent.messageRefs.byRaw }, byRef: { ...parent.messageRefs.byRef } },
-    tokenSnapshot: { ...parent.tokenSnapshot },
-    nudge: fresh.nudge,
-    stats: fresh.stats,
-    absorbed: [],
-    rules: structuredClone(parent.rules ?? []),
-    nextRuleId: parent.nextRuleId ?? fresh.nextRuleId,
-    // Ref space is NOT re-issued on derive (byRaw/byRef carry verbatim), so the
-    // image ledgers stay valid for inherited content: imageShrinks gates
-    // image_full for inherited shrunk refs, imageFullRestored keeps
-    // parent-restored refs at full resolution. The kernel's MUST-clear
-    // (resetImageFullState) applies only to ref-reissue resets.
-    imageFullRestored: structuredClone(parent.imageFullRestored ?? []),
-    imageShrinks: structuredClone(parent.imageShrinks ?? []),
-    nextBlockId: parent.nextBlockId,
-    nextRunId: parent.nextRunId
-  };
-}
-function parseLiveRefOrigins(value) {
-  if (!Array.isArray(value)) return [];
-  return value.filter((item) => {
-    if (!item || typeof item !== "object") return false;
-    const origin = item;
-    return typeof origin.rawId === "string" && typeof origin.identity === "string";
-  });
-}
 function mergeInitialState(parsed) {
   const fresh = createInitialState();
   return {
@@ -17529,13 +17350,22 @@ import {
   convertToLlm
 } from "@earendil-works/pi-coding-agent";
 
-// src/host.ts
-function isDeclaredForkHost() {
-  const v2 = process.env.PI_ACP_FORK_HOST;
-  return v2 === "1" || v2?.toLowerCase() === "true";
+// src/turn-boundary.ts
+function isTurnBoundary(entry) {
+  return entry.message?.role === "user";
 }
-function isUnsupportedHost(sm) {
-  return !isPiHost(sm) && !isDeclaredForkHost();
+function lastTurnBoundaryId(entries) {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (isTurnBoundary(e)) return e.id;
+  }
+  return void 0;
+}
+function lastTurnBoundaryIndex(entries) {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (isTurnBoundary(entries[i])) return i;
+  }
+  return -1;
 }
 
 // src/tokens.ts
@@ -17766,33 +17596,33 @@ function assertNotAborted(signal) {
   throw err;
 }
 
-// src/compat.ts
-function normalizeSystemPrompt(input) {
-  if (input === void 0) return "";
-  if (Array.isArray(input)) return input.join("\n");
-  return input;
+// src/proxy-detect.ts
+function isBiliProxyBaseUrl(baseUrl) {
+  if (!baseUrl) return false;
+  try {
+    const url = new URL(baseUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    const segments = url.pathname.split("/").filter((s) => s.length > 0);
+    if (segments[0] !== "bili") return false;
+    const rest = url.pathname.slice(url.pathname.indexOf("bili") + "bili".length);
+    return /^\/https?:\/\//.test(rest);
+  } catch {
+    return false;
+  }
 }
-function formatSystemPromptForEvent(base, append) {
-  const normalized = normalizeSystemPrompt(base);
-  return `${normalized}
-
-${append}`;
-}
-function getSystemPromptText(ctx) {
-  const result = ctx.getSystemPrompt?.();
-  return normalizeSystemPrompt(result);
-}
-
-// src/omp.ts
-var UNSUPPORTED_HOST_MESSAGE = [
-  "[billion-context-pi-lean] Unsupported host: no buildContextEntries() API and no PI_ACP_FORK_HOST declaration \u2014 ACP has been disabled for this session.",
-  "This extension is built for Pi. OMP (oh-my-pi) is not supported.",
-  "Pi-compatible fork running sessions in-process? Opt in explicitly:",
-  "  PI_ACP_FORK_HOST=1 <your host command>"
+var PROXY_STAND_DOWN_MESSAGE = [
+  "[billion-context-pi] Model baseUrl routes through the billion-context wire proxy (/bili/ prefix) \u2014 ACP client-side compression has been disabled for this session to avoid double compression.",
+  "The proxy runs the same compression pipeline server-side and owns the ref coordinate space; nothing else to configure.",
+  "If your traffic reaches the proxy via HTTPS_PROXY instead (no /bili/ prefix in the URL), export BILLION_CONTEXT_PROXY=1 before starting pi.",
+  "Docs: https://github.com/ranxianglei/billion-context"
 ].join("\n");
-var FORK_HOST_WARNING_MESSAGE = [
-  '[billion-context-pi-lean] Running on a declared fork host (PI_ACP_FORK_HOST). Live-tail refs are content-stable (#459); if compress ever fails with "does not exist in this session", this host rewrites its in-flight view and is not supported.'
-].join("\n");
+function nativeStandDownMessage(host) {
+  return [
+    `[billion-context-pi] billion-context native host detected (BILLION_CONTEXT_NATIVE=${host}) \u2014 the in-process native plugin proxies model API traffic and owns compression.`,
+    "ACP client-side compression has been disabled for this session to avoid double compression; nothing else to configure.",
+    "Docs: https://github.com/ranxianglei/billion-context"
+  ].join("\n");
+}
 
 // src/compress-model.ts
 var SESSION_MODEL_REF = "session";
@@ -18035,7 +17865,7 @@ function makeCompressTool(runtime, overrides, pi) {
     ],
     parameters: CompressParams,
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
-      if (runtime.refused) return { details: void 0, content: [{ type: "text", text: runtime.refusalMessage ?? UNSUPPORTED_HOST_MESSAGE }] };
+      if (runtime.refused) return { details: void 0, content: [{ type: "text", text: runtime.refusalMessage ?? PROXY_STAND_DOWN_MESSAGE }] };
       let result;
       const details = {};
       try {
@@ -18268,17 +18098,6 @@ function refIsDead(ref, state, visibleIds) {
   if (visibleIds.has(rawId)) return false;
   return !hasActiveOwner(state, [rawId], visibleIds);
 }
-function refDriftSignal(ref, state, visibleIds) {
-  const trimmed = ref.trim();
-  if (/^b\d+$/i.test(trimmed)) return "alive";
-  const m2 = trimmed.match(/^m(\d+)$/i);
-  if (!m2) return "unknown";
-  const rawId = state.messageRefs.byRef[trimmed] ?? state.messageRefs.byRef[paddedRef(Number(m2[1]))];
-  if (!rawId) return "unknown";
-  if (rawId.startsWith("live-")) return "live";
-  if (!visibleIds.has(rawId) && !hasActiveOwner(state, [rawId], visibleIds)) return "persistent-dangling";
-  return "alive";
-}
 function compressibleSnapshotText(nudge) {
   const ranges = viableRanges(nudge?.compressibleRanges ?? []);
   if (ranges.length === 0) {
@@ -18346,7 +18165,7 @@ async function handleCompress(args, runtime, ctx, toolCallId, signal, tools = []
   assertNotAborted(signal);
   const config = runtime.configFor(ctx);
   const modelId = ctx.model?.id ?? "default";
-  const systemPromptText = getSystemPromptText(ctx);
+  const systemPromptText = ctx.getSystemPrompt?.() ?? "";
   const systemPromptTokens = systemPromptText ? defaultCountTokens(systemPromptText) : 0;
   const imageTokens = collectImageTokens(entries, modelSupportsImages(ctx.model));
   const sentTokens = estimateTokens(coreMessages, collectCoveredMessageIds(initialState), imageTokens) + systemPromptTokens;
@@ -18372,7 +18191,7 @@ async function handleCompress(args, runtime, ctx, toolCallId, signal, tools = []
     }
     return s.text === r.summary ? r : { ...r, summary: s.text };
   });
-  const turnKey = retryBreakerKey(ctx.sessionManager, resolveHostSession(runtime.adapter)) ?? sid;
+  const turnKey = lastTurnBoundaryId(entries) ?? sid;
   const snapshot = compressibleSnapshotText(turn.nudge);
   if (runtime.compressRetryCappedFor(sid, turnKey)) {
     logWarn("compress", { sid, event: "capped-reject", turnKey });
@@ -18485,17 +18304,6 @@ async function handleCompress(args, runtime, ctx, toolCallId, signal, tools = []
   });
   if (errors.length > 0) {
     logError("compress", { sid: ctx.sessionManager.getSessionId(), event: "errors", count: errors.length, errors: errors.slice(0, 5) });
-    if (blocksCreated === 0 && isDeclaredForkHost() && !isPiHost(ctx.sessionManager) && /does not exist|cannot be anchored|is unknown|unknown refs/i.test(errors.join(" "))) {
-      const signals = ranges.flatMap((r) => [
-        refDriftSignal(r.startId, state, visibleIds),
-        refDriftSignal(r.endId, state, visibleIds)
-      ]);
-      if (signals.includes("live") || signals.includes("unknown")) {
-        logWarn("compress", { sid, event: "fork-ref-drift-suspected", seeIssue: "#459", errors: errors.slice(0, 3) });
-      } else if (signals.includes("persistent-dangling")) {
-        logWarn("compress", { sid, event: "anchor-rejected-hidden-orphan", errors: errors.slice(0, 3) });
-      }
-    }
   }
   if (warnings.length > 0) {
     logWarn("compress", { sid: ctx.sessionManager.getSessionId(), event: "warnings", count: warnings.length, warnings: warnings.slice(0, 5) });
@@ -18554,7 +18362,7 @@ async function writeDedicatedSummaries(input) {
       }
     }
   }
-  const sessionSystemPrompt = isSession ? getSystemPromptText(input.ctx) : "";
+  const sessionSystemPrompt = isSession ? input.ctx.getSystemPrompt?.() ?? "" : "";
   const planned = prefix ? /* @__PURE__ */ new Map() : plannedFolds(input, ranges);
   let used = 0;
   const failed = [];
@@ -18962,117 +18770,8 @@ async function abortableSleep(ms, signal) {
     if (signal.aborted) return "aborted";
     const remaining = end - Date.now();
     if (remaining <= 0) return "ok";
-    await new Promise((resolve4) => setTimeout(resolve4, Math.min(250, remaining)));
+    await new Promise((resolve3) => setTimeout(resolve3, Math.min(250, remaining)));
   }
-}
-
-// src/sequence-match.ts
-function findUniqueLongestRun(candidates, live) {
-  if (candidates.length === 0 || live.length === 0) return void 0;
-  const ids = /* @__PURE__ */ new Map();
-  const intern = (key) => {
-    const existing = ids.get(key);
-    if (existing !== void 0) return existing;
-    const id = ids.size + 1;
-    ids.set(key, id);
-    return id;
-  };
-  const candidateIds = candidates.map(intern);
-  const liveIds = live.map(intern);
-  const separator = ids.size + 1;
-  const sequence = [...candidateIds, separator, ...liveIds];
-  const suffixArray = buildSuffixArray(sequence);
-  const lcp = buildLcp(sequence, suffixArray);
-  const candidateLength = candidates.length;
-  const liveOffset = candidateLength + 1;
-  const sourceOf = (suffix) => {
-    if (suffix < candidateLength) return 0;
-    if (suffix >= liveOffset) return 1;
-    return void 0;
-  };
-  let bestLength = 0;
-  for (let index = 1; index < suffixArray.length; index++) {
-    const leftSource = sourceOf(suffixArray[index - 1]);
-    const rightSource = sourceOf(suffixArray[index]);
-    if (leftSource === void 0 || rightSource === void 0 || leftSource === rightSource) continue;
-    bestLength = Math.max(bestLength, lcp[index]);
-  }
-  if (bestLength === 0) return void 0;
-  let pairCount = 0;
-  let uniqueCandidateStart = -1;
-  let uniqueLiveStart = -1;
-  for (let start = 0; start < suffixArray.length; ) {
-    let end = start;
-    while (end + 1 < suffixArray.length && lcp[end + 1] >= bestLength) end++;
-    if (end > start) {
-      const candidateStarts = [];
-      const liveStarts = [];
-      for (let index = start; index <= end; index++) {
-        const suffix = suffixArray[index];
-        const source = sourceOf(suffix);
-        if (source === 0) candidateStarts.push(suffix);
-        else if (source === 1) liveStarts.push(suffix - liveOffset);
-      }
-      const groupPairs = candidateStarts.length * liveStarts.length;
-      pairCount += groupPairs;
-      if (groupPairs === 1) {
-        uniqueCandidateStart = candidateStarts[0];
-        uniqueLiveStart = liveStarts[0];
-      }
-      if (pairCount > 1) return void 0;
-    }
-    start = end + 1;
-  }
-  return pairCount === 1 ? { candidateStart: uniqueCandidateStart, liveStart: uniqueLiveStart, length: bestLength } : void 0;
-}
-function findPositionalPrefixRun(candidates, live) {
-  if (candidates.length === 0 || live.length === 0) return void 0;
-  const max = Math.min(candidates.length, live.length);
-  for (let length = max; length > 0; length--) {
-    const candidateStart = candidates.length - length;
-    let ok = true;
-    for (let i = 0; i < length; i++) {
-      if (candidates[candidateStart + i] !== live[i]) {
-        ok = false;
-        break;
-      }
-    }
-    if (ok) return { candidateStart, liveStart: 0, length };
-  }
-  return void 0;
-}
-function buildSuffixArray(sequence) {
-  const suffixArray = sequence.map((_2, index) => index);
-  let ranks = [...sequence];
-  for (let width = 1; width < sequence.length; width *= 2) {
-    suffixArray.sort((left, right) => ranks[left] - ranks[right] || (ranks[left + width] ?? -1) - (ranks[right + width] ?? -1));
-    const nextRanks = Array(sequence.length);
-    nextRanks[suffixArray[0]] = 0;
-    for (let index = 1; index < suffixArray.length; index++) {
-      const previous = suffixArray[index - 1];
-      const current = suffixArray[index];
-      const differs = ranks[previous] !== ranks[current] || (ranks[previous + width] ?? -1) !== (ranks[current + width] ?? -1);
-      nextRanks[current] = nextRanks[previous] + (differs ? 1 : 0);
-    }
-    ranks = nextRanks;
-    if (ranks[suffixArray.at(-1)] === sequence.length - 1) break;
-  }
-  return suffixArray;
-}
-function buildLcp(sequence, suffixArray) {
-  const positions = Array(sequence.length);
-  for (let index = 0; index < suffixArray.length; index++) positions[suffixArray[index]] = index;
-  const lcp = Array(sequence.length).fill(0);
-  let length = 0;
-  for (let start = 0; start < sequence.length; start++) {
-    const position = positions[start];
-    if (position === 0) continue;
-    const previous = suffixArray[position - 1];
-    while (start + length < sequence.length && previous + length < sequence.length && sequence[start + length] === sequence[previous + length]) length++;
-    lcp[position] = length;
-    if (length > 0) length--;
-  }
-  return lcp;
 }
 
 // src/overflow-selfheal.ts
@@ -19198,28 +18897,6 @@ var OverflowEpisode = class {
   }
 };
 
-// src/turn-boundary.ts
-function isTurnBoundary(entry, policy = {}) {
-  if (entry.message?.role === "user") return true;
-  if (policy.countCustomMessages !== true || !isCustomMessageEntry(entry)) return false;
-  const allowed = policy.customMessageTypes;
-  if (allowed === void 0) return true;
-  return entry.customType !== void 0 && allowed.includes(entry.customType);
-}
-function lastTurnBoundaryId(entries, policy) {
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const e = entries[i];
-    if (isTurnBoundary(e, policy)) return e.id;
-  }
-  return void 0;
-}
-function lastTurnBoundaryIndex(entries, policy) {
-  for (let i = entries.length - 1; i >= 0; i--) {
-    if (isTurnBoundary(entries[i], policy)) return i;
-  }
-  return -1;
-}
-
 // src/branch-guard.ts
 var marks = /* @__PURE__ */ new WeakMap();
 function baseIdOf2(id) {
@@ -19286,116 +18963,6 @@ function withBranchGuard(core) {
 }
 
 // src/runtime.ts
-function readContextEntries(sm) {
-  const source = sm;
-  if (typeof source.buildContextEntries === "function") return source.buildContextEntries();
-  if (typeof source.getBranch === "function") return source.getBranch();
-  return [];
-}
-function isPiHost(sm) {
-  const source = sm;
-  return typeof source.buildContextEntries === "function";
-}
-function retryBreakerKey(sm, policy) {
-  return lastTurnBoundaryId(readContextEntries(sm), policy);
-}
-function mergeLiveEntries(entries, live, state, origins) {
-  const persisted = entries.filter((e) => e.type === "message");
-  const liveIdentities = live.map(messageIdentity);
-  const persistedIdentities = persisted.map((entry) => messageIdentity(entry.message));
-  const normalizedKeys = normalizePersistedMatchKeys(persisted, persistedIdentities, live, liveIdentities);
-  const persistedRange = findUniqueLongestRun(persistedIdentities, normalizedKeys) ?? findPositionalPrefixRun(persistedIdentities, normalizedKeys);
-  const originRange = findUniqueLongestRun(origins.map((origin) => origin.identity), liveIdentities);
-  const identityRanks = /* @__PURE__ */ new Map();
-  for (const identity of persistedIdentities) identityRanks.set(identity, (identityRanks.get(identity) ?? 0) + 1);
-  const out = [];
-  const nextOrigins = [];
-  for (let i = 0; i < live.length; i++) {
-    const msg = live[i];
-    const entry = valueInRange(persisted, persistedRange, i);
-    const origin = valueInRange(origins, originRange, i);
-    if (entry) {
-      if (origin) migrateLiveRefs(state, origin.rawId, entry.id);
-      else migrateTaggedRef(state, msg, entry.id);
-      out.push(entry);
-      continue;
-    }
-    const identity = liveIdentities[i];
-    const rank = identityRanks.get(identity) ?? 0;
-    identityRanks.set(identity, rank + 1);
-    const id = origin?.rawId ?? stableLiveId(identity, rank);
-    out.push({ type: "message", id, parentId: null, timestamp: String(msg.timestamp ?? Date.now()), message: msg });
-    nextOrigins.push({ rawId: id, identity });
-  }
-  origins.splice(0, origins.length, ...nextOrigins);
-  const unmatched = live.length - (persistedRange?.length ?? 0);
-  if (unmatched > 0) logInfo("runtime", { event: "merge-live-entries", live: live.length, unmatched });
-  return out;
-}
-function stableLiveId(identity, rank) {
-  return `live-${createHash2("sha256").update(`${identity}\0${rank}`).digest("hex").slice(0, 16)}`;
-}
-function migrateTaggedRef(state, message, stableId) {
-  const ref = messageRef(message);
-  const rawId = ref ? state.messageRefs.byRef[ref] : void 0;
-  if (rawId?.startsWith("live-")) migrateLiveRefs(state, rawId, stableId);
-}
-function migrateLiveRefs(state, liveId, stableId) {
-  const rootId = liveId.split("#", 1)[0];
-  if (!rootId.startsWith("live-")) return;
-  for (const [rawId, ref] of Object.entries(state.messageRefs.byRaw)) {
-    if (rawId !== rootId && !rawId.startsWith(`${rootId}#`)) continue;
-    const stableRawId = `${stableId}${rawId.slice(rootId.length)}`;
-    if (state.messageRefs.byRaw[stableRawId] === void 0) {
-      state.messageRefs.byRaw[stableRawId] = ref;
-      state.messageRefs.byRef[ref] = stableRawId;
-    } else if (state.messageRefs.byRef[ref] === rawId) {
-      delete state.messageRefs.byRef[ref];
-    }
-    delete state.messageRefs.byRaw[rawId];
-  }
-}
-var NO_PERSISTED_MATCH = /* @__PURE__ */ Symbol("no-persisted-match");
-function normalizePersistedMatchKeys(persisted, persistedIdentities, live, liveIdentities) {
-  const persistedByStructure = /* @__PURE__ */ new Map();
-  for (let index = 0; index < persisted.length; index++) {
-    const key = toolResultStructureKey(persisted[index].message);
-    if (key === void 0) continue;
-    persistedByStructure.set(key, persistedByStructure.has(key) ? -1 : index);
-  }
-  return live.map((message, liveIndex) => {
-    const key = toolResultStructureKey(message);
-    const candidateIndex = key === void 0 ? void 0 : persistedByStructure.get(key);
-    if (candidateIndex === void 0) return liveIdentities[liveIndex];
-    if (candidateIndex < 0) return NO_PERSISTED_MATCH;
-    return sameToolResult(persisted[candidateIndex].message, message) ? persistedIdentities[candidateIndex] : liveIdentities[liveIndex];
-  });
-}
-function toolResultStructureKey(message) {
-  if (message.role !== "toolResult") return void 0;
-  return `${message.toolName}\0${message.toolCallId}`;
-}
-function valueInRange(values, range, liveIndex) {
-  if (!range || liveIndex < range.liveStart || liveIndex >= range.liveStart + range.length) return void 0;
-  return values[range.candidateStart + liveIndex - range.liveStart];
-}
-function sameToolResult(stored, visible) {
-  if (stored.role !== "toolResult" || visible.role !== "toolResult") return false;
-  return sameNonTextBlocks(stored.content, visible.content) && matchesStoredText(extractText(stored.content), extractText(visible.content));
-}
-function sameNonTextBlocks(a, b2) {
-  const nonText = (blocks) => blocks.filter((block) => {
-    if (!block || typeof block !== "object" || !("type" in block)) return true;
-    return block.type !== "text";
-  });
-  try {
-    const na = Array.isArray(a) ? nonText(a) : [];
-    const nb = Array.isArray(b2) ? nonText(b2) : [];
-    return JSON.stringify(na) === JSON.stringify(nb);
-  } catch {
-    return false;
-  }
-}
 function pruneOrphanRefs(state, messages) {
   const retainedRawIds = new Set(messages.map((message) => message.id));
   for (const block of state.blocks) {
@@ -19647,8 +19214,8 @@ function createRuntime(adapter) {
   async function acquireLock(sid) {
     const prev = locks.get(sid) ?? Promise.resolve();
     let resolveNext;
-    const next = new Promise((resolve4) => {
-      resolveNext = resolve4;
+    const next = new Promise((resolve3) => {
+      resolveNext = resolve3;
     });
     const tail = prev.then(() => next);
     locks.set(sid, tail);
@@ -19710,20 +19277,16 @@ function createRuntime(adapter) {
       logWarn("runtime", { event: "config-reload-failed", error: e instanceof Error ? e.message : String(e) });
     }
   }
-  const lastLiveBySession = /* @__PURE__ */ new Map();
   const projectionCaches = /* @__PURE__ */ new Map();
   function dropProjectionCache(sid) {
     projectionCaches.delete(sid);
   }
-  async function stateFor(ctx, liveMessages) {
+  async function stateFor(ctx) {
     const sm = ctx.sessionManager;
     const sessionFile = sm.getSessionFile() ?? void 0;
     const sessionId = sm.getSessionId();
-    const piHost = isPiHost(sm);
-    if (!piHost && liveMessages && liveMessages.length > 0) lastLiveBySession.set(sessionId, [...liveMessages]);
-    const live = piHost ? void 0 : liveMessages ?? lastLiveBySession.get(sessionId);
     let state = await store.load(sessionFile, sessionId);
-    const entries = readContextEntries(sm);
+    const entries = sm.buildContextEntries();
     if (sessionFile && state.blocks.length === 0 && hasCompressHistory(entries)) {
       const rebuilt = rebuildStateFromLog({ entries, state, config: configFor(ctx), core });
       if (rebuilt.report.blocks > 0) {
@@ -19738,22 +19301,14 @@ function createRuntime(adapter) {
         });
       }
     }
-    if (!piHost && live && live.length > 0) {
-      const origins = store.getLiveRefOrigins(sessionFile, sessionId);
-      const merged = mergeLiveEntries(entries, live, state, origins);
-      store.setLiveRefOrigins(sessionFile, sessionId, origins);
-      const coreMessages2 = entriesToCoreMessages(merged);
-      pruneOrphanRefs(state, coreMessages2);
-      return { state, coreMessages: coreMessages2, entries: merged };
-    }
     let projection = projectionCaches.get(sessionId);
     if (!projection) {
       projection = new EntryProjectionCache();
       projectionCaches.set(sessionId, projection);
     }
     const coreMessages = projection.project(entries);
-    if (live === void 0) pruneOrphanRefs(state, coreMessages);
-    if (piHost) guardBranch(sm, sessionId, state, coreMessages);
+    pruneOrphanRefs(state, coreMessages);
+    guardBranch(sm, sessionId, state, coreMessages);
     return { state, coreMessages, entries };
   }
   const offBranchLogged = /* @__PURE__ */ new Map();
@@ -19770,27 +19325,6 @@ function createRuntime(adapter) {
   async function save(state, ctx) {
     const sm = ctx.sessionManager;
     await store.save(state, sm.getSessionFile() ?? void 0, sm.getSessionId());
-  }
-  function ownSidecarHasBlocks(sessionFile) {
-    try {
-      const parsed = JSON.parse(readFileSync3(`${sessionFile}.acp.json`, "utf8"));
-      return Array.isArray(parsed.blocks) && parsed.blocks.length > 0;
-    } catch {
-      return false;
-    }
-  }
-  async function deriveChild(child, parent) {
-    if (!child.sessionFile) return false;
-    if (ownSidecarHasBlocks(child.sessionFile)) return false;
-    await store.load(child.sessionFile, child.sessionId);
-    if (store.getDerivedFrom(child.sessionFile, child.sessionId)) return false;
-    const parentState = await store.load(parent.sessionFile, parent.sessionId);
-    if (parentState.blocks.length === 0) return false;
-    const derived = deriveChildState(parentState);
-    store.setDerivedFrom(child.sessionFile, child.sessionId, { parentSessionId: parent.sessionId, derivedAt: Date.now() });
-    await store.save(derived, child.sessionFile, child.sessionId);
-    logInfo("state", { sid: child.sessionId, event: "child-state-derived", parentSid: parent.sessionId, blocks: derived.blocks.length });
-    return true;
   }
   let refused = false;
   let refusalMessage = null;
@@ -19810,7 +19344,7 @@ function createRuntime(adapter) {
     return promptsRef;
   }, setPrompts: (p) => {
     promptsRef = p;
-  }, markNudgeShown, nudgeShownFor, nudgeShownTokensFor, clearNudgeTracking, clearNudgeTokenStamps, markNudgeRecorded, nudgeRecordedFor, noteCompressOutcomes, compressRetryCappedFor, clearCompressRetryTracking, liveContextLimit, configFor, reasoningDropFor, reloadConfig, stateFor, save, deriveChildState: deriveChild, acquireLock, overflowFor, overflowDrop, noteSentViewCount, peekSentViewCount, dropSentViewCount, dropProjectionCache, noteDeadCompress, clearDeadCompress, throttleFor, throttleDrop, noteTokenScale, dropTokenScale, noteHostUsage, dropHostUsageSamples, noteSizeDivergence, dropSizeDivergence, noteTerminalEscape, dropTerminalEscape, noteTruncationSkipped, dropTruncationSkipped, stripImagesFor, getCompressionModelRef, setCompressionModelRef, setLastSentMessages, getLastSentMessages, dropLastSentMessages };
+  }, markNudgeShown, nudgeShownFor, nudgeShownTokensFor, clearNudgeTracking, clearNudgeTokenStamps, markNudgeRecorded, nudgeRecordedFor, noteCompressOutcomes, compressRetryCappedFor, clearCompressRetryTracking, liveContextLimit, configFor, reasoningDropFor, reloadConfig, stateFor, save, acquireLock, overflowFor, overflowDrop, noteSentViewCount, peekSentViewCount, dropSentViewCount, dropProjectionCache, noteDeadCompress, clearDeadCompress, throttleFor, throttleDrop, noteTokenScale, dropTokenScale, noteHostUsage, dropHostUsageSamples, noteSizeDivergence, dropSizeDivergence, noteTerminalEscape, dropTerminalEscape, noteTruncationSkipped, dropTruncationSkipped, stripImagesFor, getCompressionModelRef, setCompressionModelRef, setLastSentMessages, getLastSentMessages, dropLastSentMessages };
 }
 
 // src/session-log.ts
@@ -19852,66 +19386,20 @@ async function loadAncestorEntries(sessionFile, wantedBaseIds) {
   }
   return [...found.values()];
 }
-async function loadLiveRefEntries(sessionFile, wantedRawIds) {
-  const wanted = new Set([...wantedRawIds].filter((id) => id.startsWith("live-")));
-  const found = /* @__PURE__ */ new Map();
-  if (!sessionFile || wanted.size === 0) return found;
-  const seen = /* @__PURE__ */ new Set([sessionFile]);
-  let current = sessionFile;
-  for (let depth = 0; current !== void 0 && depth <= MAX_CHAIN_DEPTH && found.size < wanted.size; depth++) {
-    const file = current;
-    const identities = /* @__PURE__ */ new Map();
-    try {
-      const raw = await fs5.readFile(`${file}${STATE_SUFFIX}`, "utf8");
-      const parsed = JSON.parse(raw);
-      for (const origin of parseLiveRefOrigins(parsed.liveRefOrigins)) {
-        if (!wanted.has(origin.rawId)) continue;
-        const list = identities.get(origin.identity);
-        if (list) list.push(origin.rawId);
-        else identities.set(origin.identity, [origin.rawId]);
-      }
-    } catch (e) {
-      const code = e.code;
-      if (code !== "ENOENT") logWarn("session-log", { event: "live-ref-sidecar-failed", file, error: e instanceof Error ? e.message : String(e) });
-    }
-    if (identities.size > 0) {
-      let text;
-      try {
-        text = await fs5.readFile(file, "utf8");
-      } catch (e) {
-        const code = e.code;
-        if (code !== "ENOENT") logWarn("session-log", { event: "live-ref-log-failed", file, error: e instanceof Error ? e.message : String(e) });
-      }
-      if (text !== void 0) {
-        for (const entry of parseSessionLog(text)) {
-          if (entry.type !== "message") continue;
-          const rawIds = identities.get(messageIdentity(entry.message));
-          if (!rawIds) continue;
-          for (const rawId of rawIds) if (!found.has(rawId)) found.set(rawId, entry);
-        }
-      }
-    }
-    const parent = await readParentSessionPath(file);
-    if (!parent || seen.has(parent)) break;
-    seen.add(parent);
-    current = parent;
-  }
-  return found;
-}
 
 // src/decompress-tool.ts
 import { writeFile, mkdir } from "fs/promises";
-import { existsSync as existsSync3, lstatSync, readlinkSync, realpathSync } from "fs";
-import { resolve as resolve2, relative, isAbsolute as isAbsolute2, join as join9, basename as basename3, dirname as dirname8 } from "path";
+import { existsSync as existsSync2, lstatSync, readlinkSync, realpathSync } from "fs";
+import { resolve, relative, isAbsolute as isAbsolute2, join as join9, basename as basename2, dirname as dirname7 } from "path";
 import { tmpdir, homedir as homedir6 } from "os";
-import { createHash as createHash3 } from "crypto";
+import { createHash as createHash2 } from "crypto";
 var AUTO_DIR = join9(homedir6() || tmpdir(), ".cache", "pi", "acp-decompress");
 var PREVIEW_CHARS = 600;
 var MESSAGE_INLINE_THRESHOLD = 2e3;
 var DecompressParams = typebox_exports.Object({
   blockId: typebox_exports.String({ description: 'Block id to restore, e.g. "b5". Also accepts a message ref (UUID) from search_context results \u2014 resolves to the owning block automatically.' }),
   full: typebox_exports.Optional(typebox_exports.Boolean({ description: "If true, recurse through all nested blocks to original messages. Default: false (restores one tier up \u2014 nested block summaries shown, direct messages in full)." })),
-  toFile: typebox_exports.Optional(typebox_exports.String({ description: "Write restored content to this file path (must be under /tmp, ~/.cache/opencode, or ~/.cache/pi) instead of the default auto-generated path. Block stays compressed." })),
+  toFile: typebox_exports.Optional(typebox_exports.String({ description: "Write restored content to this file path (must be under /tmp or ~/.cache/pi) instead of the default auto-generated path. Block stays compressed." })),
   inline: typebox_exports.Optional(typebox_exports.Boolean({ description: "If true, return content inline as this tool's result (appends to context). Default: false \u2014 content is written to an auto-generated file to avoid context bloat. Only set true when the content is small or you accept the context cost." }))
 });
 function makeDecompressTool(runtime, overrides) {
@@ -19928,7 +19416,7 @@ function makeDecompressTool(runtime, overrides) {
     ],
     parameters: DecompressParams,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      if (runtime.refused) return { details: void 0, content: [{ type: "text", text: runtime.refusalMessage ?? UNSUPPORTED_HOST_MESSAGE }] };
+      if (runtime.refused) return { details: void 0, content: [{ type: "text", text: runtime.refusalMessage ?? PROXY_STAND_DOWN_MESSAGE }] };
       let result;
       try {
         const release = await runtime.acquireLock(ctx.sessionManager.getSessionId());
@@ -19953,26 +19441,25 @@ function refoldHint(blockId, result) {
 }
 var ALLOWED_DIRS = [
   tmpdir(),
-  join9(homedir6(), ".cache", "opencode"),
   join9(homedir6(), ".cache", "pi")
 ];
 function resolveToFilePath(targetPath) {
   const expanded = targetPath.startsWith("~/") ? join9(homedir6(), targetPath.slice(2)) : targetPath;
-  const resolved = resolve2(expanded);
+  const resolved = resolve(expanded);
   let probe = resolved;
   const suffix = [];
-  while (!existsSync3(probe) && probe !== dirname8(probe)) {
-    suffix.unshift(basename3(probe));
-    probe = dirname8(probe);
+  while (!existsSync2(probe) && probe !== dirname7(probe)) {
+    suffix.unshift(basename2(probe));
+    probe = dirname7(probe);
   }
-  const real = existsSync3(probe) ? realpathSync(probe) : probe;
+  const real = existsSync2(probe) ? realpathSync(probe) : probe;
   let checked = real;
   for (const part of suffix) {
     checked = join9(checked, part);
     try {
       if (lstatSync(checked).isSymbolicLink()) {
         const target = readlinkSync(checked);
-        checked = isAbsolute2(target) ? resolve2(target) : resolve2(dirname8(checked), target);
+        checked = isAbsolute2(target) ? resolve(target) : resolve(dirname7(checked), target);
       }
     } catch {
     }
@@ -19989,14 +19476,14 @@ function resolveToFilePath(targetPath) {
     return rel === "" || !rel.startsWith("..") && !isAbsolute2(rel);
   });
   if (!isAllowed) {
-    return { error: `Error: toFile path must be under ${tmpdir()}, ~/.cache/opencode, or ~/.cache/pi. Got: ${targetPath}` };
+    return { error: `Error: toFile path must be under ${tmpdir()} or ~/.cache/pi. Got: ${targetPath}` };
   }
   return checked;
 }
 function messageFileStem(ref) {
   if (/^[A-Za-z0-9._-]{1,80}$/.test(ref)) return `msg-${ref}`;
   const readable = ref.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 40);
-  return `msg-${readable}-${createHash3("sha256").update(ref).digest("hex").slice(0, 10)}`;
+  return `msg-${readable}-${createHash2("sha256").update(ref).digest("hex").slice(0, 10)}`;
 }
 function autoFilePath(blockId) {
   return join9(AUTO_DIR, `${blockId}-${Date.now()}.txt`);
@@ -20029,25 +19516,10 @@ async function resolveBlockMessages(block, coreMessages, ctx) {
   const coveredBaseIds = new Set([...coreMessages, ...extra].map((m2) => m2.id.split("#")[0]));
   const stillMissing = [...neededBaseIds].filter((id) => !coveredBaseIds.has(id));
   if (stillMissing.length > 0) {
-    const ancestorMissing = stillMissing.filter((id) => !id.startsWith("live-"));
-    if (ancestorMissing.length > 0) {
-      const ancestors = await loadAncestorEntries(ctx.sessionManager.getSessionFile(), new Set(ancestorMissing));
-      if (ancestors.length > 0) {
-        logInfo("decompress", { sid: ctx.sessionManager.getSessionId(), event: "ancestor-fallback", missing: ancestorMissing.length, found: ancestors.length });
-        for (const entry of ancestors) extra.push(...entriesToCoreMessages([entry]));
-      }
-    }
-    const liveMissing = stillMissing.filter((id) => id.startsWith("live-"));
-    if (liveMissing.length > 0) {
-      const recovered = await loadLiveRefEntries(ctx.sessionManager.getSessionFile(), new Set(liveMissing));
-      if (recovered.size > 0) {
-        logInfo("decompress", { sid: ctx.sessionManager.getSessionId(), event: "live-ref-recovery", missing: liveMissing.length, found: recovered.size });
-        for (const [rawId, entry] of recovered) {
-          for (const cm of entriesToCoreMessages([entry])) {
-            extra.push({ ...cm, id: rawId + cm.id.slice(entry.id.length) });
-          }
-        }
-      }
+    const ancestors = await loadAncestorEntries(ctx.sessionManager.getSessionFile(), new Set(stillMissing));
+    if (ancestors.length > 0) {
+      logInfo("decompress", { sid: ctx.sessionManager.getSessionId(), event: "ancestor-fallback", missing: stillMissing.length, found: ancestors.length });
+      for (const entry of ancestors) extra.push(...entriesToCoreMessages([entry]));
     }
   }
   return [...coreMessages, ...extra];
@@ -20062,23 +19534,9 @@ async function findAncestorMessage(ref, ctx) {
   }
   return null;
 }
-async function findLiveRefMessage(ref, ctx) {
-  const baseId = ref.split("#")[0];
-  const recovered = await loadLiveRefEntries(ctx.sessionManager.getSessionFile(), /* @__PURE__ */ new Set([baseId]));
-  const entry = recovered.get(baseId);
-  if (!entry) return null;
-  const suffix = ref.slice(baseId.length);
-  for (const cm of entriesToCoreMessages([entry])) {
-    if (cm.id === entry.id + suffix) return { text: cm.text ?? "", role: cm.role };
-  }
-  return null;
-}
 async function handleMessageRef(ref, ownerBlockId, args, ctx) {
   let found = findMessageContent(ref, ctx);
-  if (!found) {
-    const baseId = ref.split("#")[0];
-    found = baseId.startsWith("live-") ? await findLiveRefMessage(ref, ctx) : await findAncestorMessage(ref, ctx);
-  }
+  if (!found) found = await findAncestorMessage(ref, ctx);
   if (!found || !found.text) {
     return `Message ${ref} (in block ${ownerBlockId}) has no restorable text content in the session log.`;
   }
@@ -20240,7 +19698,7 @@ function makeSearchTool(runtime, overrides) {
     ],
     parameters: SearchParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (runtime.refused) return { details: void 0, content: [{ type: "text", text: runtime.refusalMessage ?? UNSUPPORTED_HOST_MESSAGE }] };
+      if (runtime.refused) return { details: void 0, content: [{ type: "text", text: runtime.refusalMessage ?? PROXY_STAND_DOWN_MESSAGE }] };
       let result;
       try {
         result = await handleSearch(params, runtime, ctx);
@@ -20292,7 +19750,7 @@ function formatSize(tokens) {
 }
 
 // src/prompt-pack.ts
-import { readFileSync as readFileSync4 } from "fs";
+import { readFileSync as readFileSync3 } from "fs";
 import { homedir as homedir7 } from "os";
 function defaultPackSources2(cwd) {
   return defaultPackSources({
@@ -20410,7 +19868,7 @@ function readToolSurfaceWithPacks(cwd) {
   let packName = "default";
   for (const file of acpJsonFiles(cwd)) {
     try {
-      const parsed = JSON.parse(readFileSync4(file, "utf8"));
+      const parsed = JSON.parse(readFileSync3(file, "utf8"));
       if (parsed && typeof parsed === "object") {
         const rec = parsed;
         if (rec.toolPrompts) inline = sanitizeToolPrompts(rec.toolPrompts);
@@ -20486,7 +19944,7 @@ function makeStatusTool(runtime, overrides) {
     ],
     parameters: StatusParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (runtime.refused) return { details: void 0, content: [{ type: "text", text: runtime.refusalMessage ?? UNSUPPORTED_HOST_MESSAGE }] };
+      if (runtime.refused) return { details: void 0, content: [{ type: "text", text: runtime.refusalMessage ?? PROXY_STAND_DOWN_MESSAGE }] };
       let result;
       try {
         result = await handleStatus(params, runtime, ctx);
@@ -20502,7 +19960,7 @@ async function handleStatus(args, runtime, ctx) {
   const { state, coreMessages, entries } = await runtime.stateFor(ctx);
   const config = applyOutputHeadroom(runtime.configFor(ctx), ctx.model, resolveOutputHeadroomCap(runtime.adapter.outputHeadroomMaxPct));
   const coveredIds = collectCoveredMessageIds(state);
-  const systemPromptText = getSystemPromptText(ctx);
+  const systemPromptText = ctx.getSystemPrompt?.() ?? "";
   const systemPromptTokens = systemPromptText ? defaultCountTokens(systemPromptText) : 0;
   const imageTokens = collectImageTokens(entries, modelSupportsImages(ctx.model));
   const sentTokens = estimateTokens(coreMessages, coveredIds, imageTokens) + systemPromptTokens;
@@ -20609,7 +20067,7 @@ function makeCacheTool(runtime, overrides) {
     ],
     parameters: CacheParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (runtime.refused) return { details: void 0, content: [{ type: "text", text: runtime.refusalMessage ?? UNSUPPORTED_HOST_MESSAGE }] };
+      if (runtime.refused) return { details: void 0, content: [{ type: "text", text: runtime.refusalMessage ?? PROXY_STAND_DOWN_MESSAGE }] };
       try {
         const text = await cacheReportText(runtime, ctx, params.detail === "full" ? "full" : "summary");
         return { details: void 0, content: [{ type: "text", text }] };
@@ -20632,7 +20090,7 @@ function makeRuleTool(runtime) {
     description: "Record a short, principle-level reminder that must survive context compression. Use it for behavioral corrections the user has had to repeat more than once, project invariants the user explicitly asked you to remember, and pitfalls you ran into once and must not run into again. Keep each rule short and principle-level. Recorded rules are hard-protected from compression and stay visible in the conversation. Omit the rule argument to list recorded rules.",
     parameters: RuleParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (runtime.refused) return { details: void 0, content: [{ type: "text", text: runtime.refusalMessage ?? UNSUPPORTED_HOST_MESSAGE }] };
+      if (runtime.refused) return { details: void 0, content: [{ type: "text", text: runtime.refusalMessage ?? PROXY_STAND_DOWN_MESSAGE }] };
       try {
         const release = await runtime.acquireLock(ctx.sessionManager.getSessionId());
         let text;
@@ -21222,7 +20680,7 @@ async function statusReport(runtime, ctx) {
   const config = applyOutputHeadroom(runtime.configFor(ctx), ctx.model, resolveOutputHeadroomCap(runtime.adapter.outputHeadroomMaxPct));
   const realUsage = ctx.getContextUsage?.();
   const anchorStale = usageAnchorPredatesCompression(entries ?? []);
-  const systemPromptText = getSystemPromptText(ctx);
+  const systemPromptText = ctx.getSystemPrompt?.() ?? "";
   const systemPromptTokens = systemPromptText ? defaultCountTokens(systemPromptText) : 0;
   const imageTokens = collectImageTokens(entries, modelSupportsImages(ctx.model));
   const imageTokensTotal = [...imageTokens.values()].reduce((a, b2) => a + b2, 0);
@@ -21596,9 +21054,9 @@ function degenerationNotice(runs) {
 }
 
 // node_modules/acp-kernel/dist/wire/index.js
-import { createHash as createHash4 } from "crypto";
+import { createHash as createHash3 } from "crypto";
 function hashId(s) {
-  return createHash4("sha256").update(s, "utf8").digest("hex").slice(0, 16);
+  return createHash3("sha256").update(s, "utf8").digest("hex").slice(0, 16);
 }
 function createSubagentNamespaces() {
   const anchors = /* @__PURE__ */ new Map();
@@ -21778,13 +21236,11 @@ function applyStripImages(body, api, settings2) {
 }
 
 // src/tool-guardrails.ts
-import { createHash as createHash5 } from "crypto";
-function isBashToolResult(e) {
-  return e.toolName === "bash";
-}
-function isBashToolCall(event) {
-  return event.toolName === "bash";
-}
+import { createHash as createHash4 } from "crypto";
+import {
+  isBashToolResult,
+  isToolCallEventType
+} from "@earendil-works/pi-coding-agent";
 function resolveBashTimeout(input, defaultTimeout) {
   if (input.timeout !== void 0) return void 0;
   const d2 = defaultTimeout ?? DEFAULT_TOOL_BASH_TIMEOUT;
@@ -21879,7 +21335,7 @@ function canonicalStringify(value) {
 function repetitionFingerprint(toolName, input) {
   const payload = `${toolName}\0${canonicalStringify(input ?? {})}`;
   try {
-    return createHash5("sha1").update(payload).digest("hex");
+    return createHash4("sha1").update(payload).digest("hex");
   } catch {
     return `unhashable:${toolName}`;
   }
@@ -21920,7 +21376,7 @@ function wireToolGuardrails(pi, runtime) {
   const trackers = /* @__PURE__ */ new Map();
   const pendingWarns = /* @__PURE__ */ new Map();
   pi.on("tool_call", (event, ctx) => {
-    if (isBashToolCall(event)) {
+    if (isToolCallEventType("bash", event)) {
       const t = resolveBashTimeout(event.input, runtime.adapter.toolBashDefaultTimeout);
       if (t !== void 0) {
         event.input.timeout = t;
@@ -22431,34 +21887,6 @@ function inheritedNote(id, effective) {
   return "";
 }
 
-// src/proxy-detect.ts
-function isBiliProxyBaseUrl(baseUrl) {
-  if (!baseUrl) return false;
-  try {
-    const url = new URL(baseUrl);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-    const segments = url.pathname.split("/").filter((s) => s.length > 0);
-    if (segments[0] !== "bili") return false;
-    const rest = url.pathname.slice(url.pathname.indexOf("bili") + "bili".length);
-    return /^\/https?:\/\//.test(rest);
-  } catch {
-    return false;
-  }
-}
-var PROXY_STAND_DOWN_MESSAGE = [
-  "[billion-context-pi] Model baseUrl routes through the billion-context wire proxy (/bili/ prefix) \u2014 ACP client-side compression has been disabled for this session to avoid double compression.",
-  "The proxy runs the same compression pipeline server-side and owns the ref coordinate space; nothing else to configure.",
-  "If your traffic reaches the proxy via HTTPS_PROXY instead (no /bili/ prefix in the URL), export BILLION_CONTEXT_PROXY=1 before starting pi.",
-  "Docs: https://github.com/ranxianglei/billion-context"
-].join("\n");
-function nativeStandDownMessage(host) {
-  return [
-    `[billion-context-pi] billion-context native host detected (BILLION_CONTEXT_NATIVE=${host}) \u2014 the in-process native plugin proxies model API traffic and owns compression.`,
-    "ACP client-side compression has been disabled for this session to avoid double compression; nothing else to configure.",
-    "Docs: https://github.com/ranxianglei/billion-context"
-  ].join("\n");
-}
-
 // src/index.ts
 var latestUserOverLimit = /* @__PURE__ */ new Set();
 function createAcpExtension(adapter = {}) {
@@ -22514,7 +21942,7 @@ function userConfigDisabled(cwd) {
   for (const file of acpJsonFiles(cwd)) {
     let text;
     try {
-      text = readFileSync5(file, "utf8");
+      text = readFileSync4(file, "utf8");
     } catch {
       continue;
     }
@@ -22543,29 +21971,7 @@ function wireCompactionDisable(pi, runtime) {
   });
 }
 function wireSessionLifecycle(pi, runtime, standDownIfProxied) {
-  let ompWarned = false;
-  let forkWarned = false;
   pi.on("session_start", async (_event, ctx) => {
-    if (isUnsupportedHost(ctx.sessionManager)) {
-      runtime.refused = true;
-      if (!ompWarned) {
-        ompWarned = true;
-        const sid2 = ctx.sessionManager.getSessionId();
-        logWarn("host", { event: "host-unsupported", sid: sid2, action: "refused" });
-        if (ctx.hasUI) ctx.ui.notify(UNSUPPORTED_HOST_MESSAGE, "warning");
-        else console.error(UNSUPPORTED_HOST_MESSAGE);
-      }
-      return;
-    }
-    if (isDeclaredForkHost() && !isPiHost(ctx.sessionManager)) {
-      const sid2 = ctx.sessionManager.getSessionId();
-      logWarn("host", { event: "fork-host-admitted", sid: sid2, hardening: "#459", proxy: "billion-context" });
-      if (!forkWarned) {
-        forkWarned = true;
-        if (ctx.hasUI) ctx.ui.notify(FORK_HOST_WARNING_MESSAGE, "warning");
-        else console.error(FORK_HOST_WARNING_MESSAGE);
-      }
-    }
     if (standDownIfProxied(ctx)) return;
     runtime.store.invalidate();
     runtime.clearNudgeTracking(ctx.sessionManager.getSessionId());
@@ -22642,7 +22048,7 @@ function wireContextTransform(pi, runtime, standDownIfProxied, idle) {
     try {
       await runtime.reloadConfig(ctx.cwd);
       const modelId = ctx.model?.id ?? "default";
-      const { state, coreMessages, entries } = await runtime.stateFor(ctx, event.messages);
+      const { state, coreMessages, entries } = await runtime.stateFor(ctx);
       const configBase = runtime.configFor(ctx);
       const ov = runtime.overflowFor(sid);
       let config = configBase;
@@ -22659,7 +22065,7 @@ function wireContextTransform(pi, runtime, standDownIfProxied, idle) {
       }
       const coveredIds = collectCoveredMessageIds(state);
       const realUsage = ctx.getContextUsage?.();
-      const systemPromptText = getSystemPromptText(ctx);
+      const systemPromptText = ctx.getSystemPrompt?.() ?? "";
       const systemPromptTokens = systemPromptText ? defaultCountTokens(systemPromptText) : 0;
       const imageTokens = collectImageTokens(entries, modelSupportsImages(ctx.model));
       const compressThinkingTokens = keptCompressThinkingTokens(
@@ -22841,11 +22247,9 @@ function wireContextTransform(pi, runtime, standDownIfProxied, idle) {
         }
       }
       const debugOn2 = debug.enabled;
-      const turnPolicy = resolveHostSession(runtime.adapter);
-      const turnKey = lastTurnBoundaryId(entries, turnPolicy) ?? sid;
-      const retryTurnKey = retryBreakerKey(ctx.sessionManager, turnPolicy) ?? sid;
-      const compressOutcomes = collectCompressOutcomes(entries, lastTurnBoundaryIndex(entries, turnPolicy));
-      const outcome = compressOutcomes.length > 0 ? runtime.noteCompressOutcomes(sid, retryTurnKey, compressOutcomes) : null;
+      const turnKey = lastTurnBoundaryId(entries) ?? sid;
+      const compressOutcomes = collectCompressOutcomes(entries, lastTurnBoundaryIndex(entries));
+      const outcome = compressOutcomes.length > 0 ? runtime.noteCompressOutcomes(sid, turnKey, compressOutcomes) : null;
       const adaptiveGrowth = !config.modelContextLimit || config.modelContextLimit <= 0 ? config.nudge.growthFloor : Math.min(
         config.nudge.growthCap,
         Math.max(config.nudge.growthFloor, Math.round(config.modelContextLimit * config.nudge.growthRatio))
@@ -22861,7 +22265,7 @@ function wireContextTransform(pi, runtime, standDownIfProxied, idle) {
       if (turn.nudge?.shouldInject) {
         const emergency = turn.nudge.breakdown?.emergencyOverride === 1;
         turn.nudge.compressibleRanges = viableRanges(turn.nudge.compressibleRanges);
-        const retryCapped = runtime.compressRetryCappedFor(sid, retryTurnKey);
+        const retryCapped = runtime.compressRetryCappedFor(sid, turnKey);
         const reInjectReady = shownAt === void 0 || tokenCount - shownAt >= reInjectFloor;
         const alreadyShown = retryCapped || !emergency && runtime.nudgeShownFor(sid, turnKey) && !reInjectReady;
         if (!alreadyShown) {
@@ -22977,7 +22381,9 @@ function wireSystemPrompt(pi, runtime) {
       lastIgnoredPromptKeys = key;
     }
     const prompt = buildAcpSystemPrompt(runtime.prompts, merged.promptSections);
-    return { systemPrompt: formatSystemPromptForEvent(event.systemPrompt, prompt) };
+    return { systemPrompt: `${event.systemPrompt}
+
+${prompt}` };
   });
 }
 var DEDICATED_CALLER_RULES = `HOW TO COMPRESS (dedicated summary model active)
@@ -23155,9 +22561,7 @@ function formatNudgeRecord(nudge, emergency) {
 }
 export {
   createAcpExtension,
-  createRuntime,
   index_default as default,
-  deriveChildState,
   formatNudgeRecord
 };
 //# sourceMappingURL=index.js.map

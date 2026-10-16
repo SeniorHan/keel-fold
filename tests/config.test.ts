@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveConfig, resolveCompress, mergeCompress, resolveRepetitionGuard, resolveHostSession, REPETITION_GUARD_DEFAULTS, type AdapterConfig } from "../src/config.js";
+import { resolveConfig, resolveCompress, mergeCompress, resolveRepetitionGuard, REPETITION_GUARD_DEFAULTS, type AdapterConfig } from "../src/config.js";
 
 const EMPTY: AdapterConfig = {};
 
@@ -207,49 +207,6 @@ test("resolveRepetitionGuard keeps custom thresholds while honoring enabled:fals
   assert.equal(r.enabled, false);
   assert.equal(r.warn, 4);
   assert.equal(r.abort, 9);
-});
-
-test("resolveHostSession defaults to pi-native (off) when unset or false", () => {
-  assert.deepEqual(resolveHostSession(EMPTY), { countCustomMessages: false });
-  assert.deepEqual(resolveHostSession({ hostSession: false }), { countCustomMessages: false });
-});
-
-test("resolveHostSession boolean true shorthand enables countCustomMessages", () => {
-  assert.deepEqual(resolveHostSession({ hostSession: true }), { countCustomMessages: true });
-});
-
-test("resolveHostSession object form honors explicit values", () => {
-  assert.deepEqual(resolveHostSession({ hostSession: { countCustomMessages: true } }), { countCustomMessages: true });
-  assert.deepEqual(resolveHostSession({ hostSession: { countCustomMessages: false } }), { countCustomMessages: false });
-});
-
-test("resolveHostSession falls back to off for invalid values", () => {
-  assert.deepEqual(resolveHostSession({ hostSession: "yes" as unknown as boolean }), { countCustomMessages: false });
-  assert.deepEqual(resolveHostSession({ hostSession: { countCustomMessages: "yes" as unknown as boolean } }), { countCustomMessages: false });
-});
-
-test("resolveHostSession passes a valid customMessageTypes allowlist through (#578)", () => {
-  const r = resolveHostSession({ hostSession: { countCustomMessages: true, customMessageTypes: ["agent_message", "heartbeat_prompt"] } });
-  assert.equal(r.countCustomMessages, true);
-  assert.deepEqual(r.customMessageTypes, ["agent_message", "heartbeat_prompt"]);
-});
-
-test("resolveHostSession drops an orphaned customMessageTypes without countCustomMessages (#578)", () => {
-  const r = resolveHostSession({ hostSession: { customMessageTypes: ["agent_message"] } });
-  assert.deepEqual(r, { countCustomMessages: false }, "allowlist alone does not opt in");
-});
-
-test("resolveHostSession drops malformed customMessageTypes values (#578)", () => {
-  const bad = (v: unknown) => resolveHostSession({ hostSession: { countCustomMessages: true, customMessageTypes: v as string[] } });
-  assert.deepEqual(bad("agent_message"), { countCustomMessages: true }, "non-array falls back to all types counting");
-  assert.deepEqual(bad(["agent_message", 42]), { countCustomMessages: true }, "non-string member rejected");
-  assert.deepEqual(bad([""]), { countCustomMessages: true }, "empty-string member rejected");
-  assert.deepEqual(bad(null), { countCustomMessages: true }, "null rejected");
-});
-
-test("resolveHostSession honors an empty allowlist as explicit count-none (#578)", () => {
-  const r = resolveHostSession({ hostSession: { countCustomMessages: true, customMessageTypes: [] } });
-  assert.deepEqual(r, { countCustomMessages: true, customMessageTypes: [] });
 });
 
 test("resolveConfig forwards protection keys into the kernel config", () => {

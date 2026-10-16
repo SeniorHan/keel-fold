@@ -1,6 +1,4 @@
 import type { ExtensionContext, SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import {
   createCore,
   defaultCountTokens,
@@ -13,68 +11,28 @@ import {
 import { resolveCompress, resolveConfig, type AdapterConfig } from "./config.js";
 import { applyStrictReasoningGate, resolveReasoningDrop, type CompressReasoningConfig } from "./reasoning-drop.js";
 import type { SentViewMeterRecord } from "./tokens.js";
-import { entriesToCoreMessages, EntryProjectionCache, extractText, matchesStoredText, messageIdentity, messageRef } from "./messages.js";
-import { SessionStateStore, deriveChildState, type LiveRefOrigin } from "./state.js";
+import { entriesToCoreMessages, EntryProjectionCache } from "./messages.js";
+import { SessionStateStore } from "./state.js";
 import { hasCompressHistory, rebuildStateFromLog } from "./state-rebuild.js";
 import { loadUserConfig, applyUserConfig, saveCompressionModelId } from "./user-config.js";
 import { sanitizeSurfaceConfig } from "./surface.js";
 import { ThrottleEpisode } from "./throttle-retry.js";
 import { logInfo, logWarn, setDebugEnabled } from "./log.js";
-import { findPositionalPrefixRun, findUniqueLongestRun, type MatchRange } from "./sequence-match.js";
 import { OverflowEpisode } from "./overflow-selfheal.js";
-import { lastTurnBoundaryId, type TurnBoundaryPolicy } from "./turn-boundary.js";
 import { findOffBranchBlocks, markOffBranchBlocks, withBranchGuard } from "./branch-guard.js";
-// pi exposes `sessionManager.buildContextEntries()`; omp (oh-my-pi) only has
-// `getBranch()`. Both return chronological SessionEntry[]; feature-detect so
-// the adapter runs under either host (omp's runner silently swallows the TypeError).
-type SessionEntrySource = {
-  buildContextEntries?: () => SessionEntry[];
-  getBranch?: () => SessionEntry[];
-};
 
 type AgentMessage = SessionMessageEntry["message"];
 
-export function readContextEntries(sm: ExtensionContext["sessionManager"]): SessionEntry[] {
-  const source = sm as unknown as SessionEntrySource;
-  if (typeof source.buildContextEntries === "function") return source.buildContextEntries();
-  if (typeof source.getBranch === "function") return source.getBranch();
-  return [];
-}
-
-export function isPiHost(sm: ExtensionContext["sessionManager"]): boolean {
-  const source = sm as unknown as SessionEntrySource;
-  return typeof source.buildContextEntries === "function";
-}
-
-/** #453: key for the compress-retry circuit breaker, derived from PERSISTED
- *  entries only. Live-merged tail ids (content-addressed since #459) can still
- *  churn when the host's view of a not-yet-persisted message drifts, so a
- *  breaker keyed on the merged view could reset failCount mid-episode (#452
- *  log: cap → inject loop). Persisted entry ids are immutable; this key
- *  changes only when a genuine new user message reaches the session log.
- *  pi-native hosts see no change. */
-export function retryBreakerKey(sm: ExtensionContext["sessionManager"], policy?: TurnBoundaryPolicy): string | undefined {
-  return lastTurnBoundaryId(readContextEntries(sm), policy);
-}
-
-/** Minimal identity of a session for state operations that don't need a live
- *  ExtensionContext (hosts deriving inline child sessions build these from
- *  whatever session handles they hold). */
-export interface SessionRef {
-  sessionId: string;
-  sessionFile?: string;
-}
-
 export interface AcpRuntime {
   core: CompressionCore;
-  /** Set when the host is unsupported (currently: OMP / oh-my-pi) or when the
-   *  model's baseUrl routes through the billion-context wire proxy (#296).
+  /** Set when the model's traffic routes through the billion-context wire
+   *  proxy (#296), which then owns compression.
    *  Once true, the extension stands down: the context transform, system-prompt
    *  injection, compaction-cancel and ACP tools all no-op so the host runs
    *  untouched. Set at session_start (first context event as fallback). */
   refused: boolean;
-  /** User-facing reason shown when a refused ACP tool is invoked; null means
-   *  the default OMP refusal text applies. Set together with `refused`. */
+  /** User-facing reason shown when a refused ACP tool is invoked. Set
+   *  together with `refused`. */
   refusalMessage: string | null;
   /** Per-session provider-throttle retry episode (attempt budget + kick
    *  pacing), keyed by session id so concurrent sessions in one extension
@@ -110,9 +68,7 @@ export interface AcpRuntime {
   nudgeRecordedFor(sid: string, turnKey: string): boolean;
   /** Process compress toolResults for the CURRENT user turn only (the caller
    *  scopes the list — see collectCompressOutcomes in src/index.ts); idempotent
-   *  per toolCallId. turnKey MUST be the stable persisted-boundary key
-   *  (retryBreakerKey) — a key derived from live-merged entries churns under
-   *  fork hosts and resets the counter mid-episode (#453). Outcome classes:
+   *  per toolCallId. turnKey is the last user-turn boundary. Outcome classes:
    *  isError or noop (0-block panel) → failure (count++), success panel
    *  (>= 1 block) → reset, other non-error text → neutral (count unchanged).
    *  Returns the failure count and whether the cap was just reached. */
@@ -136,7 +92,7 @@ export interface AcpRuntime {
    *  config when the contents change. Cheap no-op when unchanged. Called at
    *  session_start and on every context event so config edits apply live. */
   reloadConfig(cwd: string): Promise<void>;
-  stateFor(ctx: ExtensionContext, liveMessages?: AgentMessage[]): Promise<{ state: CompressionState; coreMessages: ReturnType<typeof entriesToCoreMessages>; entries: SessionEntry[] }>;
+  stateFor(ctx: ExtensionContext): Promise<{ state: CompressionState; coreMessages: ReturnType<typeof entriesToCoreMessages>; entries: SessionEntry[] }>;
   /** Record the EXACT sent view measured off the real processTurn output for
    *  this turn (issue #561): `viewTokens` counts turn.messages (the pruned,
    *  summary-injected projection that actually went on the wire), and `usable`
@@ -153,16 +109,6 @@ export interface AcpRuntime {
    *  holds the full projected CoreMessage[] for the session history. */
   dropProjectionCache(sid: string): void;
   save(state: CompressionState, ctx: ExtensionContext): Promise<void>;
-  /** #364 inline child sessions (same process, e.g. Prime RLM): derive the
-   *  child's compression state from another session's. Inherits blocks /
-   *  message refs / token snapshot so decompress + search_context keep working
-   *  on inherited blocks; resets every rhythm ledger (nudge cadence, stats,
-   *  absorb). One-time: writes a derivation marker into the child sidecar and
-   *  refuses to run again; also refuses when the child already owns real
-   *  (non-derived) blocks or when the parent has no blocks. Separate-process
-   *  pi-native delegates must NOT call this — their parentSession header
-   *  already inherits verbatim. Returns true when the child state was derived. */
-  deriveChildState(child: SessionRef, parent: SessionRef): Promise<boolean>;
   acquireLock(sid: string): Promise<() => void>;
   /** Per-session overflow self-heal state (learned window + armed emergency).
    *  Keyed by session id so concurrent sessions cannot share an episode. */
@@ -217,140 +163,6 @@ export interface AcpRuntime {
   /** Drop a session's truncation-skipped episode (session_shutdown). */
   dropTruncationSkipped(sid: string): void;
 }
-// omp fires the context event before the current user message is persisted to
-// the session branch, so merge event.messages (exact messages about to be sent,
-// including the not-yet-persisted tail) with the persisted branch: matching
-// messages keep their stable entry id, unmatched tail messages get
-// content-addressed `live-<hash>` ids (#459) until persisted.
-function mergeLiveEntries(entries: SessionEntry[], live: AgentMessage[], state: CompressionState, origins: LiveRefOrigin[]): SessionEntry[] {
-  const persisted = entries.filter((e): e is SessionMessageEntry => e.type === "message");
-  const liveIdentities = live.map(messageIdentity);
-  const persistedIdentities = persisted.map((entry) => messageIdentity(entry.message));
-  const normalizedKeys = normalizePersistedMatchKeys(persisted, persistedIdentities, live, liveIdentities);
-  // #459: the unique matcher gives up on duplicate-heavy views (ambiguous best
-  // run), which previously stranded every live message and renumbered its
-  // volatile live-N id each fire; the tail-anchored prefix run recovers the
-  // alignment deterministically under append-only growth.
-  const persistedRange = findUniqueLongestRun<MatchKey>(persistedIdentities, normalizedKeys) ?? findPositionalPrefixRun<MatchKey>(persistedIdentities, normalizedKeys);
-  const originRange = findUniqueLongestRun(origins.map((origin) => origin.identity), liveIdentities);
-  // #459: occurrence rank of each identity across (persisted + unmatched live
-  // prefix). When a message gets persisted it moves from the live count into
-  // the persisted count, so every still-live duplicate keeps the same rank —
-  // its id stays put across fires.
-  const identityRanks = new Map<string, number>();
-  for (const identity of persistedIdentities) identityRanks.set(identity, (identityRanks.get(identity) ?? 0) + 1);
-  const out: SessionEntry[] = [];
-  const nextOrigins: LiveRefOrigin[] = [];
-  for (let i = 0; i < live.length; i++) {
-    const msg = live[i]!;
-    const entry = valueInRange(persisted, persistedRange, i);
-    const origin = valueInRange(origins, originRange, i);
-    if (entry) {
-      if (origin) migrateLiveRefs(state, origin.rawId, entry.id);
-      else migrateTaggedRef(state, msg, entry.id);
-      out.push(entry);
-      continue;
-    }
-    const identity = liveIdentities[i]!;
-    const rank = identityRanks.get(identity) ?? 0;
-    identityRanks.set(identity, rank + 1);
-    const id = origin?.rawId ?? stableLiveId(identity, rank);
-    out.push({ type: "message", id, parentId: null, timestamp: String(msg.timestamp ?? Date.now()), message: msg });
-    nextOrigins.push({ rawId: id, identity });
-  }
-  origins.splice(0, origins.length, ...nextOrigins);
-  const unmatched = live.length - (persistedRange?.length ?? 0);
-  if (unmatched > 0) logInfo("runtime", { event: "merge-live-entries", live: live.length, unmatched });
-  return out;
-}
-
-// #459: deterministic id for an unmatched live message — sha256 over its
-// content identity plus occurrence rank, so the same logical message gets the
-// same id on every context fire (and after a state rebuild) even when the
-// unique matcher cannot align it.
-function stableLiveId(identity: string, rank: number): string {
-  return `live-${createHash("sha256").update(`${identity}\u0000${rank}`).digest("hex").slice(0, 16)}`;
-}
-
-function migrateTaggedRef(state: CompressionState, message: AgentMessage, stableId: string): void {
-  const ref = messageRef(message);
-  const rawId = ref ? state.messageRefs.byRef[ref] : undefined;
-  if (rawId?.startsWith("live-")) migrateLiveRefs(state, rawId, stableId);
-}
-
-function migrateLiveRefs(state: CompressionState, liveId: string, stableId: string): void {
-  const rootId = liveId.split("#", 1)[0]!;
-  if (!rootId.startsWith("live-")) return;
-  for (const [rawId, ref] of Object.entries(state.messageRefs.byRaw)) {
-    if (rawId !== rootId && !rawId.startsWith(`${rootId}#`)) continue;
-    const stableRawId = `${stableId}${rawId.slice(rootId.length)}`;
-    if (state.messageRefs.byRaw[stableRawId] === undefined) {
-      state.messageRefs.byRaw[stableRawId] = ref;
-      state.messageRefs.byRef[ref] = stableRawId;
-    } else if (state.messageRefs.byRef[ref] === rawId) {
-      delete state.messageRefs.byRef[ref];
-    }
-    delete state.messageRefs.byRaw[rawId];
-  }
-}
-
-type MatchKey = string | symbol;
-
-const NO_PERSISTED_MATCH = Symbol("no-persisted-match");
-
-function normalizePersistedMatchKeys(
-  persisted: readonly SessionMessageEntry[],
-  persistedIdentities: readonly string[],
-  live: readonly AgentMessage[],
-  liveIdentities: readonly string[],
-): MatchKey[] {
-  const persistedByStructure = new Map<string, number>();
-  for (let index = 0; index < persisted.length; index++) {
-    const key = toolResultStructureKey(persisted[index]!.message);
-    if (key === undefined) continue;
-    persistedByStructure.set(key, persistedByStructure.has(key) ? -1 : index);
-  }
-  return live.map((message, liveIndex) => {
-    const key = toolResultStructureKey(message);
-    const candidateIndex = key === undefined ? undefined : persistedByStructure.get(key);
-    if (candidateIndex === undefined) return liveIdentities[liveIndex]!;
-    if (candidateIndex < 0) return NO_PERSISTED_MATCH;
-    return sameToolResult(persisted[candidateIndex]!.message, message)
-      ? persistedIdentities[candidateIndex]!
-      : liveIdentities[liveIndex]!;
-  });
-}
-
-function toolResultStructureKey(message: AgentMessage): string | undefined {
-  if (message.role !== "toolResult") return undefined;
-  return `${message.toolName}\0${message.toolCallId}`;
-}
-
-function valueInRange<T>(values: readonly T[], range: MatchRange | undefined, liveIndex: number): T | undefined {
-  if (!range || liveIndex < range.liveStart || liveIndex >= range.liveStart + range.length) return undefined;
-  return values[range.candidateStart + liveIndex - range.liveStart];
-}
-
-function sameToolResult(stored: AgentMessage, visible: AgentMessage): boolean {
-  if (stored.role !== "toolResult" || visible.role !== "toolResult") return false;
-  return sameNonTextBlocks(stored.content, visible.content)
-    && matchesStoredText(extractText(stored.content), extractText(visible.content));
-}
-
-function sameNonTextBlocks(a: unknown, b: unknown): boolean {
-  const nonText = (blocks: unknown[]): unknown[] => blocks.filter((block) => {
-    if (!block || typeof block !== "object" || !("type" in block)) return true;
-    return block.type !== "text";
-  });
-  try {
-    const na = Array.isArray(a) ? nonText(a) : [];
-    const nb = Array.isArray(b) ? nonText(b) : [];
-    return JSON.stringify(na) === JSON.stringify(nb);
-  } catch {
-    return false;
-  }
-}
-
 function pruneOrphanRefs(state: CompressionState, messages: ReturnType<typeof entriesToCoreMessages>): void {
   const retainedRawIds = new Set(messages.map((message) => message.id));
   for (const block of state.blocks) {
@@ -709,16 +521,6 @@ export function createRuntime(adapter: AdapterConfig): AcpRuntime {
     }
   }
 
-  // #459: tools (compress/decompress/status/search) run stateFor WITHOUT the
-  // context event's live tail, while the nudge that told the model which refs
-  // to cite was rendered WITH it — on fork hosts getBranch() lags the live
-  // tail, so every model-built range touching the tail died with "does not
-  // exist" (#452 loop). Cache each session's last context-fire live tail and
-  // replay it on the tool path so both views agree. The map is process-local:
-  // a resumed session starts with an empty cache and the first context fire
-  // repopulates it before any tool can run.
-  const lastLiveBySession = new Map<string, AgentMessage[]>();
-
   // Issue #561: per-session incremental projection cache — pi hosts rebuild the
   // entries array (fresh objects) every turn from an append-only jsonl, so the
   // 24k-entry projection is prefix-stable and only the new tail needs work.
@@ -727,22 +529,18 @@ export function createRuntime(adapter: AdapterConfig): AcpRuntime {
     projectionCaches.delete(sid);
   }
 
-  async function stateFor(ctx: ExtensionContext, liveMessages?: AgentMessage[]) {
+  async function stateFor(ctx: ExtensionContext) {
     const sm = ctx.sessionManager;
     const sessionFile = sm.getSessionFile() ?? undefined;
     const sessionId = sm.getSessionId();
-    const piHost = isPiHost(sm);
-    if (!piHost && liveMessages && liveMessages.length > 0) lastLiveBySession.set(sessionId, [...liveMessages]);
-    const live = piHost ? undefined : (liveMessages ?? lastLiveBySession.get(sessionId));
     let state = await store.load(sessionFile, sessionId);
-    const entries = readContextEntries(sm);
+    const entries = sm.buildContextEntries();
     // Issue #299 (ranxianglei/billion-context-pi#299): pi's importFromJsonl
     // copies only the .jsonl, so the `${sessionFile}.acp.json` sidecar never
     // travels with an imported session and compression state silently resets
     // (the adapter then re-compresses already-compressed content). Last resort
     // after the sidecar and parent-session inheritance both miss: replay the
-    // successful compress calls recorded in the session log itself. Uses only
-    // persisted entries — the omp live tail is not part of history yet.
+    // successful compress calls recorded in the session log itself.
     if (sessionFile && state.blocks.length === 0 && hasCompressHistory(entries)) {
       const rebuilt = rebuildStateFromLog({ entries, state, config: configFor(ctx), core });
       if (rebuilt.report.blocks > 0) {
@@ -757,30 +555,11 @@ export function createRuntime(adapter: AdapterConfig): AcpRuntime {
         });
       }
     }
-    // omp fires the context event BEFORE the current user message is persisted
-    // to the session branch (its agent-loop emits message_end only after
-    // prepareProviderCall → transformContext), so getBranch() lags one message
-    // behind and the current prompt would be dropped from the rebuilt context.
-    // pi appends user messages to the session before the LLM call, so its
-    // buildContextEntries() is always current. Merge event.messages (the exact
-    // messages about to be sent, including the not-yet-persisted tail) with the
-    // persisted branch records on the omp path only.
-    if (!piHost && live && live.length > 0) {
-      const origins = store.getLiveRefOrigins(sessionFile, sessionId);
-      const merged = mergeLiveEntries(entries, live, state, origins);
-      store.setLiveRefOrigins(sessionFile, sessionId, origins);
-      const coreMessages = entriesToCoreMessages(merged);
-      // #459: enforce byRaw ⊆ view-ids ∪ block-ids on the merged view too —
-      // without it, stale live-* refs from a shrunken/rewound host view linger
-      // in state and get cited into compress ranges (#452 cross-generation refs).
-      pruneOrphanRefs(state, coreMessages);
-      return { state, coreMessages, entries: merged };
-    }
     let projection = projectionCaches.get(sessionId);
     if (!projection) { projection = new EntryProjectionCache(); projectionCaches.set(sessionId, projection); }
     const coreMessages = projection.project(entries);
-    if (live === undefined) pruneOrphanRefs(state, coreMessages);
-    if (piHost) guardBranch(sm, sessionId, state, coreMessages);
+    pruneOrphanRefs(state, coreMessages);
+    guardBranch(sm, sessionId, state, coreMessages);
     return { state, coreMessages, entries };
   }
 
@@ -805,36 +584,6 @@ export function createRuntime(adapter: AdapterConfig): AcpRuntime {
     await store.save(state, sm.getSessionFile() ?? undefined, sm.getSessionId());
   }
 
-  // Own-sidecar check (not cache/load) because load() may have already filled
-  // the slot via implicit parentSession-header inheritance — that implicit
-  // state is replaceable by an explicit derivation, but real self-compressed
-  // blocks are not.
-  function ownSidecarHasBlocks(sessionFile: string): boolean {
-    try {
-      const parsed = JSON.parse(readFileSync(`${sessionFile}.acp.json`, "utf8")) as { blocks?: unknown };
-      return Array.isArray(parsed.blocks) && parsed.blocks.length > 0;
-    } catch {
-      return false;
-    }
-  }
-
-  async function deriveChild(child: SessionRef, parent: SessionRef): Promise<boolean> {
-    if (!child.sessionFile) return false;
-    if (ownSidecarHasBlocks(child.sessionFile)) return false;
-    // Materialize the child cache slot (also surfaces any implicit header
-    // inheritance or a marker persisted by an earlier process) so the marker
-    // below has a slot to attach to and save() persists it.
-    await store.load(child.sessionFile, child.sessionId);
-    if (store.getDerivedFrom(child.sessionFile, child.sessionId)) return false;
-    const parentState = await store.load(parent.sessionFile, parent.sessionId);
-    if (parentState.blocks.length === 0) return false;
-    const derived = deriveChildState(parentState);
-    store.setDerivedFrom(child.sessionFile, child.sessionId, { parentSessionId: parent.sessionId, derivedAt: Date.now() });
-    await store.save(derived, child.sessionFile, child.sessionId);
-    logInfo("state", { sid: child.sessionId, event: "child-state-derived", parentSid: parent.sessionId, blocks: derived.blocks.length });
-    return true;
-  }
-
   let refused = false;
   let refusalMessage: string | null = null;
-  return { core, store, get refused() { return refused; }, set refused(v: boolean) { refused = v; }, get refusalMessage() { return refusalMessage; }, set refusalMessage(v: string | null) { refusalMessage = v; }, get adapter() { return adapterRef; }, setAdapter: (a) => { adapterRef = a; }, get prompts() { return promptsRef; }, setPrompts: (p) => { promptsRef = p; }, markNudgeShown, nudgeShownFor, nudgeShownTokensFor, clearNudgeTracking, clearNudgeTokenStamps, markNudgeRecorded, nudgeRecordedFor, noteCompressOutcomes, compressRetryCappedFor, clearCompressRetryTracking, liveContextLimit, configFor, reasoningDropFor, reloadConfig, stateFor, save, deriveChildState: deriveChild, acquireLock, overflowFor, overflowDrop, noteSentViewCount, peekSentViewCount, dropSentViewCount, dropProjectionCache, noteDeadCompress, clearDeadCompress, throttleFor, throttleDrop , noteTokenScale, dropTokenScale, noteHostUsage, dropHostUsageSamples, noteSizeDivergence, dropSizeDivergence, noteTerminalEscape, dropTerminalEscape, noteTruncationSkipped, dropTruncationSkipped, stripImagesFor, getCompressionModelRef, setCompressionModelRef, setLastSentMessages, getLastSentMessages, dropLastSentMessages };}
+  return { core, store, get refused() { return refused; }, set refused(v: boolean) { refused = v; }, get refusalMessage() { return refusalMessage; }, set refusalMessage(v: string | null) { refusalMessage = v; }, get adapter() { return adapterRef; }, setAdapter: (a) => { adapterRef = a; }, get prompts() { return promptsRef; }, setPrompts: (p) => { promptsRef = p; }, markNudgeShown, nudgeShownFor, nudgeShownTokensFor, clearNudgeTracking, clearNudgeTokenStamps, markNudgeRecorded, nudgeRecordedFor, noteCompressOutcomes, compressRetryCappedFor, clearCompressRetryTracking, liveContextLimit, configFor, reasoningDropFor, reloadConfig, stateFor, save, acquireLock, overflowFor, overflowDrop, noteSentViewCount, peekSentViewCount, dropSentViewCount, dropProjectionCache, noteDeadCompress, clearDeadCompress, throttleFor, throttleDrop , noteTokenScale, dropTokenScale, noteHostUsage, dropHostUsageSamples, noteSizeDivergence, dropSizeDivergence, noteTerminalEscape, dropTerminalEscape, noteTruncationSkipped, dropTruncationSkipped, stripImagesFor, getCompressionModelRef, setCompressionModelRef, setLastSentMessages, getLastSentMessages, dropLastSentMessages };}

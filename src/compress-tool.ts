@@ -10,17 +10,15 @@ import {
 import type { Api, Context, Message, Model, Tool } from "@earendil-works/pi-ai";
 import type { SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import type { AcpRuntime } from "./runtime.js";
-import { MAX_COMPRESS_ATTEMPTS, isPiHost, retryBreakerKey } from "./runtime.js";
-import { isDeclaredForkHost } from "./host.js";
+import { MAX_COMPRESS_ATTEMPTS } from "./runtime.js";
+import { lastTurnBoundaryId } from "./turn-boundary.js";
 import { debug, logError, logInfo, logThrow, logWarn } from "./log.js";
 import { estimateTokens, collectCoveredMessageIds, collectImageTokens, modelSupportsImages, adjustedTokenCount } from "./tokens.js";
 import { applyToolPromptOverrides, type ToolPromptOverrides } from "./surface.js";
-import { resolveHostSession } from "./config.js";
 import { defaultCountTokens, parseCompressArgs, resolveBoundaries, viableRanges, formatRanges, type CompressionBlock, type CompressionState, type CompressParseDiagnostics, type CoreMessage, type NudgeDecision } from "acp-kernel";
 import { countUnicodeEscapes, findUnverifiableUserQuote, sanitizeSummary } from "./summary-sanitize.js";
 import { assertNotAborted } from "./abort.js";
-import { getSystemPromptText } from "./compat.js";
-import { UNSUPPORTED_HOST_MESSAGE } from "./omp.js";
+import { PROXY_STAND_DOWN_MESSAGE } from "./proxy-detect.js";
 import { buildSummarizeSystemPrompt, fitToModel, resolveModel, summarizeChecked, SESSION_MODEL_REF, type ContentPart } from "./compress-model.js";
 
 function formatK(n: number): string {
@@ -82,7 +80,7 @@ export function makeCompressTool(runtime: AcpRuntime, overrides?: ToolPromptOver
     ],
     parameters: CompressParams,
     async execute(toolCallId, params, signal, _onUpdate, ctx): Promise<AgentToolResult<unknown>> {
-      if (runtime.refused) return { details: undefined, content: [{ type: "text", text: runtime.refusalMessage ?? UNSUPPORTED_HOST_MESSAGE }] };
+      if (runtime.refused) return { details: undefined, content: [{ type: "text", text: runtime.refusalMessage ?? PROXY_STAND_DOWN_MESSAGE }] };
       let result: string;
       const details: CompressResultDetails = {};
       try {
@@ -430,25 +428,6 @@ function refIsDead(ref: string, state: CompressionState, visibleIds: Set<string>
   return !hasActiveOwner(state, [rawId], visibleIds);
 }
 
-// #532: classify one failed range boundary for fork-drift attribution.
-// "live": ref resolves to a content-addressed live-* id (unpersisted tail) —
-// host-view churn territory (#459). "unknown": ref absent from the persisted
-// byRef (pruned stale live ref or cross-generation) — also #459 territory.
-// "persistent-dangling": stable-id ref whose message left the sent view
-// (hide-consumed / orphan hiding, acp-kernel#396) — NOT fork drift.
-// "alive": still resolvable; the range failed for another reason.
-function refDriftSignal(ref: string, state: CompressionState, visibleIds: Set<string>): "live" | "unknown" | "persistent-dangling" | "alive" {
-  const trimmed = ref.trim();
-  if (/^b\d+$/i.test(trimmed)) return "alive";
-  const m = trimmed.match(/^m(\d+)$/i);
-  if (!m) return "unknown";
-  const rawId = state.messageRefs.byRef[trimmed] ?? state.messageRefs.byRef[paddedRef(Number(m[1]))];
-  if (!rawId) return "unknown";
-  if (rawId.startsWith("live-")) return "live";
-  if (!visibleIds.has(rawId) && !hasActiveOwner(state, [rawId], visibleIds)) return "persistent-dangling";
-  return "alive";
-}
-
 function compressibleSnapshotText(nudge: NudgeDecision | undefined): string {
   const ranges = viableRanges(nudge?.compressibleRanges ?? []);
   if (ranges.length === 0) {
@@ -536,7 +515,7 @@ async function handleCompress(args: CompressArgs, runtime: AcpRuntime, ctx: Exte
   // Sent-view arbitration — the same scale as the context transform and
   // acp_status (see src/index.ts): never the session-tree tokenCount.
   const modelId = (ctx.model as { id?: string } | undefined)?.id ?? "default";
-  const systemPromptText = getSystemPromptText(ctx);
+  const systemPromptText = ctx.getSystemPrompt?.() ?? "";
   const systemPromptTokens = systemPromptText ? defaultCountTokens(systemPromptText) : 0;
   const imageTokens = collectImageTokens(entries, modelSupportsImages(ctx.model));
   const sentTokens = estimateTokens(coreMessages, collectCoveredMessageIds(initialState), imageTokens) + systemPromptTokens;
@@ -568,10 +547,8 @@ async function handleCompress(args: CompressArgs, runtime: AcpRuntime, ctx: Exte
     }
     return s.text === r.summary ? r : { ...r, summary: s.text };
   });
-  // #453: stable persisted-boundary key — must match the key the context
-  // transform records outcomes under (retryBreakerKey); a merged-view key
-  // churns under fork hosts and would never see the latched cap.
-  const turnKey = retryBreakerKey(ctx.sessionManager, resolveHostSession(runtime.adapter)) ?? sid;
+  // Same key the context transform records compress outcomes under.
+  const turnKey = lastTurnBoundaryId(entries) ?? sid;
   const snapshot = compressibleSnapshotText(turn.nudge);
   if (runtime.compressRetryCappedFor(sid, turnKey)) {
     logWarn("compress", { sid, event: "capped-reject", turnKey });
@@ -719,25 +696,6 @@ async function handleCompress(args: CompressArgs, runtime: AcpRuntime, ctx: Exte
   });
   if (errors.length > 0) {
     logError("compress", { sid: ctx.sessionManager.getSessionId(), event: "errors", count: errors.length, errors: errors.slice(0, 5) });
-    // Residual drift signal (#454/#459): with content-stable live ids,
-    // ref-resolution failures on a declared fork host mean the host rewrote or
-    // shrank its in-flight view (see mergeLiveEntries in runtime.ts). Attribute
-    // it in support logs so "does not exist" spam is not misread as model
-    // misbehavior. #532: only live-*/unresolvable refs implicate the host view;
-    // persistent refs left dangling by sent-view hiding (acp-kernel#396) get
-    // their own event so kernel-side orphan hiding is not counted as #459.
-    if (blocksCreated === 0 && isDeclaredForkHost() && !isPiHost(ctx.sessionManager)
-      && /does not exist|cannot be anchored|is unknown|unknown refs/i.test(errors.join(" "))) {
-      const signals = ranges.flatMap((r) => [
-        refDriftSignal(r.startId, state, visibleIds),
-        refDriftSignal(r.endId, state, visibleIds),
-      ]);
-      if (signals.includes("live") || signals.includes("unknown")) {
-        logWarn("compress", { sid, event: "fork-ref-drift-suspected", seeIssue: "#459", errors: errors.slice(0, 3) });
-      } else if (signals.includes("persistent-dangling")) {
-        logWarn("compress", { sid, event: "anchor-rejected-hidden-orphan", errors: errors.slice(0, 3) });
-      }
-    }
   }
   if (warnings.length > 0) {
     logWarn("compress", { sid: ctx.sessionManager.getSessionId(), event: "warnings", count: warnings.length, warnings: warnings.slice(0, 5) });
@@ -834,7 +792,7 @@ async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<De
       try { prefix = convertToLlm(captured); } catch { prefix = null; }
     }
   }
-  const sessionSystemPrompt = isSession ? getSystemPromptText(input.ctx) : "";
+  const sessionSystemPrompt = isSession ? (input.ctx.getSystemPrompt?.() ?? "") : "";
 
   // Extracted-content path (registry model, and session mode when no prefix
   // was captured — it always shared this path): summarize exactly what the kernel will fold. A dry run of

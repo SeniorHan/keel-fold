@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- The unsupported-host and fork-host warnings no longer advertise the upstream `billion-context` proxy and use this package's name.
+- Pi only: removed every non-Pi host path. OMP detection and refusal, Pi-fork host support (`PI_ACP_FORK_HOST`, `live-*` refs for unpersisted messages, the `.prime` config dir), the `hostSession` turn-boundary policy, inline child-state derivation (`deriveChildState`) and the `createRuntime` / `SessionRef` exports are gone, along with the `~/.cache/opencode` decompress target. A turn now always starts at a user message; `hostSession` in `acp.json` is ignored. Sessions forked with Pi `/fork` still inherit the parent's blocks through the `parentSession` header. The billion-context proxy stand-down and the `./contract` sidecar schema export stay.
 - Removed upstream-only material from the repo (paper, devlog, design docs, cost estimator, offline benchmark script); `CONFIGURATION.md` drops upstream issue links and older history here now points to the upstream CHANGELOG.
 
 ## v0.2.0 (2026-10-17)

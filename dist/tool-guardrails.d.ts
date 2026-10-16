@@ -1,9 +1,5 @@
 import { type ExtensionAPI, type ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import type { AcpRuntime } from "./runtime.js";
-export type BashToolResultEvent = Extract<ToolResultEvent, {
-    toolName: "bash";
-}>;
-export declare function isBashToolResult(e: ToolResultEvent): e is BashToolResultEvent;
 export declare function resolveBashTimeout(input: {
     timeout?: number;
 }, defaultTimeout: number | undefined): number | undefined;
