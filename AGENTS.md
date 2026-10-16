@@ -1,6 +1,6 @@
 # Contributor guide (humans and agents)
 
-This repository is a long-term fork of `billion-context-pi` v0.1.83. Goals: stable for daily long Pi sessions, and as few tokens as possible (lean tool surface, cheap dedicated summary model). See [README.md](README.md) for what differs from upstream and [MAINTENANCE.md](MAINTENANCE.md) (Chinese) for implementation notes and the release flow.
+This repository started as a fork of `billion-context-pi` v0.1.83 and is versioned on its own since 0.2.0; upstream fixes are ported as needed. Goals: stable for daily long Pi sessions, and as few tokens as possible (lean tool surface, cheap dedicated summary model). See [README.md](README.md) for what differs from upstream and [MAINTENANCE.md](MAINTENANCE.md) (Chinese) for implementation notes and the release flow.
 
 ## Layout
 
@@ -16,5 +16,5 @@ This repository is a long-term fork of `billion-context-pi` v0.1.83. Goals: stab
 - Keep the resident prompt small: the facade's tool surface and prompt budget are asserted in `lean/tests/facade.test.mjs`. Grow them only with a measured reason.
 - Every model-visible fallback must stay meaningful: when the dedicated summary model fails, keep the main model's fallback summary; never store a placeholder.
 - Upstream fixes are cherry-picked by hand (`git cherry-pick -x` when it applies) and noted in `MAINTENANCE.md`. Do not merge `upstream/master` wholesale.
-- Published to npm as `billion-context-pi-lean`. A release is one commit on `main`: tag `v0.1.83-lean.<n>`, GitHub release, `npm publish`; steps in `MAINTENANCE.md`.
+- Published to npm as `billion-context-pi-lean`. Versions follow semver independently of upstream (`0.2.0`, `0.2.1`, …). A release is one commit on `main`: tag `v<version>`, GitHub release, `npm publish`; steps in `MAINTENANCE.md`.
 - Record user-visible changes in `CHANGELOG.md` under the top Lean section.

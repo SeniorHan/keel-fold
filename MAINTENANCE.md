@@ -97,7 +97,7 @@
    改了工具描述或注入的提示词后，运行 `npm run measure` 重测占用，并同步 README 对比表里的数字。它借用同级目录 `my-lean-pi-setup` 的 `measure-extension-worker.mjs`，在隔离的空白 Pi 会话里测量；设置 `PI_CODING_AGENT_MODULE` 可指定要测的 Pi 版本。
 3. 把 `dist/` 的变化和源码一起提交。
 4. 端到端验证：在临时目录里用 `pi --no-session --mode json -p ...` 读几个文件，再让模型 compress，确认结果里出现 `summaries written by ...`，`~/.pi/acp.log` 里没有 `compression-model-failed`。
-5. 发版：`npm version 0.1.83-lean.<n> --no-git-tag-version --ignore-scripts`，`npm run build`，提交后打 tag `v0.1.83-lean.<n>` 并推送，用 `gh release create` 发 GitHub Release，再在同一提交上 `npm publish --tag latest`（版本号带 `-lean.<n>` 属于预发布版本，npm 要求显式指定 tag）。发布前用 `npm pack --dry-run` 确认包里有 `lean/index.ts`。中文 README 命名为 `README_zh-CN.md`：npm 会强制打包 `README.*`，可能拿它当包主页。
+5. 发版：版本号按 semver 独立编号，不跟上游（修复递增 patch，新功能递增 minor）。`npm version <x.y.z> --no-git-tag-version --ignore-scripts`，`npm run build`，提交后打 tag `v<x.y.z>` 并推送，用 `gh release create` 发 GitHub Release，再在同一提交上 `npm publish`。发布前用 `npm pack --dry-run` 确认包里有 `lean/index.ts`。中文 README 命名为 `README_zh-CN.md`：npm 会强制打包 `README.*`，可能拿它当包主页。
 
 ## 挑上游修复
 
@@ -110,4 +110,4 @@
 - 不做“强制继承旧块 Open objectives”：2026-10-12 核查全部 15 个 refold、40 条旧目标，确认丢失 0 条，另有 8 条本来就不是用户目标（助手建议、读到的资料），强制继承会把它们一直传下去；b24 “漏掉”的 3 条属于这类。改为摘要规则：问卷答案归用户、三类待办分开、未核实限定保留（见上）。注意：样本小，原文中段被截断或内核紧急截断时，新目标仍可能到不了专用模型。
 - 新规则下摘要变长：A/B 中 b17（并入 3 个旧块）平均从约 9.3K 字符增到 15K 字符，输出最多用到上限（≈6.7K tokens）的 75%。上限由 `compress` 调用参数 `summaryMaxChars`（默认 20000）/3 决定，不是 `acp.json` 配置项；若频繁出现 `hit its output limit`，需要在规则里引导主模型传更大的 `summaryMaxChars`，或改 `src/compress-tool.ts` 的默认值。
 - 不要和原版 `billion-context-pi` 同时启用（工具和钩子会注册两次）。
-- 命名：2026-10-12 之前叫 Lean2（子目录 `lean2/`、版本 `0.1.83-pr241-lean2.N`），之后改名为 Lean，版本从 `0.1.83-lean.6` 续。更早的 Lean v1（`0.1.69-lean.1`，基于 npm 包的外壳）保留在 `legacy-v1` 分支。
+- 命名：2026-10-12 之前叫 Lean2（子目录 `lean2/`、版本 `0.1.83-pr241-lean2.N`），之后改名为 Lean，版本从 `0.1.83-lean.6` 续，到 `0.1.83-lean.10`；从 `0.2.0`（2026-10-17）起独立编号，上游只按需移植。更早的 Lean v1（`0.1.69-lean.1`，基于 npm 包的外壳）保留在 `legacy-v1` 分支。
