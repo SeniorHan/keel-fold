@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import { createJiti } from "../../node_modules/@earendil-works/pi-coding-agent/node_modules/jiti/lib/jiti.mjs";
 
 const jiti = createJiti(import.meta.url, { moduleCache: false });
@@ -489,4 +490,142 @@ test("provider-facing metadata stays within the lean budget", () => {
     serialized.length <= 1450,
     `lean metadata grew to ${serialized.length} characters`,
   );
+});
+
+// prepareArguments runs before Pi's schema validation; check against the real
+// upstream schemas through the same validator Pi uses.
+function realTools() {
+  const pi = createPi();
+  extension(pi);
+  return { compress: getTool(pi, "compress"), facade: getTool(pi, "acp_context") };
+}
+
+const validated = (tool, raw) => validateToolArguments(tool, { id: "t", type: "toolCall", name: tool.name, arguments: tool.prepareArguments(raw) });
+const rejected = (tool, raw) => assert.throws(() => validated(tool, raw));
+
+const RANGE = { startId: "m00001", endId: "m00019", topic: "t", summary: "s" };
+const RANGE2 = { startId: "m00020", endId: "m00030", summary: "s2" };
+
+test("facade prepareArguments decodes args given as a JSON string", () => {
+  const { facade } = realTools();
+  assert.deepEqual(validated(facade, { op: "decompress", args: '{"blockId":"b5","full":true}' }), { op: "decompress", args: { blockId: "b5", full: true } });
+  assert.deepEqual(facade.prepareArguments({ op: "acp_cache", args: "not json" }), { op: "acp_cache", args: "not json" });
+  assert.deepEqual(facade.prepareArguments({ op: "acp_cache", args: "[1]" }), { op: "acp_cache", args: "[1]" });
+});
+
+test("facade prepareArguments moves top-level op fields into args without overriding", () => {
+  const { facade } = realTools();
+  assert.deepEqual(validated(facade, { op: "decompress", blockId: "b5" }), { op: "decompress", args: { blockId: "b5" } });
+  assert.deepEqual(validated(facade, { op: "search_context", query: "x", args: { limit: 3 } }), { op: "search_context", args: { limit: 3, query: "x" } });
+  assert.deepEqual(validated(facade, { op: "acp_status", args: '{"scope":"compressed"}', limit: 5 }), { op: "acp_status", args: { scope: "compressed", limit: 5 } });
+  assert.deepEqual(facade.prepareArguments({ op: "help", tool: "decompress" }), { op: "help", args: { tool: "decompress" } });
+  assert.deepEqual(facade.prepareArguments({ op: "decompress", blockId: "b5", args: { blockId: "b5" } }), { op: "decompress", args: { blockId: "b5" } });
+  // conflicting value: args wins, the top-level one stays put and is not applied
+  assert.deepEqual(facade.prepareArguments({ op: "decompress", blockId: "b9", args: { blockId: "b5" } }), { op: "decompress", blockId: "b9", args: { blockId: "b5" } });
+  // fields the operation does not accept stay where they are
+  assert.deepEqual(facade.prepareArguments({ op: "decompress", blockId: "b5", query: "x" }), { op: "decompress", query: "x", args: { blockId: "b5" } });
+});
+
+test("facade prepareArguments infers an omitted op only from unambiguous fields", () => {
+  const { facade } = realTools();
+  const infer = (raw) => facade.prepareArguments(raw).op;
+  assert.equal(infer({ blockId: "b5" }), "decompress");
+  assert.equal(infer({ args: { blockId: "b5", inline: true } }), "decompress");
+  assert.equal(infer({ args: '{"query":"x"}' }), "search_context");
+  assert.equal(infer({ query: "x", limit: 3 }), "search_context");
+  assert.equal(infer({ scope: "compressed" }), "acp_status");
+  assert.equal(infer({ view: "messages", limit: 3 }), "acp_status");
+  assert.equal(infer({ sort: "size" }), "acp_status");
+  assert.equal(infer({ detail: "full" }), "acp_cache");
+  assert.deepEqual(validated(facade, { blockId: "b5" }), { op: "decompress", args: { blockId: "b5" } });
+  assert.deepEqual(validated(facade, { query: "x", limit: 3 }), { op: "search_context", args: { query: "x", limit: 3 } });
+  // shared (limit, tool), mixed, unknown and empty inputs are not guessed
+  for (const raw of [{ limit: 3 }, { tool: "bash" }, { blockId: "b5", query: "x" }, { blockId: "b5", limit: 3 }, { foo: 1 }, {}]) {
+    assert.deepEqual(facade.prepareArguments(raw), raw);
+    rejected(facade, raw);
+  }
+});
+
+test("facade prepareArguments keeps explicit and invalid ops and never throws or mutates", () => {
+  const { facade } = realTools();
+  const explicit = { op: "search_context", blockId: "b5" };
+  assert.deepEqual(facade.prepareArguments(explicit), { op: "search_context", blockId: "b5" }, "explicit op is not re-inferred");
+  const invalid = { op: "buildStatusReport", blockId: "b5", args: '{"x":1}' };
+  assert.deepEqual(facade.prepareArguments(invalid), invalid, "invalid op is not guessed");
+  rejected(facade, invalid);
+  assert.equal(facade.prepareArguments({ op: "help" }).args, undefined, "help is never inferred and gets no args");
+  for (const raw of [undefined, null, "x", 5, ["a"]]) assert.equal(facade.prepareArguments(raw), raw);
+  const input = { blockId: "b5", args: '{"full":true}' };
+  const snapshot = structuredClone(input);
+  const once = facade.prepareArguments(input);
+  assert.deepEqual(input, snapshot);
+  assert.deepEqual(facade.prepareArguments(once), once, "idempotent");
+});
+
+test("compress prepareArguments parses a stringified content array", () => {
+  const { compress } = realTools();
+  const content = JSON.stringify([RANGE, RANGE2]);
+  assert.deepEqual(validated(compress, { topic: "top", content, summaryMaxChars: 100 }), { topic: "top", content: [RANGE, RANGE2], summaryMaxChars: 100 });
+  assert.deepEqual(validated(compress, { content: JSON.stringify(JSON.stringify([RANGE])) }), { content: [RANGE] }, "double-encoded");
+  assert.deepEqual(validated(compress, { content: JSON.stringify(RANGE) }), { content: [RANGE] }, "single encoded object");
+});
+
+test("compress prepareArguments parses stringified entries inside the content array", () => {
+  const { compress } = realTools();
+  assert.deepEqual(validated(compress, { content: [RANGE, JSON.stringify(RANGE2)] }), { content: [RANGE, RANGE2] });
+  assert.deepEqual(validated(compress, { content: [JSON.stringify([RANGE, RANGE2])] }), { content: [RANGE, RANGE2] });
+  // an element that is not a range stays, so validation still reports it
+  const bad = { content: [RANGE, "not json"] };
+  assert.deepEqual(compress.prepareArguments(bad), bad);
+  rejected(compress, bad);
+});
+
+test("compress prepareArguments moves a range array from summary into content", () => {
+  const { compress } = realTools();
+  assert.deepEqual(validated(compress, { topic: "top", summary: [RANGE, RANGE2] }), { topic: "top", content: [RANGE, RANGE2] });
+  assert.deepEqual(validated(compress, { summary: JSON.stringify([RANGE]) }), { content: [RANGE] });
+  assert.deepEqual(validated(compress, { summary: [RANGE, JSON.stringify(RANGE2)], summaryMaxChars: 9 }), { content: [RANGE, RANGE2], summaryMaxChars: 9 });
+});
+
+test("compress prepareArguments leaves legal and non-range inputs untouched", () => {
+  const { compress } = realTools();
+  const same = [
+    { content: [RANGE] },
+    { topic: "top", content: [RANGE, RANGE2], summaryMaxChars: 5 },
+    { content: "m00001-m00019 topic\nline form summary" },
+    { content: "[not json" },
+    { content: "[]" },
+    { content: [] },
+    { content: '[{"startId":"m1"}]' },
+    { summary: "plain text" },
+    { summary: [{ startId: "m1" }] },
+    { summary: "[]" },
+    { content: [RANGE], summary: [RANGE2] },
+    { topic: "only" },
+    {},
+  ];
+  for (const raw of same) assert.deepEqual(compress.prepareArguments(raw), raw);
+  for (const raw of [undefined, null, "x", 5, [RANGE]]) assert.equal(compress.prepareArguments(raw), raw);
+  const input = { summary: [RANGE] };
+  const snapshot = structuredClone(input);
+  const once = compress.prepareArguments(input);
+  assert.deepEqual(input, snapshot);
+  assert.deepEqual(compress.prepareArguments(once), once, "idempotent");
+});
+
+test("compress prepareArguments chains an upstream prepareArguments first", () => {
+  const pi = createPi();
+  const upstream = (target) => {
+    target.registerTool({
+      name: "compress",
+      label: "compress",
+      description: "compress",
+      parameters: structuredClone(schemas.compress),
+      prepareArguments: (args) => ({ ...args, content: args.legacyContent }),
+      async execute() { return { content: [] }; },
+    });
+  };
+  createLeanAcpExtension(upstream)(pi);
+  const prepared = getTool(pi, "compress").prepareArguments({ legacyContent: JSON.stringify([RANGE]) });
+  assert.deepEqual(prepared.content, [RANGE]);
 });

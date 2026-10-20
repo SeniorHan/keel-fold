@@ -2,7 +2,7 @@ import {
   SIDECAR_SCHEMA_VERSION,
   __export,
   sidecarProducer
-} from "./chunk-EYDKO7YM.js";
+} from "./chunk-C3GD6WZH.js";
 
 // src/config-dir.ts
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
@@ -19773,7 +19773,7 @@ function resolveActivePack(adapter, cwd, provider, modelId, resolver) {
 }
 var HOST_VERSION = (() => {
   try {
-    return "0.2.1";
+    return "0.2.2";
   } catch {
     return "dev";
   }
@@ -20690,7 +20690,7 @@ async function statusReport(runtime, ctx) {
   const sentTokens = estimateTokens(coreMessages, coveredIds, imageTokens) + systemPromptTokens;
   const viewSentTokens = adjustedTokenCount(runtime.core, coreMessages, state, config, sentTokens, imageTokens, systemPromptTokens);
   const turn = runtime.core.processTurn({ messages: coreMessages, state, config, tokenCount: anchorStale ? viewSentTokens : Math.max(viewSentTokens, realUsage?.tokens ?? 0) });
-  const versionStr = "0.2.1" ? `billion-context-pi@${"0.2.1"} \xB7 pack: ${resolveSurfaceMeta(runtime.adapter, ctx?.cwd ?? process.cwd(), ctx?.model?.provider, ctx?.model?.id).pack}` : void 0;
+  const versionStr = "0.2.2" ? `billion-context-pi@${"0.2.2"} \xB7 pack: ${resolveSurfaceMeta(runtime.adapter, ctx?.cwd ?? process.cwd(), ctx?.model?.provider, ctx?.model?.id).pack}` : void 0;
   const text = buildStatusPanel({
     version: versionStr,
     tokenCount: sessionTokens,
@@ -21986,7 +21986,7 @@ function wireSessionLifecycle(pi, runtime, standDownIfProxied) {
     dropLiveOnlyTailCache(ctx.sessionManager.getSessionId());
     const sid = ctx.sessionManager.getSessionId();
     const modelInfo = ctx.model;
-    logInfo("session", { event: "start", sid, cwd: ctx.cwd, debug: runtime.adapter.debug ?? null, version: true ? "0.2.1" : null, model: modelInfo?.id ?? null, modelApi: modelInfo?.api ?? null, contextWindow: modelInfo?.contextWindow ?? null });
+    logInfo("session", { event: "start", sid, cwd: ctx.cwd, debug: runtime.adapter.debug ?? null, version: true ? "0.2.2" : null, model: modelInfo?.id ?? null, modelApi: modelInfo?.api ?? null, contextWindow: modelInfo?.contextWindow ?? null });
     try {
       await runtime.reloadConfig(ctx.cwd);
     } catch (e) {

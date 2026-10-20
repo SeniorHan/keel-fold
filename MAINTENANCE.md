@@ -71,7 +71,8 @@
 - 系统提示保留“不要把解压当成压缩后的例行步骤”：块摘要显示在 compress 调用参数里，只在需要摘要里没有的细节时才 search/decompress。compress 折叠成功后，结果末尾再提示一次（`COMPRESS_DONE_HINT`，只在 `details.acpFolded` 存在时加）。
 - 常驻提示只放调用前必须知道的规则：隐藏 ref、压缩边界、op 签名、摘要是历史元数据。调用后才用得上的说明已由对应消息给出，不再常驻：压缩时机和写法（nudge）、失效 ref 的恢复（compress 拒绝信息附当前可压缩范围并提示 acp_status）、解压写文件（decompress 结果带路径和 read 提示）、限流恢复（`THROTTLE_KICK_TEXT`）。
 - 专用摘要模型的“只写 1-2 句 fallback”规则由提示钩子每轮按 compress 描述 getter 追加（`DEDICATED_PROMPT_LINE`）。不能只靠 compress 描述：Pi 1.3 在绑定扩展时（`_refreshToolRegistry` → `wrapToolDefinition`）就快照工具描述，pi-collapsed-tools 的 `{...base}` 也会快照 getter，而 `compressionModelId` 要到 session_start 的 `reloadConfig` 才载入，所以模型看到的始终是非专用描述。
-- 测试：`lean/tests/facade.test.mjs`，含工具面和 1450 字符提示预算。
+- 参数兜底（`prepareArguments`，Pi 在 schema 校验前调用；纯函数、幂等、不改入参、不增加模型可见 token）。`acp_context`（`prepareFacadeArguments`）：`args` 是 JSON 字符串则解析成对象；顶层的 op 字段（按上游真实 schema 的 `properties` 取字段名，help 为 `tool`）归入 `args`，`args` 已有不同值时不覆盖；漏传 `op` 时，只有恰好一个操作独占的字段（`blockId`/`query`/`scope`/`view`/`sort`/`detail`/`full`/`toFile`/`inline`）且所有已识别字段都属于该操作才推断；`limit`、`tool` 被多个操作共享，help 从不推断；显式 op 原样保留，非法 op（如 `buildStatusReport`）原样交给校验报错。`compress`（`prepareCompressArguments`）：`content` 是 JSON 字符串、数组里有 JSON 字符串元素、或没给 `content` 而 `summary` 是范围数组/其 JSON 字符串时，解析后挪进 `content`（保留顶层 `topic` 等）；只有结果全是 `{startId,endId,summary}` 字符串对象时才改，行格式字符串、残缺 JSON 等原样留给上游 `normalizeRanges`。上游 compress 若有 `prepareArguments`，先跑它再跑本层。升级上游时检查：`decompress`/`search_context`/`acp_status`/`acp_cache` 的参数名是否出现新的共享字段（会让推断失效或改变）；`RangeSpec` 必填字段是否变化（`isRangeSpec`）；`compress` 的 `content` 联合类型和 `prepareArguments` 是否变化。
+- 测试：`lean/tests/facade.test.mjs`，含工具面、1450 字符提示预算和参数兜底（用真实 schema 过 Pi 的 `validateToolArguments`）。
 
 ### 空闲压缩（Idle compact，`idleCompact`）
 

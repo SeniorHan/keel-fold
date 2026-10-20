@@ -20,6 +20,8 @@ ACP 不会自己动手压缩。已经做完的旧内容积累多了，它会在�
 - `compress`：把做完的消息范围折叠成摘要块。
 - `acp_context`：包含 `decompress`、`search_context`、`acp_status`、`acp_cache` 和 `help`，用来取回原文或查找内容，例如 `{ "op": "search_context", "args": { "query": "authentication" } }`。
 
+模型传错参数时，校验前会先自动修正而不是报错：`args` 或 `content` 传成 JSON 字符串、op 的字段写在顶层、漏传 `op`（只按 `blockId` 这类无歧义字段推断），以及把范围数组写进 `summary` 而没给 `content`。
+
 打开**空闲压缩**（Idle compact）后，你离开时、提示缓存还热着，ACP 也会把同样的压缩提醒发一次，回来时上下文已经变短。压缩提醒什么时候出现由[设置](#设置项)决定；另外上下文到窗口 95% 时，ACP 会兜底截断大的工具输出。
 
 ## 与上游 0.1.83 的主要区别
@@ -59,7 +61,7 @@ ACP 不会自己动手压缩。已经做完的旧内容积累多了，它会在�
 
 | 版本 | 工具与提示词构成 | 合计 |
 | --- | --- | ---: |
-| Lean `billion-context-pi-lean@0.2.1` | `compress` (231) + `acp_context` (87) + 提示词 (168) | **486** |
+| Lean `billion-context-pi-lean@0.2.2` | `compress` (231) + `acp_context` (87) + 提示词 (168) | **486** |
 | 上游 `billion-context-pi@0.1.83`，开 `promptPack: "lean"` | `compress` (389) + `decompress` (271) + `search_context` (90) + `acp_status` (227) + `acp_cache` (204) + `acp_delegate` (1,452) + `acp_delegate_wait` (342) + `acp_delegate_cancel` (83) + 提示词 (1,819) | **4,877** |
 | 上游 `billion-context-pi@0.1.83` | `compress` (549) + `decompress` (546) + `search_context` (210) + `acp_status` (339) + `acp_cache` (204) + `acp_delegate` (1,452) + `acp_delegate_wait` (342) + `acp_delegate_cancel` (83) + 提示词 (4,945) | **8,670** |
 

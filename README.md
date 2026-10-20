@@ -20,6 +20,8 @@ The model sees two tools:
 - `compress`: fold finished message ranges into summary blocks.
 - `acp_context`: `decompress`, `search_context`, `acp_status`, `acp_cache` and `help`, e.g. `{ "op": "search_context", "args": { "query": "authentication" } }`, to bring originals back or look things up.
 
+Malformed calls are repaired before validation instead of failing: JSON-string `args` or `content`, op fields written at the top level, an omitted `op` (inferred only from unambiguous fields such as `blockId`), and a range array put in `summary` instead of `content`.
+
 With **Idle compact** on, the same nudge is also shown once when you step away, while the prompt cache is still warm, so you come back to a shorter context. When the [settings](#settings) make the nudge appear is up to you; as a last resort, at 95% of the window ACP cuts large tool outputs regardless.
 
 ## Main differences from upstream 0.1.83
@@ -59,7 +61,7 @@ With only this extension enabled, its recurring model-facing initialization cont
 
 | Variant | Tool and prompt contribution | Total |
 | --- | --- | ---: |
-| Lean `billion-context-pi-lean@0.2.1` | `compress` (231) + `acp_context` (87) + prompt (168) | **486** |
+| Lean `billion-context-pi-lean@0.2.2` | `compress` (231) + `acp_context` (87) + prompt (168) | **486** |
 | Upstream `billion-context-pi@0.1.83` with `promptPack: "lean"` | `compress` (389) + `decompress` (271) + `search_context` (90) + `acp_status` (227) + `acp_cache` (204) + `acp_delegate` (1,452) + `acp_delegate_wait` (342) + `acp_delegate_cancel` (83) + prompt (1,819) | **4,877** |
 | Upstream `billion-context-pi@0.1.83` | `compress` (549) + `decompress` (546) + `search_context` (210) + `acp_status` (339) + `acp_cache` (204) + `acp_delegate` (1,452) + `acp_delegate_wait` (342) + `acp_delegate_cancel` (83) + prompt (4,945) | **8,670** |
 

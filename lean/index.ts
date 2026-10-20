@@ -223,6 +223,103 @@ function rewriteRecallResult(op: string, value: unknown): unknown {
   };
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseJson(value: unknown): unknown {
+  if (typeof value !== "string") return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+// Fields an operation accepts, read from the real upstream schema so the
+// fallbacks follow upstream changes. help takes only `tool`.
+function operationFields(tools: Map<string, CapturedTool>, op: string): string[] {
+  if (op === "help") return ["tool"];
+  return Object.keys((tools.get(op)?.parameters as { properties?: object } | undefined)?.properties ?? {});
+}
+
+// Infer a missing op only from fields that exactly one operation accepts, and
+// only when every recognized field fits that operation. Shared fields (limit,
+// tool) never decide; help is never inferred.
+function inferOperation(tools: Map<string, CapturedTool>, keys: string[]): Operation | undefined {
+  const owners = (key: string) => [...LOW_FREQUENCY_TOOLS, "help"].filter((op) => operationFields(tools, op).includes(key));
+  const inferred = new Set(keys.map(owners).filter((ops) => ops.length === 1).map((ops) => ops[0]));
+  if (inferred.size !== 1) return undefined;
+  const [op] = inferred;
+  if (!LOW_FREQUENCY_SET.has(op)) return undefined;
+  const fields = operationFields(tools, op);
+  return keys.every((key) => owners(key).length === 0 || fields.includes(key)) ? (op as Operation) : undefined;
+}
+
+// Models send op args as a JSON string, put them at the top level, or omit op.
+// Pure and idempotent; runs before schema validation. An explicit op is kept,
+// an invalid op is left for validation to reject, and a top-level field that
+// conflicts with args is not moved.
+function prepareFacadeArguments(tools: Map<string, CapturedTool>, args: unknown): any {
+  if (!isPlainObject(args)) return args;
+  const { op: givenOp, args: givenArgs, ...loose } = args;
+  const decoded = parseJson(givenArgs);
+  const nested = isPlainObject(decoded) ? decoded : givenArgs;
+  if (nested !== undefined && !isPlainObject(nested)) return args;
+  const op = givenOp === undefined ? inferOperation(tools, [...Object.keys(loose), ...Object.keys(nested ?? {})]) : givenOp;
+  if (typeof op !== "string" || (op !== "help" && !LOW_FREQUENCY_SET.has(op))) return args;
+  const fields = operationFields(tools, op);
+  const merged: FacadeArgs = { ...(nested ?? {}) };
+  const rest: Record<string, unknown> = {};
+  let moved = false;
+  for (const [key, value] of Object.entries(loose)) {
+    if (!fields.includes(key)) rest[key] = value;
+    else if (!(key in merged)) {
+      merged[key] = value;
+      moved = true;
+    } else if (JSON.stringify(merged[key]) !== JSON.stringify(value)) rest[key] = value;
+  }
+  return { ...rest, op, ...(nested !== undefined || moved ? { args: merged } : {}) };
+}
+
+function isRangeSpec(value: unknown): boolean {
+  return isPlainObject(value)
+    && typeof value.startId === "string"
+    && typeof value.endId === "string"
+    && typeof value.summary === "string";
+}
+
+// Range specs from a range object, an array of them, or JSON strings of either
+// (also double-encoded). undefined unless everything decodes to range specs.
+function decodeRanges(value: unknown, depth = 2): unknown[] | undefined {
+  if (isRangeSpec(value)) return [value];
+  if (typeof value === "string") return depth > 0 ? decodeRanges(parseJson(value), depth - 1) : undefined;
+  if (!Array.isArray(value)) return undefined;
+  const items = value.map((item) => decodeRanges(item, depth - 1));
+  return items.length > 0 && items.every((item) => item !== undefined) ? items.flat() : undefined;
+}
+
+// Models stringify the content array, stringify single entries, or put the
+// range array in summary. Only a result made of range specs replaces the
+// input; everything else is left for upstream parsing and validation. Pure and
+// idempotent; runs before schema validation.
+function prepareCompressArguments(args: unknown): any {
+  if (!isPlainObject(args)) return args;
+  const { content, summary, ...rest } = args;
+  if (content === undefined) {
+    const ranges = decodeRanges(summary);
+    return ranges ? { ...rest, content: ranges } : args;
+  }
+  if (typeof content === "string") {
+    const ranges = decodeRanges(content);
+    return ranges ? { ...args, content: ranges } : args;
+  }
+  if (Array.isArray(content) && content.some((item) => typeof item === "string")) {
+    return { ...args, content: content.flatMap((item) => (typeof item === "string" ? decodeRanges(item) : undefined) ?? [item]) };
+  }
+  return args;
+}
+
 function validationError(tool: CapturedTool, args: FacadeArgs): string | undefined {
   if (!tool.parameters || Check(tool.parameters, args)) return undefined;
   const first = Errors(tool.parameters, args)[0];
@@ -276,6 +373,7 @@ function wrapCompress(tool: CapturedTool): CapturedTool & { exposure: "model-onl
     },
     promptSnippet: "",
     promptGuidelines: [],
+    prepareArguments: (args: unknown) => prepareCompressArguments(tool.prepareArguments ? tool.prepareArguments(args) : args),
     async execute(callId, params, signal, onUpdate, ctx) {
       const forwardUpdate = onUpdate
         ? (update: unknown) => onUpdate(rewriteModelFacingText(update) as any)
@@ -301,6 +399,7 @@ function facadeTool(tools: Map<string, CapturedTool>): ToolDefinition<typeof FAC
     promptSnippet: "",
     promptGuidelines: [],
     parameters: FACADE_PARAMETERS,
+    prepareArguments: (args: unknown) => prepareFacadeArguments(tools, args),
     async execute(callId, params, signal, onUpdate, ctx) {
       if (params.op === "help") return helpResult(params.args ?? {}, tools);
       const tool = tools.get(params.op);

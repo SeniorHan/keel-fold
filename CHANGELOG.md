@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.2 (2026-10-20)
+
+- Lean facade repairs malformed model arguments before validation (`prepareArguments`, no extra tokens): `acp_context` accepts JSON-string `args`, top-level op fields and an omitted `op` (inferred only from unambiguous fields); `compress` accepts a JSON-string `content`, JSON-string entries inside `content`, and a range array placed in `summary` without `content`. Explicit and invalid ops are left for validation.
+
 ## v0.2.1 (2026-10-17)
 
 - Pi only: removed every non-Pi host path. OMP detection and refusal, Pi-fork host support (`PI_ACP_FORK_HOST`, `live-*` refs for unpersisted messages, the `.prime` config dir), the `hostSession` turn-boundary policy, inline child-state derivation (`deriveChildState`) and the `createRuntime` / `SessionRef` exports are gone, along with the `~/.cache/opencode` decompress target. A turn now always starts at a user message; `hostSession` in `acp.json` is ignored. Sessions forked with Pi `/fork` still inherit the parent's blocks through the `parentSession` header. The billion-context proxy stand-down and the `./contract` sidecar schema export stay.
