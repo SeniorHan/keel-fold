@@ -1,5 +1,5 @@
 {
-	"name": "billion-context-pi-lean",
+	"name": "keel-fold",
 	"version": "0.3.0",
 	"description": "Lean fork of billion-context-pi for Pi: long-session context compression with an optional cheap summary model — 486 initialization tokens, 94% fewer than the original.",
 	"main": "dist/index.js",
@@ -28,13 +28,13 @@
 		"LICENSE"
 	],
 	"sideEffects": false,
-	"homepage": "https://github.com/kunkun9527/billion-context-pi-lean",
+	"homepage": "https://github.com/SeniorHan/keel-fold",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/kunkun9527/billion-context-pi-lean.git"
+		"url": "git+https://github.com/SeniorHan/keel-fold.git"
 	},
 	"bugs": {
-		"url": "https://github.com/kunkun9527/billion-context-pi-lean/issues"
+		"url": "https://github.com/SeniorHan/keel-fold/issues"
 	},
 	"publishConfig": {
 		"access": "public"

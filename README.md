@@ -1,4 +1,7 @@
-# billion-context-pi-lean
+# keel-fold
+
+> Fork of [kunkun9527/billion-context-pi-lean](https://github.com/kunkun9527/billion-context-pi-lean)
+> (itself a lean fork of ranxianglei/billion-context-pi). Maintained at [SeniorHan/keel-fold](https://github.com/SeniorHan/keel-fold).
 
 <!-- token-benchmark:summary:start -->
 > **Token benchmark: Lean 486, upstream `billion-context-pi@0.1.83` 8,670 — 94.4% fewer.**
