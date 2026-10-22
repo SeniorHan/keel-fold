@@ -177,7 +177,6 @@ var KNOWN = /* @__PURE__ */ new Set([
   "protectedLatestTools",
   "neverPreserveRecentTools",
   "preserveRecentTools",
-  "toolOutputMaxBytes",
   "compress",
   "throttleRetry",
   "idleCompact",
@@ -12121,7 +12120,6 @@ function makePreview(text, query, len) {
 }
 
 // src/config.ts
-var DEFAULT_TOOL_OUTPUT_MAX_BYTES = 5e4;
 var REPETITION_GUARD_DEFAULTS = { warn: 3, abort: 5 };
 function positiveInt(v2, fallback) {
   return typeof v2 === "number" && Number.isFinite(v2) && v2 >= 1 ? Math.floor(v2) : fallback;
@@ -21234,56 +21232,10 @@ function applyStripImages(body, api, settings2) {
 }
 
 // src/tool-guardrails.ts
-import { createHash as createHash4, randomBytes } from "crypto";
-import { writeFile as writeFile2 } from "fs/promises";
-import { tmpdir as tmpdir2 } from "os";
-import { join as join11 } from "path";
+import { createHash as createHash4 } from "crypto";
 import {
   isBashToolResult
 } from "@earendil-works/pi-coding-agent";
-function toolOutputFilePath() {
-  return join11(tmpdir2(), `pi-tool-output-${randomBytes(8).toString("hex")}.log`);
-}
-async function spillOversized(event, maxBytes, existingFullPath) {
-  const texts = [];
-  for (const c of event.content) {
-    if (c.type === "text") texts.push(c.text);
-  }
-  if (texts.length === 0) return void 0;
-  const combined = texts.join("\n");
-  const total = Buffer.byteLength(combined, "utf8");
-  if (total <= maxBytes) return void 0;
-  let path10 = existingFullPath;
-  if (!path10) {
-    path10 = toolOutputFilePath();
-    try {
-      await writeFile2(path10, combined, { mode: 384, flag: "wx" });
-    } catch (e) {
-      logWarn("guardrail", { event: "output-spill-failed", error: e instanceof Error ? e.message : String(e) });
-      path10 = void 0;
-    }
-  }
-  const capped = capToolOutput(event.content, maxBytes, path10);
-  if (capped) logWarn("guardrail", { event: "output-cap", max: maxBytes, hadPath: !!path10 });
-  return capped;
-}
-function capToolOutput(content, maxBytes, fullPath) {
-  const max = maxBytes ?? DEFAULT_TOOL_OUTPUT_MAX_BYTES;
-  if (!Number.isFinite(max) || max <= 0) return void 0;
-  const kept = [];
-  const texts = [];
-  for (const c of content) {
-    if (c.type === "text") texts.push(c.text);
-    else kept.push(c);
-  }
-  if (texts.length === 0) return void 0;
-  const combined = texts.join("\n");
-  const total = Buffer.byteLength(combined, "utf8");
-  if (total <= max) return void 0;
-  const head = keepHead(combined, max);
-  kept.push({ type: "text", text: buildCapNotice(total, max, fullPath) + head });
-  return kept;
-}
 var TIMEOUT_RE = /Command timed out after (\d+) seconds/;
 function detectBashTimeout(content) {
   for (const c of content) {
@@ -21308,34 +21260,11 @@ function appendTrailingText(content, notice) {
 function appendTimeoutNotice(content, secs) {
   return appendTrailingText(content, buildTimeoutNotice(secs));
 }
-function keepHead(str, maxBytes) {
-  const buf = Buffer.from(str, "utf8");
-  if (buf.length <= maxBytes) return str;
-  let end = maxBytes;
-  while (end > 0) {
-    const b2 = buf[end];
-    if (b2 === void 0 || (b2 & 192) !== 128) break;
-    end--;
-  }
-  let head = buf.subarray(0, end).toString("utf8");
-  const nl = head.lastIndexOf("\n");
-  if (nl >= Math.floor(maxBytes / 2)) head = head.slice(0, nl);
-  return head;
-}
-function buildCapNotice(originalBytes, maxBytes, fullPath) {
-  const where = fullPath ? `Full output saved to: ${fullPath} \u2014 read it to see everything.` : "To see the full output, rerun the tool with a narrower query.";
-  return `[ACP guardrail: output too large (${formatBytes(originalBytes)}) \u2014 output capped at ${formatBytes(maxBytes)}. ${where}]
-
-`;
-}
 function buildTimeoutNotice(secs) {
   const suggested = Math.min(Math.max(Math.ceil(secs * 2), 120), 3600);
   return `
 
 [ACP guardrail: command killed after ${secs}s. To give it more time, re-run the bash tool with a larger \`timeout\` argument (e.g. \`"timeout": ${suggested}\`).]`;
-}
-function formatBytes(n) {
-  return n >= 1024 ? `${(n / 1024).toFixed(1)}KB` : `${n}B`;
 }
 function canonicalStringify(value) {
   if (value === null || value === void 0 || typeof value !== "object") {
@@ -21422,14 +21351,8 @@ function wireToolGuardrails(pi, runtime) {
   });
   pi.on("tool_result", async (event, ctx) => {
     const isBash = isBashToolResult(event);
-    const fullPath = isBash ? event.details?.fullOutputPath : void 0;
     const timeoutSecs = isBash && event.isError ? detectBashTimeout(event.content) : void 0;
     let modified;
-    const max = runtime.adapter.toolOutputMaxBytes ?? DEFAULT_TOOL_OUTPUT_MAX_BYTES;
-    const next = await spillOversized(event, max, fullPath);
-    if (next) {
-      modified = next;
-    }
     if (timeoutSecs !== void 0) {
       modified = appendTimeoutNotice(modified ?? event.content, timeoutSecs);
       debug.event("guardrail-bash-timeout-notice", { secs: timeoutSecs });
@@ -21716,19 +21639,6 @@ var PANEL_ITEMS = [
   modelKeyItem("maxContextLimit", "Context threshold", "Share of the window above which the compress nudge stops waiting for Nudge interval and appears whenever Minimum benefit could be reclaimed (default 75%). Not a hard cap. Current model only.", ["40%", "45%", "50%", "60%", "70%", "75%", "80%"], pct2, (v2) => Number(v2.slice(0, -1)) / 100),
   modelKeyItem("nudgeGrowthTokens", "Nudge interval", "Below Context threshold, the compress nudge waits until about this many tokens of old, compressible content have piled up (default 50K). Bigger: fewer nudges, more folded at once. Current model only.", ["30K", "50K", "70K", "100K", "150K", "200K"], k, parseK),
   modelKeyItem("minPressureBenefitTokens", "Minimum benefit", "No compress nudge, and no idle compact turn, when less than this could be reclaimed (default: larger of 5K and 1% of the window). Current model only.", ["5K", "10K", "20K", "30K", "50K"], k, parseK),
-  {
-    id: "toolOutputMaxBytes",
-    label: "Tool output cap",
-    description: `Keeps one huge tool result from flooding the context: a result larger than this is cut, with a note telling the model where the full output is (default ${k(DEFAULT_TOOL_OUTPUT_MAX_BYTES)} bytes). Pi's own bash/read already stop at 50KB; this mainly catches MCP and other extensions' tools. off = keep everything.`,
-    values: (current) => withCurrent(["8K", "20K", "50K", "100K", OFF], current),
-    read(a) {
-      const v2 = a.toolOutputMaxBytes ?? DEFAULT_TOOL_OUTPUT_MAX_BYTES;
-      return v2 === 0 ? OFF : k(v2);
-    },
-    write(raw, value) {
-      raw.toolOutputMaxBytes = value === OFF ? 0 : parseK(value);
-    }
-  },
   {
     id: "debug",
     label: "Debug log",

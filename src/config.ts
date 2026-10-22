@@ -150,15 +150,6 @@ export interface AdapterConfig {
    *  warnings) are written regardless; `debug` only adds verbose diagnostics.
    *  Default: false (or env ACP_DEBUG=1/true). */
   debug?: boolean;
-  /** Hard byte cap applied to tool result text via the `tool_result` hook.
-   *  Default: 50000 (~50KB) — aligned with Pi's own bash/read/grep cap so
-   *  every tool path lands under one ceiling; the net still catches runaway
-   *  output from tools Pi does not cap (MCP/custom). Set higher for large
-   *  MCP outputs, lower (e.g. 8192) for a tighter context budget, or 0 to
-   *  disable. When capped, oversized text is head-truncated with a notice
-   *  telling the model how to see the full output (bash: read
-   *  BashToolDetails.fullOutputPath). */
-  toolOutputMaxBytes?: number;
   /** Compression tuning. */
   compress?: CompressConfig;
   /** Provider token-throttle (Bedrock "Too many tokens, please wait before
@@ -231,8 +222,6 @@ export interface AdapterConfig {
    *  reported once as ignored instead of silently dropped. */
   externalSystemPrompt?: boolean;
 }
-
-export const DEFAULT_TOOL_OUTPUT_MAX_BYTES = 50_000;
 
 /** Defaults for the generic tool-call repetition guard (issue #308). */
 export const REPETITION_GUARD_DEFAULTS = { warn: 3, abort: 5 } as const;

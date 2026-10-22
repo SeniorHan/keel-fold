@@ -99,7 +99,6 @@ pi install npm:billion-context-pi-lean
 | Context threshold（上下文阈值） | 上下文占到模型窗口的这个比例以上，压缩提醒不再等 Nudge interval：只要能腾出的空间达到 Minimum benefit 就提醒。调低让上下文常保小；调高允许它更满。它不是硬上限。 | 75% |
 | Nudge interval（提醒间隔） | 上下文没到 Context threshold 时，要等可压缩的旧内容攒到大约这么多 token 才提醒一次。调大：提醒少，每次压得多；调小：频繁小压缩，上下文更精简。 | 50K |
 | Minimum benefit（最小收益） | 能腾出的空间少于这个值时不提醒，也不做空闲压缩：只为几千 token 去重写、打断缓存不划算。 | 5K 与窗口 1% 中较大者 |
-| Tool output cap（工具输出上限） | 单个工具结果超过这个大小就落盘：完整输出写进一个临时文件（bash 复用自带日志），模型先看到带文件路径的提示，再看到输出开头一段。Pi 自带的 bash、read 本来就有 50KB 上限，这一项主要兜住 MCP 和其它扩展的工具，它们可能一次返回几百 KB。`off` 表示不截。 | 50K 字节 |
 | Debug log（调试日志） | 在 `~/.pi/acp.log` 里额外记录详细事件，排查问题用。错误和主要事件始终会记。 | `off` |
 
 Context threshold、Nudge interval、Minimum benefit 跟模型的窗口和价格有关，所以面板只为**当前模型**设置它们；要改别的模型，先切换过去。选 `inherit`（继承）会去掉这个模型自己的值，改用 `acp.json` 里 provider 级或全局的值，都没有就用默认值。
@@ -123,7 +122,7 @@ Context threshold、Nudge interval、Minimum benefit 跟模型的窗口和价格
 - **按 provider 设置**：三项压缩时机设置除了按模型，也能对整个 provider 或全局设置（[写法](CONFIGURATION.zh-CN.md#compressproviders--按-provider--按-model-覆盖)）。
 - **面板没有的选项**，比如 `compress.emergencyThresholdPercent`。完整列表见 [CONFIGURATION.zh-CN.md](CONFIGURATION.zh-CN.md)，以下几项除外：`autoUpdate` 和 `ACP_AUTO_UPDATE` 已移除（用 `pi install` 更新）；已移除的委派配置（`delegate.*`、`displayUsage`、`delegatePrompt`）会被忽略；`promptSections.*` 会被忽略并提示一次，因为本分支注入自己的提示词。
 
-面板设置对应的键：Summary model 是 `compressionModelId`，Idle compact 是 `idleCompact.enabled`，Idle minutes 是 `idleCompact.idleMinutes`，Tool output cap 是 `toolOutputMaxBytes`，Debug log 是 `debug`。
+面板设置对应的键：Summary model 是 `compressionModelId`，Idle compact 是 `idleCompact.enabled`，Idle minutes 是 `idleCompact.idleMinutes`，Debug log 是 `debug`。
 
 `/acp compact <provider/model>` 也能在命令行设置摘要模型（`/acp compact` 查看当前设置，`reset` 改回主模型）。
 

@@ -1,82 +1,15 @@
-import { createHash, randomBytes } from "node:crypto";
-import { writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
 import {
   isBashToolResult,
   type ExtensionAPI,
   type ExtensionContext,
   type ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_TOOL_OUTPUT_MAX_BYTES, resolveRepetitionGuard } from "./config.js";
+import { resolveRepetitionGuard } from "./config.js";
 import { debug, logInfo, logWarn } from "./log.js";
 import type { AcpRuntime } from "./runtime.js";
 
 type ContentPart = ToolResultEvent["content"][number];
-
-// --- Oversized tool output: spill to a file (no LLM in the loop) ---
-// Above the byte cap the full output is written to a temp file and the notice
-// telling the model where it went comes FIRST, followed by the head of the
-// output. Bash results already carry details.fullOutputPath (pi's bash tool
-// streams the full log there); for every other tool the guardrail writes the
-// spill file itself, mirroring pi's own scheme (0600 mode, exclusive create,
-// <tmpdir>/<prefix>-<16 hex>.log) so nothing world-readable lands on disk.
-// If the spill write fails we cap without a path and say so — the tool-result
-// path never blocks. Non-text parts (images) are preserved in the result but
-// not written to the spill file; bash results have their own full log.
-function toolOutputFilePath(): string {
-  return join(tmpdir(), `pi-tool-output-${randomBytes(8).toString("hex")}.log`);
-}
-
-async function spillOversized(
-  event: ToolResultEvent,
-  maxBytes: number,
-  existingFullPath: string | undefined,
-): Promise<ToolResultEvent["content"] | undefined> {
-  const texts: string[] = [];
-  for (const c of event.content) {
-    if (c.type === "text") texts.push((c as { text: string }).text);
-  }
-  if (texts.length === 0) return undefined;
-  const combined = texts.join("\n");
-  const total = Buffer.byteLength(combined, "utf8");
-  if (total <= maxBytes) return undefined;
-  let path = existingFullPath;
-  if (!path) {
-    path = toolOutputFilePath();
-    try {
-      await writeFile(path, combined, { mode: 0o600, flag: "wx" });
-    } catch (e) {
-      logWarn("guardrail", { event: "output-spill-failed", error: e instanceof Error ? e.message : String(e) });
-      path = undefined;
-    }
-  }
-  const capped = capToolOutput(event.content, maxBytes, path);
-  if (capped) logWarn("guardrail", { event: "output-cap", max: maxBytes, hadPath: !!path });
-  return capped;
-}
-
-export function capToolOutput(
-  content: ToolResultEvent["content"],
-  maxBytes: number | undefined,
-  fullPath?: string,
-): ToolResultEvent["content"] | undefined {
-  const max = maxBytes ?? DEFAULT_TOOL_OUTPUT_MAX_BYTES;
-  if (!Number.isFinite(max) || max <= 0) return undefined;
-  const kept: ContentPart[] = [];
-  const texts: string[] = [];
-  for (const c of content) {
-    if (c.type === "text") texts.push((c as { text: string }).text);
-    else kept.push(c);
-  }
-  if (texts.length === 0) return undefined;
-  const combined = texts.join("\n");
-  const total = Buffer.byteLength(combined, "utf8");
-  if (total <= max) return undefined;
-  const head = keepHead(combined, max);
-  kept.push({ type: "text", text: buildCapNotice(total, max, fullPath) + head } as ContentPart);
-  return kept;
-}
 
 const TIMEOUT_RE = /Command timed out after (\d+) seconds/;
 
@@ -112,35 +45,9 @@ export function appendTimeoutNotice(
   return appendTrailingText(content, buildTimeoutNotice(secs));
 }
 
-function keepHead(str: string, maxBytes: number): string {
-  const buf = Buffer.from(str, "utf8");
-  if (buf.length <= maxBytes) return str;
-  let end = maxBytes;
-  while (end > 0) {
-    const b = buf[end];
-    if (b === undefined || (b & 0xc0) !== 0x80) break;
-    end--;
-  }
-  let head = buf.subarray(0, end).toString("utf8");
-  const nl = head.lastIndexOf("\n");
-  if (nl >= Math.floor(maxBytes / 2)) head = head.slice(0, nl);
-  return head;
-}
-
-function buildCapNotice(originalBytes: number, maxBytes: number, fullPath?: string): string {
-  const where = fullPath
-    ? `Full output saved to: ${fullPath} — read it to see everything.`
-    : "To see the full output, rerun the tool with a narrower query.";
-  return `[ACP guardrail: output too large (${formatBytes(originalBytes)}) — output capped at ${formatBytes(maxBytes)}. ${where}]\n\n`;
-}
-
 function buildTimeoutNotice(secs: number): string {
   const suggested = Math.min(Math.max(Math.ceil(secs * 2), 120), 3600);
   return `\n\n[ACP guardrail: command killed after ${secs}s. To give it more time, re-run the bash tool with a larger \`timeout\` argument (e.g. \`"timeout": ${suggested}\`).]`;
-}
-
-function formatBytes(n: number): string {
-  return n >= 1024 ? `${(n / 1024).toFixed(1)}KB` : `${n}B`;
 }
 
 // --- Generic tool-call repetition guard (issue #308) ---
@@ -250,16 +157,10 @@ export function wireToolGuardrails(pi: ExtensionAPI, runtime: AcpRuntime): void 
 
   pi.on("tool_result", async (event, ctx) => {
     const isBash = isBashToolResult(event);
-    const fullPath = isBash ? event.details?.fullOutputPath : undefined;
     const timeoutSecs =
       isBash && event.isError ? detectBashTimeout(event.content) : undefined;
 
     let modified: ToolResultEvent["content"] | undefined;
-    const max = runtime.adapter.toolOutputMaxBytes ?? DEFAULT_TOOL_OUTPUT_MAX_BYTES;
-    const next = await spillOversized(event, max, fullPath);
-    if (next) {
-      modified = next;
-    }
 
     if (timeoutSecs !== undefined) {
       modified = appendTimeoutNotice(modified ?? event.content, timeoutSecs);

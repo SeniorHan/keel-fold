@@ -34,7 +34,6 @@ Create `~/.pi/acp.json` (or `<project>/.pi/acp.json`) and drop in whichever keys
   "debug": false,
   "modelContextLimit": 200000,
   "outputHeadroomMaxPct": 0.25,
-  "toolOutputMaxBytes": 50000,
 
   "throttleRetry": {
     "enabled": true,
@@ -119,7 +118,6 @@ All keys below are currently **ACTIVE**.
 | `debug` | boolean | `false` | 🟢 ACTIVE | Enable verbose debug-level events in the log. |
 | `modelContextLimit` | number | *(auto)* | 🟢 ACTIVE | Override the context limit (in tokens). |
 | `outputHeadroomMaxPct` | number \| string | `0.25` | 🟢 ACTIVE | Cap on the output-headroom reservation, as a fraction of the context window. |
-| `toolOutputMaxBytes` | number | `50000` | 🟢 ACTIVE | Hard byte cap on tool result text. Oversized output is spilled to a temp file and the notice points there first. |
 | `protectedTools` | string\[\] | `none` | 🟢 ACTIVE | Tool-name patterns (glob suffix allowed) whose **every** call+result pair is hard-excluded from compression (refs render `BLOCKED`). For low-frequency, high-value tools with independent outputs — see the ⚠ note below. |
 | `protectedLatestTools` | string\[\] | `none` | 🟢 ACTIVE | Tool-name patterns (glob suffix allowed) whose **latest** call+result pair is hard-excluded from compression; older pairs remain compressible. For cumulative-snapshot tools. |
 | `neverPreserveRecentTools` | string\[\] | kernel built-in (`["decompress", "search_context", "read", "bash"]`, acp-kernel >= 0.0.92) | 🟢 ACTIVE | Tool-name patterns **removed from** the soft-protected recent zone so their results fold immediately. Default keeps `read`/`bash` compressible; remove only `read` (keep `decompress`/`search_context`) to stop the batch-read fold→re-read loop. **Empty array `[]` is valid** (max-protection escape hatch). |
@@ -210,13 +208,6 @@ All keys below are currently **ACTIVE**.
 - **Default:** `0.25`
 - **Status:** 🟢 ACTIVE
 - **Description:** Caps the output-headroom reservation as a fraction of the context window: reserved = min(model.maxTokens, pct × window). The reservation keeps the kernel's nudge/truncate bands below (window − reserved) so a long reply cannot push input + output past the window on APIs that count output against the window (all except Anthropic Messages, which enforces its input limit independently and is exempt). Without a cap, models whose registered max output is a large share of the window (e.g. 131072 on a 262144 window) lose most of their input budget — the 75% force-compress band then fires at roughly a third of the full window. The 0.25 default bounds that loss while still guaranteeing any single-turn reply up to 25% of the window fits at the 95% emergency threshold; longer replies overflow once and are recovered by the overflow self-heal on the next turn. Accepts a ratio (`0.25`) or percent string (`"25%"`). Set `0` to disable the reservation entirely; `1` (or greater) restores the legacy full-capability reservation.
-
-### `toolOutputMaxBytes`
-
-- **Type:** `number`
-- **Default:** `50000`
-- **Status:** 🟢 ACTIVE
-- **Description:** A hard byte cap (~50 KB, roughly 1250 lines) applied to tool result text via the `tool_result` hook. Aligned with Pi's own bash/read/grep cap so every tool path lands under one ceiling; the net still catches runaway output from tools Pi does not cap (MCP/custom). When the cap fires, the full output is written to a temp file (`/tmp/pi-tool-output-<id>.log`, mode `0600`; bash results reuse their own `details.fullOutputPath`) and the notice comes **first**: `[ACP guardrail: output too large (N) — output capped at M. Full output saved to: <path> — read it to see everything.]`, followed by the head of the output. Set higher for large MCP outputs, lower (e.g. `8192`) for a tighter context budget, or set to `0` to disable the cap entirely.
 
 ### `protectedTools`
 

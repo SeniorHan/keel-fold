@@ -16,7 +16,6 @@ export interface UserAcpConfig {
     protectedLatestTools?: string[];
     neverPreserveRecentTools?: string[];
     preserveRecentTools?: string[];
-    toolOutputMaxBytes?: number;
     compress?: CompressConfig;
     outputHeadroomMaxPct?: number | string;
     throttleRetry?: boolean | ThrottleRetryConfig;

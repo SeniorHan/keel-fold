@@ -3,7 +3,7 @@
 ## v0.3.0 (2026-10-22)
 
 - Removed the bash default-timeout guard (`toolBashDefaultTimeout`). ACP no longer injects a `timeout` into `bash` calls the model left unbounded: long commands belong to the bash tool's own promotion/timeout design (e.g. the pi-bg-bash extension), not to a hidden side injection. The key is dropped from the config, the panel and the docs; a stale key in an existing `acp.json` is ignored silently.
-- Reworked oversized tool-output handling (`toolOutputMaxBytes`): no LLM in the loop. Above the cap the full output is written to a temp file — `/tmp/pi-tool-output-<id>.log`, mode `0600`, exclusive create, mirroring Pi's own output-file scheme — and the tool result becomes notice-first: `[ACP guardrail: output too large (N) — output capped at M. Full output saved to: <path> — read it to see everything.]` followed by the head of the output. Bash results keep reusing their own `details.fullOutputPath` log instead of a second file; if the spill write fails the guard still caps, without a path.
+- Removed the tool-output cap (`toolOutputMaxBytes`) entirely. Every output path Pi reaches already caps itself upstream — bash and read at 50KB, MCP direct tools at 20KB, MCP via codemode at 10K tokens, each preserving the full text its own way (`fullOutputPath` or pagination) — so the guard only ever fired in the sliver where `read`'s 51.2KB output crossed the 50K threshold, truncating away Pi's own pagination hint and pointing at a near-duplicate spill file. The key is dropped from the config, the panel and the docs; a stale key in an existing `acp.json` is ignored silently.
 
 ## v0.2.2 (2026-10-20)
 

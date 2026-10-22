@@ -1,8 +1,6 @@
-import { readFile, readdir, rm, stat } from "node:fs/promises";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  capToolOutput,
   detectBashTimeout,
   appendTimeoutNotice,
   wireToolGuardrails,
@@ -10,71 +8,11 @@ import {
   repetitionFingerprint,
   RepetitionTracker,
 } from "../src/tool-guardrails.js";
-import type { ExtensionAPI, ExtensionContext, ToolCallEvent, ToolResultEvent } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolCallEvent, ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import type { AcpRuntime } from "../src/runtime.js";
 
 type Content = ToolResultEvent["content"];
 const text = (t: string): Content => [{ type: "text", text: t }];
-
-test("capToolOutput leaves small output untouched (returns undefined)", () => {
-  assert.equal(capToolOutput(text("hello"), 100), undefined);
-});
-
-test("capToolOutput returns undefined when the cap is disabled", () => {
-  assert.equal(capToolOutput(text("x".repeat(10_000)), 0), undefined);
-  assert.equal(capToolOutput(text("x".repeat(10_000)), undefined), undefined);
-});
-
-test("capToolOutput truncates oversized text to under the byte cap and adds a notice", () => {
-  const big = "line\n".repeat(4000);
-  const out = capToolOutput(text(big), 500);
-  assert.ok(out, "should return truncated content");
-  const t = (out![0] as { text: string }).text;
-  assert.ok(Buffer.byteLength(t, "utf8") <= 500 + 200, "truncated payload must be near the cap (notice adds a little)");
-  assert.match(t, /^\[ACP guardrail/, "the notice must come first");
-  assert.match(t, /output capped at/);
-});
-
-test("capToolOutput keeps a complete last line (no mid-line cut)", () => {
-  const big = "0123456789\n".repeat(2000);
-  const out = capToolOutput(text(big), 100);
-  const t = (out![0] as { text: string }).text;
-  const body = t.slice(t.indexOf("]\n\n") + 3);
-  for (const line of body.split("\n")) {
-    assert.ok(line.length === 0 || line.length === 10, "no partial line: " + JSON.stringify(line));
-  }
-});
-
-test("capToolOutput mentions the saved full-output path for bash-style results", () => {
-  const big = "x".repeat(10_000);
-  const out = capToolOutput(text(big), 500, "/tmp/acp-full.log");
-  const t = (out![0] as { text: string }).text;
-  assert.match(t, /\/tmp\/acp-full\.log/);
-});
-
-test("capToolOutput preserves non-text (image) content alongside truncated text", () => {
-  const img = { type: "image", source: { media_type: "image/png", data: "AAAA" } } as Content[number];
-  const content: Content = [{ type: "text", text: "x".repeat(10_000) }, img];
-  const out = capToolOutput(content, 500);
-  assert.ok(out);
-  assert.equal(out!.some((c) => c.type === "image"), true, "image part must survive");
-  assert.equal(out!.some((c) => c.type === "text"), true, "truncated text part must be present");
-});
-
-test("capToolOutput is UTF-8 safe (never splits a multibyte sequence)", () => {
-  const big = "中文测试\n".repeat(3000);
-  const out = capToolOutput(text(big), 200);
-  const t = (out![0] as { text: string }).text;
-  const body = t.slice(t.indexOf("]\n\n") + 3);
-  const buf = Buffer.from(body, "utf8");
-  let i = 0;
-  while (i < buf.length) {
-    const b = buf[i];
-    const size = b < 0x80 ? 1 : b < 0xe0 ? 2 : b < 0xf0 ? 3 : 4;
-    assert.ok(i + size <= buf.length, "no truncated multibyte sequence at byte " + i);
-    i += size;
-  }
-});
 
 test("detectBashTimeout extracts the seconds from Pi's timeout error text", () => {
   assert.equal(detectBashTimeout(text("Command timed out after 60 seconds")), 60);
@@ -107,102 +45,6 @@ test("appendTimeoutNotice adds a new text part when content has no text part", (
   const out = appendTimeoutNotice([img], 30);
   assert.equal(out.length, 2);
   assert.equal(out[1].type, "text");
-});
-
-// --- wiring: the oversized-output pipeline (file spill, then truncation) ---
-
-function wireFor(adapter: Record<string, unknown>) {
-  const handlers: Record<string, (e: unknown, ctx: ExtensionContext) => unknown> = {};
-  const pi = {
-    on: (name: string, fn: (e: unknown, ctx: ExtensionContext) => unknown) => {
-      handlers[name] = fn;
-    },
-  } as unknown as ExtensionAPI;
-  wireToolGuardrails(pi, { adapter } as unknown as AcpRuntime);
-  const ctx = { signal: undefined } as unknown as ExtensionContext;
-  return async (event: ToolResultEvent) => handlers["tool_result"]!(event, ctx);
-}
-
-const readResult = (t: string) =>
-  ({ toolName: "read", content: text(t), isError: false }) as unknown as ToolResultEvent;
-
-function textOf(part: unknown): string {
-  if (part && typeof part === "object" && "text" in part && typeof part.text === "string") {
-    return part.text;
-  }
-  throw new Error("expected a text content part");
-}
-
-function spillPathOf(notice: string): string | null {
-  const marker = "Full output saved to: ";
-  const i = notice.indexOf(marker);
-  if (i < 0) return null;
-  const rest = notice.slice(i + marker.length);
-  const end = rest.indexOf(" ");
-  return rest.slice(0, end);
-}
-
-async function cleanupSpill(notice: string): Promise<void> {
-  const p = spillPathOf(notice);
-  if (p && p.startsWith("/tmp/pi-tool-output-")) await rm(p, { force: true });
-}
-
-test("wireToolGuardrails applies the documented 50KB default when toolOutputMaxBytes is unset", async () => {
-  const onResult = wireFor({});
-  const ret = await onResult(readResult("x".repeat(300 * 1024)));
-  assert.ok(ret && typeof ret === "object" && "content" in ret && Array.isArray(ret.content),
-    "oversized output must be capped even with no explicit config");
-  const t = textOf(ret.content[0]);
-  assert.ok(t.startsWith("[ACP guardrail"), "the notice must come first");
-  assert.ok(Buffer.byteLength(t, "utf8") < 60 * 1024, "payload must be truncated near the 50KB default");
-  await cleanupSpill(t);
-});
-
-test("wireToolGuardrails keeps an explicit toolOutputMaxBytes: 0 as disable", async () => {
-  const onResult = wireFor({ toolOutputMaxBytes: 0 });
-  assert.equal(await onResult(readResult("x".repeat(300 * 1024))), undefined);
-});
-
-test("wireToolGuardrails honors an explicit smaller cap", async () => {
-  const onResult = wireFor({ toolOutputMaxBytes: 1000 });
-  const ret = await onResult(readResult("x".repeat(10_000)));
-  assert.ok(ret && typeof ret === "object" && "content" in ret && Array.isArray(ret.content));
-  const t = textOf(ret.content[0]);
-  assert.ok(Buffer.byteLength(t, "utf8") < 2000, "payload must be truncated to the explicit cap");
-  await cleanupSpill(t);
-});
-
-test("oversized non-bash output is spilled to a 0600 temp file, notice first", async () => {
-  const onResult = wireFor({});
-  const big = "X".repeat(300 * 1024);
-  const ret = await onResult(readResult(big));
-  assert.ok(ret && typeof ret === "object" && "content" in ret && Array.isArray(ret.content));
-  const t = textOf(ret.content[0]);
-  assert.ok(t.startsWith("[ACP guardrail: output too large"), "the notice must come before the output head");
-  const file = spillPathOf(t);
-  assert.ok(file, "notice must point at the spill file: " + t.slice(0, 200));
-  assert.ok(file.startsWith("/tmp/pi-tool-output-") && file.endsWith(".log"), "unexpected spill path: " + file);
-  assert.equal(await readFile(file, "utf8"), big, "spill file must hold the full original output");
-  const mode = (await stat(file)).mode & 0o777;
-  assert.equal(mode, 0o600, "spill file must be 0600");
-  await rm(file, { force: true });
-});
-
-test("bash results with details.fullOutputPath reuse the existing file", async () => {
-  const onResult = wireFor({});
-  const before = new Set(await readdir("/tmp"));
-  const ret = await onResult({
-    toolName: "bash",
-    isError: false,
-    content: text("y".repeat(300 * 1024)),
-    details: { fullOutputPath: "/tmp/acp-full.log" },
-  } as unknown as ToolResultEvent);
-  assert.ok(ret && typeof ret === "object" && "content" in ret && Array.isArray(ret.content));
-  const t = textOf(ret.content[0]);
-  assert.ok(t.includes("Full output saved to: /tmp/acp-full.log"));
-  const after = new Set(await readdir("/tmp"));
-  const created = [...after].filter((n) => !before.has(n) && n.startsWith("pi-tool-output"));
-  assert.equal(created.length, 0, "no second spill file for bash results");
 });
 
 // --- generic tool-call repetition guard (issue #308) ---
@@ -306,6 +148,13 @@ const statusResult = (id: string): ToolResultEvent =>
 
 const hasContent = (ret: unknown): ret is { content: Content } =>
   !!ret && typeof ret === "object" && "content" in ret;
+
+const textOf = (part: unknown): string => {
+  if (part && typeof part === "object" && "text" in part && typeof part.text === "string") {
+    return part.text;
+  }
+  throw new Error("expected a text content part");
+};
 
 test("repetition guard queues a warning at warn=3 (default) without blocking", async () => {
   const w = wireRepetition({});
