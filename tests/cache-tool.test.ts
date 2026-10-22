@@ -55,10 +55,10 @@ async function setup(entries: any[], stateFile: string, notifies: string[] = [])
   await rm(`${stateFile}.acp.json`, { force: true });
   const ctx = fakeCtx(entries, stateFile, notifies);
   await handlers.get("context")![0]!({ type: "context", messages: [] }, ctx);
-  return { api, ctx, handlers, tool: api.tools.find((t: any) => t.name === "acp_cache") as any };
+  return { api, ctx, handlers, tool: api.tools.find((t: any) => t.name === "cache") as any };
 }
 
-test("acp_cache reports grand ledger with closed identity (no folds)", async () => {
+test("cache reports grand ledger with closed identity (no folds)", async () => {
   const T0 = Date.now() - 60_000;
   const entries = [
     userMsg("e1", "hello world, let us start a conversation about caching.", T0 - 1000),
@@ -86,7 +86,7 @@ test("acp_cache reports grand ledger with closed identity (no folds)", async () 
   assert.match(lines[1], /4400\s+4300\s+97\.7%\s+0\s+0\s+100/, "req2: 100 miss attributed to ttl/other");
 });
 
-test("acp_cache attributes post-fold re-pay to the fold and prices it", async () => {
+test("cache attributes post-fold re-pay to the fold and prices it", async () => {
   const T0 = Date.now() - 60_000;
   const longText = "This is a detailed message that needs to be compressed. ".repeat(130);
   const entries = [
@@ -113,7 +113,7 @@ test("acp_cache attributes post-fold re-pay to the fold and prices it", async ()
   entries.push(post);
   await handlers.get("context")![0]!({ type: "context", messages: [] }, ctx);
 
-  const res = await api.tools.find((t: any) => t.name === "acp_cache")!.execute("tc2", {}, undefined, undefined, ctx);
+  const res = await api.tools.find((t: any) => t.name === "cache")!.execute("tc2", {}, undefined, undefined, ctx);
   const text = (res.content[0] as any).text as string;
 
   assert.match(text, /— 3 requests/, "all three usage footers counted");
@@ -131,7 +131,7 @@ test("acp_cache attributes post-fold re-pay to the fold and prices it", async ()
   assert.match(itemLines[1], /1200\s+0\s+0\.0%\s+0\s+1200\s+0\s+#1$/, "post-fold miss fully attributed to the fold");
   assert.match(text, /1 lines omitted/, "healthy line counted as omitted");
 
-  const resFull = await api.tools.find((t: any) => t.name === "acp_cache")!.execute("tc2f", { detail: "full" }, undefined, undefined, ctx);
+  const resFull = await api.tools.find((t: any) => t.name === "cache")!.execute("tc2f", { detail: "full" }, undefined, undefined, ctx);
   const fullText = (resFull.content[0] as any).text as string;
   assert.equal(itemRows(fullText).length, 3, "detail:full lists every request");
   assert.match(fullText, /verdict: 0 paid back, 0 not paid back, 1 unobserved/, "full keeps legacy fold table wording");

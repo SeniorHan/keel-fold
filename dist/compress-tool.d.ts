@@ -65,7 +65,7 @@ type AgentMessage = SessionMessageEntry["message"];
  * because it renders the full text as separate `acp_summary_` messages, but
  * coreOutToAgentMessages drops those (pi has no slot for them), so without this
  * the main model only ever sees its own stubbed fallback — never the summary
- * the dedicated model wrote — and decompresses blocks just to read them.
+ * the dedicated model wrote — and unfolds blocks just to read them.
  * Arguments are parsed with normalizeRanges, so every shape the tool accepts
  * (bare objects, startRef/endRef, single-range, string content) is covered.
  * Ranges match blocks by start/end ref; a single-range call whose callId owns a

@@ -104,18 +104,18 @@ test("④ thinking of messages whose first call is not compress is left to estim
   assert.equal(keptCompressThinkingTokens([msg] as unknown as AgentMessage[]), 0);
 });
 
-test("⑤ acp_context calls and results project under the wrapped operation", () => {
-  const facade = (id: string, op: string): object => ({ role: "assistant", content: [{ type: "toolCall", id, name: "acp_context", arguments: { op, args: {} } }] });
+test("⑤ fold calls and results project under the wrapped operation", () => {
+  const facade = (id: string, op: string): object => ({ role: "assistant", content: [{ type: "toolCall", id, name: "fold", arguments: { op, args: {} } }] });
   const entries = [
-    entry("e1", facade("d1", "decompress")),
-    entry("e2", result("d1", "acp_context")),
+    entry("e1", facade("d1", "unfold")),
+    entry("e2", result("d1", "fold")),
     entry("e3", facade("h1", "help")),
-    entry("e4", result("h1", "acp_context")),
+    entry("e4", result("h1", "fold")),
   ];
   const names = (cores: CoreMessage[]): string[] => cores.map((c) => c.toolName ?? "");
-  assert.deepEqual(names(entriesToCoreMessages(entries)), ["decompress", "decompress", "acp_context", "acp_context"]);
+  assert.deepEqual(names(entriesToCoreMessages(entries)), ["unfold", "unfold", "fold", "fold"]);
   // The incremental projection cache yields the same names across appends.
   const cache = new EntryProjectionCache();
   cache.project(entries.slice(0, 1));
-  assert.deepEqual(names(cache.project(entries)), ["decompress", "decompress", "acp_context", "acp_context"]);
+  assert.deepEqual(names(cache.project(entries)), ["unfold", "unfold", "fold", "fold"]);
 });

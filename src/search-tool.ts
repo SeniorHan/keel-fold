@@ -16,15 +16,15 @@ type SearchArgs = Static<typeof SearchParams>;
 
 export function makeSearchTool(runtime: AcpRuntime, overrides?: ToolPromptOverrides): ToolDefinition<typeof SearchParams> {
     return applyToolPromptOverrides({
-        name: "search_context",
-        label: "Search Context",
+        name: "search",
+        label: "Search",
         description:
-            "Search compressed blocks AND historical messages by keyword. Use to cheaply locate detail before decompressing. Returns ranked results with ref, size, preview, and the decompress command to retrieve full content.",
-        promptSnippet: 'search_context({ query: "auth token" })',
+            "Search compressed blocks AND historical messages by keyword. Use to cheaply locate detail before unfolding. Returns ranked results with ref, size, preview, and the unfold command to retrieve full content.",
+        promptSnippet: 'search({ query: "auth token" })',
         promptGuidelines: [
-            "Search locates detail folded into summaries or past messages — cheaper than decompressing blind.",
-            "Each result shows a ref (b3 block / m00350 message), size, and the exact decompress command for full content.",
-            "Message hits link to the owning block — decompress that block to recover surrounding detail.",
+            "Search locates detail folded into summaries or past messages — cheaper than unfolding blind.",
+            "Each result shows a ref (b3 block / m00350 message), size, and the exact unfold command for full content.",
+            "Message hits link to the owning block — unfold that block to recover surrounding detail.",
         ],
         parameters: SearchParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<AgentToolResult<unknown>> {
@@ -70,13 +70,13 @@ function formatResult(r: SearchResult): string {
 
     const header = `${meta}  "${truncate(r.title, 50)}"`;
 
-    const decompressHint = r.kind === "block"
-        ? `→ decompress({ blockId: "${r.ref}" })`
+    const unfoldHint = r.kind === "block"
+        ? `→ unfold({ ref: "${r.ref}" })`
         : r.blockId
-          ? `→ decompress({ blockId: "${r.blockId}" })  (block containing message ${r.ref})`
+          ? `→ unfold({ ref: "${r.blockId}" })  (block containing message ${r.ref})`
           : `(message ${r.ref} is still visible in context)`;
 
-    return `${header}\n  ${r.preview}\n  ${decompressHint}`;
+    return `${header}\n  ${r.preview}\n  ${unfoldHint}`;
 }
 
 function truncate(s: string, n: number): string {

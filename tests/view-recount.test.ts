@@ -187,7 +187,7 @@ test("#289 Fix B: acp_status nudge follows the sent view, not the raw estimate",
   try {
     const { api, handlers } = captureApi();
     createAcpExtension({ modelContextLimit: L })(api as any);
-    const statusTool = api.tools.find((t: any) => t.name === "acp_status");
+    const statusTool = api.tools.find((t: any) => t.name === "status");
     assert.ok(statusTool, "acp_status tool registered");
     const ctx = fakeCtx();
 

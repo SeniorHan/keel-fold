@@ -22,11 +22,11 @@ type StatusArgs = Static<typeof StatusParams>;
 
 export function makeStatusTool(runtime: AcpRuntime, overrides?: ToolPromptOverrides): ToolDefinition<typeof StatusParams> {
   return applyToolPromptOverrides({
-    name: "acp_status",
-    label: "ACP Status",
+    name: "status",
+    label: "Status",
     description:
       "Context status: overview, compressed blocks, or uncompressed ranges/messages. No args = overview + totals + compressible ranges. scope:'uncompressed' + view:'messages' for per-message listing. scope:'compressed' for block drilldown.",
-    promptSnippet: 'acp_status({}) or acp_status({ scope: "uncompressed", view: "messages" })',
+    promptSnippet: 'status({}) or status({ scope: "uncompressed", view: "messages" })',
     promptGuidelines: [
       "Call with no args for a quick overview of context usage.",
       "Use scope:'uncompressed' to find the largest compressible ranges.",
@@ -53,9 +53,9 @@ async function handleStatus(args: StatusArgs, runtime: AcpRuntime, ctx: Extensio
   // transform, so the reported percentages match the nudge bands (issue #267).
   const config = applyOutputHeadroom(runtime.configFor(ctx), ctx.model, resolveOutputHeadroomCap(runtime.adapter.outputHeadroomMaxPct));
   // Run the same pipeline (assign-refs → prune → hide-compress-calls → ...) that
-  // the context transform runs, so what acp_status reports matches what the
+  // the context transform runs, so what status reports matches what the
   // model actually receives. Without this, consumed/hidden compress calls and
-  // pruned messages showed up in acp_status even though they never reached
+  // pruned messages showed up in status even though they never reached
   // the model.
   const coveredIds = collectCoveredMessageIds(state);
   // Sent-view arbitration (same scale as the context transform), floored at
@@ -122,7 +122,7 @@ async function handleStatus(args: StatusArgs, runtime: AcpRuntime, ctx: Extensio
   }
   if (ranges.length > 0 || protectedRanges.length > 0) {
     extra.push("");
-    // Reuse the kernel's merged range formatter so acp_status, the nudge,
+    // Reuse the kernel's merged range formatter so status, the nudge,
     // and /acp all render compressible+protected ranges identically
     // (merged oldest-first, with mixed-range breakdowns).
     extra.push(formatRanges(ranges, protectedRanges));

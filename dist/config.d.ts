@@ -71,7 +71,7 @@ export interface CompressConfig extends CompressSettings {
 /** Generic tool-call repetition guard. Detects the same tool being called
  *  repeatedly with byte-identical arguments — a sequence-level attractor that
  *  token-level penalties cannot break (greedy small models loop on e.g.
- *  acp_status or bash polls forever, each round adding protected tokens that
+ *  status or bash polls forever, each round adding protected tokens that
  *  the compression protection band then refuses to reclaim). Consecutive
  *  identical calls accumulate per session: at `warn` a strong warning is
  *  appended to that call's toolResult; at `abort` the call is refused (blocked,

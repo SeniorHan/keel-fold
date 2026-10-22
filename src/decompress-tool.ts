@@ -14,53 +14,60 @@ import { resolve, relative, isAbsolute, join, basename, dirname } from "node:pat
 import { tmpdir, homedir } from "node:os";
 import { createHash } from "node:crypto";
 
-/** Directory for auto-generated decompress output files. */
+/** Directory for auto-generated unfold output files. (The directory name
+ *  keeps the historical spelling — an on-disk compat path, not a model face.) */
 const AUTO_DIR = join(homedir() || tmpdir(), ".cache", "pi", "acp-decompress");
 
 /** Maximum chars of a head preview included in the tool result for file mode. */
 const PREVIEW_CHARS = 600;
 
-/** For message-ref decompression: a single message at or above this size is
+/** For message-ref unfolds: a single message at or above this size is
  *  written to a file instead of returned inline, to avoid context bloat.
  *  Single messages are usually small, so the default for messages is inline
- *  (unlike block decompression, which defaults to file). */
+ *  (unlike block unfolds, which default to file). */
 const MESSAGE_INLINE_THRESHOLD = 2000;
 
-const DecompressParams = Type.Object({
-  blockId: Type.String({ description: 'Block id to restore, e.g. "b5". Also accepts a message ref (UUID) from search_context results — resolves to the owning block automatically.' }),
+const UnfoldParams = Type.Object({
+  ref: Type.String({ description: 'Ref to restore, e.g. "b5" — a block id, or a message ref (UUID) from search results that resolves to the owning block automatically.' }),
+  blockId: Type.Optional(Type.String({ description: 'Deprecated alias for ref — still accepted; ignored when ref is set.' })),
   full: Type.Optional(Type.Boolean({ description: "If true, recurse through all nested blocks to original messages. Default: false (restores one tier up — nested block summaries shown, direct messages in full)." })),
   toFile: Type.Optional(Type.String({ description: "Write restored content to this file path (must be under /tmp or ~/.cache/pi) instead of the default auto-generated path. Block stays compressed." })),
   inline: Type.Optional(Type.Boolean({ description: "If true, return content inline as this tool's result (appends to context). Default: false — content is written to an auto-generated file to avoid context bloat. Only set true when the content is small or you accept the context cost." })),
 });
 
-type DecompressArgs = Static<typeof DecompressParams>;
+type UnfoldArgs = Static<typeof UnfoldParams>;
 
-export function makeDecompressTool(runtime: AcpRuntime, overrides?: ToolPromptOverrides): ToolDefinition<typeof DecompressParams> {
+/** The legacy parameter spelling is still accepted: normalize to `ref`. */
+function normalizedRef(args: UnfoldArgs): string {
+  return (args.ref ?? args.blockId ?? "").trim();
+}
+
+export function makeUnfoldTool(runtime: AcpRuntime, overrides?: ToolPromptOverrides): ToolDefinition<typeof UnfoldParams> {
   return applyToolPromptOverrides({
-    name: "decompress",
-    label: "Decompress",
+    name: "unfold",
+    label: "Unfold",
     description:
-      "Restore a previously compressed block's content, or a single message by its ref. The block/message stays compressed — context and cache prefix are not disrupted. BLOCK decompress (blockId b5) defaults to writing a file (blocks can be large); use the read tool to access it, or inline:true to return inline. MESSAGE decompress (blockId = a message UUID from search_context) returns that ONE message's original text — defaults to inline since a single message is usually small; oversized messages go to a file. full:true recurses through nested block tiers (block mode only). You can pass a block id (b5) OR a message ref (UUID) from search_context results.",
-    promptSnippet: 'decompress({ blockId: "b5" }) or decompress({ blockId: "d51b6f94" }) (message ref from search) — writes to file by default; add inline: true to return inline',
+      "Restore a previously compressed block's content, or a single message by its ref. The block/message stays compressed — context and cache prefix are not disrupted. BLOCK unfold (ref b5) defaults to writing a file (blocks can be large); use the read tool to access it, or inline:true to return inline. MESSAGE unfold (ref = a message UUID from search) returns that ONE message's original text — defaults to inline since a single message is usually small; oversized messages go to a file. full:true recurses through nested block tiers (block mode only). You can pass a block id (b5) OR a message ref (UUID) from search results.",
+    promptSnippet: 'unfold({ ref: "b5" }) or unfold({ ref: "d51b6f94" }) (message ref from search) — writes to file by default; add inline: true to return inline',
     promptGuidelines: [
-      "Decompress when you need exact details lost in compression (file contents, error messages, signatures).",
+      "Unfold when you need exact details lost in compression (file contents, error messages, signatures).",
       "Message ref (UUID) returns ONLY that one message's original text, default inline (small). Block id (b5) returns the whole block, default file.",
       "Pass inline:true ONLY when content is small or you accept the context cost (block mode).",
       "Use full:true to recurse through all nested tiers to original messages.",
     ],
-    parameters: DecompressParams,
+    parameters: UnfoldParams,
     async execute(_toolCallId, params, signal, _onUpdate, ctx): Promise<AgentToolResult<unknown>> {
       if (runtime.refused) return { details: undefined, content: [{ type: "text", text: runtime.refusalMessage ?? PROXY_STAND_DOWN_MESSAGE }] };
       let result: string;
       try {
         const release = await runtime.acquireLock(ctx.sessionManager.getSessionId());
         try {
-          result = await handleDecompress(params as DecompressArgs, runtime, ctx, signal);
+          result = await handleUnfold(params as UnfoldArgs, runtime, ctx, signal);
         } finally {
           release();
         }
       } catch (e) {
-        logThrow("decompress", e, { sid: ctx.sessionManager.getSessionId(), blockId: (params as DecompressArgs).blockId });
+        logThrow("unfold", e, { sid: ctx.sessionManager.getSessionId(), ref: (params as UnfoldArgs).ref });
         throw e;
       }
       return { details: undefined, content: [{ type: "text", text: result }] };
@@ -136,7 +143,7 @@ function resolveToFilePath(targetPath: string): string | { error: string } {
 }
 
 /** Generate a unique auto file path for a block. Uses a timestamp so repeated
- *  decompressions of the same block never overwrite each other. */
+ *  unfolds of the same block never overwrite each other. */
 /** Lean: filename stem for a message ref. Raw entry refs can carry
  *  characters Windows rejects in filenames (e.g. `4d9e965e#toolu_x|fc_toolu_x`);
  *  keep safe refs readable and give unsafe ones a sanitized prefix plus a
@@ -175,7 +182,7 @@ function findMessageContent(ref: string, ctx: ExtensionContext): { text: string;
 }
 
 /** Recover a block's message refs from the FULL session tree (getEntry), not
- *  just the active branch, so block decompress still works after a tree
+ *  just the active branch, so block unfold still works after a tree
  *  navigation (workspace-history /undo /redo, Pi /tree). Block refs are
  *  CoreMessage ids — multi tool-call assistants are `${entryId}#${callId}`
  *  (messages.ts projectMessage) — while getEntry() keys are SessionEntry ids
@@ -208,7 +215,7 @@ async function resolveBlockMessages(
   if (stillMissing.length > 0) {
     const ancestors = await loadAncestorEntries(ctx.sessionManager.getSessionFile(), new Set(stillMissing));
     if (ancestors.length > 0) {
-      logInfo("decompress", { sid: ctx.sessionManager.getSessionId(), event: "ancestor-fallback", missing: stillMissing.length, found: ancestors.length });
+      logInfo("unfold", { sid: ctx.sessionManager.getSessionId(), event: "ancestor-fallback", missing: stillMissing.length, found: ancestors.length });
       for (const entry of ancestors) extra.push(...entriesToCoreMessages([entry]));
     }
   }
@@ -229,13 +236,13 @@ async function findAncestorMessage(ref: string, ctx: ExtensionContext): Promise<
   return null;
 }
 
-/** Decompress a single message by its ref. Unlike block decompression (which
+/** Decompress a single message by its ref. Unlike block unfolds (which
  *  defaults to file — blocks can be huge), a single message is usually small,
  *  so it defaults to inline. Oversized messages still go to a file. */
 async function handleMessageRef(
   ref: string,
   ownerBlockId: string,
-  args: DecompressArgs,
+  args: UnfoldArgs,
   ctx: ExtensionContext,
 ): Promise<string> {
   let found = findMessageContent(ref, ctx);
@@ -250,22 +257,22 @@ async function handleMessageRef(
   const wantFile = args.toFile !== undefined || args.inline === false || text.length >= MESSAGE_INLINE_THRESHOLD;
 
   if (!wantFile) {
-    debug.event("decompress-message", { ref, ownerBlockId, mode: "inline", chars: text.length });
-    logInfo("decompress", { sid: ctx.sessionManager.getSessionId(), event: "message", mode: "inline", ref, ownerBlockId, chars: text.length });
+    debug.event("unfold-message", { ref, ownerBlockId, mode: "inline", chars: text.length });
+    logInfo("unfold", { sid: ctx.sessionManager.getSessionId(), event: "message", mode: "inline", ref, ownerBlockId, chars: text.length });
     return `Message ${ref} (${role}, block ${ownerBlockId}, ${text.length} chars) restored inline:\n\n${text}`;
   }
 
   const targetPath = args.toFile ? resolveToFilePath(args.toFile) : autoFilePath(messageFileStem(ref));
   if (typeof targetPath === "object" && "error" in targetPath) {
-    logError("decompress", { sid: ctx.sessionManager.getSessionId(), event: "message-path-rejected", ref, toFile: args.toFile });
+    logError("unfold", { sid: ctx.sessionManager.getSessionId(), event: "message-path-rejected", ref, toFile: args.toFile });
     return targetPath.error;
   }
 
   await mkdir(AUTO_DIR, { recursive: true }).catch(() => {});
   await writeFile(targetPath, text, "utf8");
 
-  debug.event("decompress-message", { ref, ownerBlockId, mode: "file", path: targetPath, chars: text.length });
-  logInfo("decompress", { sid: ctx.sessionManager.getSessionId(), event: "message", mode: "file", ref, ownerBlockId, path: targetPath, chars: text.length });
+  debug.event("unfold-message", { ref, ownerBlockId, mode: "file", path: targetPath, chars: text.length });
+  logInfo("unfold", { sid: ctx.sessionManager.getSessionId(), event: "message", mode: "file", ref, ownerBlockId, path: targetPath, chars: text.length });
 
   return [
     `Message ${ref} (${role}, block ${ownerBlockId}, ${text.length} chars) written to ${targetPath}.`,
@@ -274,11 +281,11 @@ async function handleMessageRef(
   ].join("\n");
 }
 
-async function handleDecompress(args: DecompressArgs, runtime: AcpRuntime, ctx: ExtensionContext, signal?: AbortSignal): Promise<string> {
+async function handleUnfold(args: UnfoldArgs, runtime: AcpRuntime, ctx: ExtensionContext, signal?: AbortSignal): Promise<string> {
   assertNotAborted(signal);
   const { state, coreMessages } = await runtime.stateFor(ctx);
   assertNotAborted(signal);
-  const arg = (args.blockId ?? "").trim();
+  const arg = normalizedRef(args);
 
   // Resolve what `arg` refers to. Check message-ref FIRST (data-driven: a ref
   // exists in some block's effectiveMessageIds). This must precede block-id
@@ -291,7 +298,7 @@ async function handleDecompress(args: DecompressArgs, runtime: AcpRuntime, ctx: 
 
   // Otherwise treat as a block id.
   const blockId = parseBlockIdArg(arg);
-  if (!blockId) return `Invalid blockId: ${args.blockId}. Expected format like "b5", "5", or a message ref (UUID) from search_context results.`;
+  if (!blockId) return `Invalid ref: ${args.ref ?? args.blockId}. Expected format like "b5", "5", or a message ref (UUID) from search results.`;
   const block = state.blocks.find((b) => b.blockId === blockId);
   if (!block) {
     const active = state.blocks.filter((b) => b.active).map((b) => b.blockId).join(", ");
@@ -301,7 +308,7 @@ async function handleDecompress(args: DecompressArgs, runtime: AcpRuntime, ctx: 
   const full = args.full ?? false;
   // Resolve the block's message refs against the FULL session tree (falling
   // back to getEntry for refs missing from the active branch, then to ancestor
-  // session logs for derived children — issue #531), so decompress still
+  // session logs for derived children — issue #531), so unfold still
   // restores original text after a tree navigation (undo/redo//tree) or in a
   // child that inherited the block.
   const resolved = await resolveBlockMessages(block, coreMessages, ctx);
@@ -316,8 +323,8 @@ async function handleDecompress(args: DecompressArgs, runtime: AcpRuntime, ctx: 
     // refold it in place (kernel K2), and surface the re-fold hint.
     const marked = markBlockRestoredInline(state, blockId);
     await runtime.save(marked.state, ctx);
-    debug.event("decompress", { blockId, full, count, mode: "inline", restoredStartRef: marked.result?.restoredStartRef ?? null, restoredEndRef: marked.result?.restoredEndRef ?? null });
-    logInfo("decompress", { sid: ctx.sessionManager.getSessionId(), event: "block", mode: "inline", blockId, full, count, refold: marked.result !== null });
+    debug.event("unfold", { blockId, full, count, mode: "inline", restoredStartRef: marked.result?.restoredStartRef ?? null, restoredEndRef: marked.result?.restoredEndRef ?? null });
+    logInfo("unfold", { sid: ctx.sessionManager.getSessionId(), event: "block", mode: "inline", blockId, full, count, refold: marked.result !== null });
     return `Restored block ${blockId} (${count} item${count === 1 ? "" : "s"}) inline:\n\n${text}\n\n${refoldHint(blockId, marked.result)}`;
   }
 
@@ -325,7 +332,7 @@ async function handleDecompress(args: DecompressArgs, runtime: AcpRuntime, ctx: 
     ? resolveToFilePath(args.toFile)
     : autoFilePath(blockId);
   if (typeof targetPath === "object" && "error" in targetPath) {
-    logError("decompress", { sid: ctx.sessionManager.getSessionId(), event: "block-path-rejected", blockId, toFile: args.toFile });
+    logError("unfold", { sid: ctx.sessionManager.getSessionId(), event: "block-path-rejected", blockId, toFile: args.toFile });
     return targetPath.error;
   }
 
@@ -333,8 +340,8 @@ async function handleDecompress(args: DecompressArgs, runtime: AcpRuntime, ctx: 
   await mkdir(AUTO_DIR, { recursive: true }).catch(() => {});
   await writeFile(targetPath, text, "utf8");
 
-  debug.event("decompress", { blockId, full, count, mode: "file", path: targetPath, chars: text.length });
-  logInfo("decompress", { sid: ctx.sessionManager.getSessionId(), event: "block", mode: "file", blockId, full, count, path: targetPath, chars: text.length });
+  debug.event("unfold", { blockId, full, count, mode: "file", path: targetPath, chars: text.length });
+  logInfo("unfold", { sid: ctx.sessionManager.getSessionId(), event: "block", mode: "file", blockId, full, count, path: targetPath, chars: text.length });
 
   const itemWord = count === 1 ? "item" : "items";
   const lines = [

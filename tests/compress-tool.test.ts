@@ -194,7 +194,7 @@ test("compress in an in-memory session (no session file) survives to the next co
   await runContextRound(handlers, ctx); // prime refs
 
   const compressTool = api.tools.find((t: any) => t.name === "compress")!;
-  const statusTool = api.tools.find((t: any) => t.name === "acp_status")!;
+  const statusTool = api.tools.find((t: any) => t.name === "status")!;
   async function doCompress(callId: string, range: { startId: string; endId: string; summary: string }) {
     const out = await compressTool.execute(callId, { content: [range] }, undefined, undefined, ctx);
     return typeof out === "string" ? out : out.content?.[0]?.text ?? String(out);
@@ -491,7 +491,7 @@ test("in-place refold of a non-tail block: span clause and fingerprint reference
   await runContextRound(handlers, ctx);
 
   const compressTool = api.tools.find((t: any) => t.name === "compress")!;
-  const decompressTool = api.tools.find((t: any) => t.name === "decompress")!;
+  const unfoldTool = api.tools.find((t: any) => t.name === "unfold")!;
   const s1 = "First block pre-refold summary describing the early investigation phase in detail.";
   const s2 = "Second block summary covering the later phase, untouched by the refold.";
   const out1 = await compressTool.execute(
@@ -505,7 +505,7 @@ test("in-place refold of a non-tail block: span clause and fingerprint reference
   const t1 = typeof out1 === "string" ? out1 : out1.content?.[0]?.text ?? String(out1);
   assert.ok(t1.includes("▣ ACP") && !t1.includes("Errors:"), `setup compress failed: ${t1}`);
 
-  await decompressTool.execute("tc2", { blockId: "b1", inline: true }, undefined, undefined, ctx);
+  await unfoldTool.execute("tc2", { ref: "b1", inline: true }, undefined, undefined, ctx);
 
   const s1b = "Refolded b1 summary: replaced after the inline restore completed, mentions src/runtime.ts:88.";
   const out2 = await compressTool.execute(

@@ -2,6 +2,10 @@ import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-codin
 import { type Config, type CoreMessage } from "acp-kernel";
 import type { TurnBoundaryEntry } from "./turn-boundary.js";
 type AgentMessage = SessionMessageEntry["message"];
+/** Rewrite legacy ref tags to the schema-facing spelling across a message
+ *  list (see rewriteTagSpelling). Returns `messages` itself when nothing
+ *  changes. */
+export declare function rewriteRefTagsOutbound<T>(messages: T[]): T[];
 /** Host-injected status-panel custom messages (written by src/commands.ts) —
  *  UI-only, never projected into LLM context, so never user-like entries. */
 export declare const ACP_STATUS_CUSTOM_TYPE = "acp-status";

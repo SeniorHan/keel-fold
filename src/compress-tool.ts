@@ -344,7 +344,7 @@ export function isCompressNoopText(text: string): boolean {
 // to fail. After DEAD_REPEAT_REJECT identical failures we stop running the
 // kernel and return a hard rejection that lists the LIVE compressible ranges
 // (from the nudge decision already computed in this call), so the model gets
-// usable refs without having to call acp_status.
+// usable refs without having to call status.
 const DEAD_REPEAT_REJECT = 2;
 
 function paddedRef(n: number): string {
@@ -387,7 +387,7 @@ export function blockSpanLabel(block: CompressionBlock, state: CompressionState)
 
 // #535 P1: one-line integrity fingerprint per new/updated block — cheap
 // head/tail excerpt + char length so the model can verify its summary was
-// stored intact without decompressing.
+// stored intact without unfolding.
 export function summaryFingerprintLine(blockId: string, summary: string): string {
   const head = summary.slice(0, 30).replace(/\r?\n/g, " ");
   const tail = summary.slice(-100).replace(/\r?\n/g, " ");
@@ -444,7 +444,7 @@ function deadRepeatRejectionText(spans: string[], count: number, snapshot: strin
     "Current compressible ranges (use these refs exactly as listed):",
     snapshot,
     "",
-    "If none of these fit, call acp_status for the full picture — or continue the task without compressing.",
+    "If none of these fit, call status for the full picture — or continue the task without compressing.",
   ].join("\n");
 }
 
@@ -513,7 +513,7 @@ async function handleCompress(args: CompressArgs, runtime: AcpRuntime, ctx: Exte
   assertNotAborted(signal);
   const config = runtime.configFor(ctx);
   // Sent-view arbitration — the same scale as the context transform and
-  // acp_status (see src/index.ts): never the session-tree tokenCount.
+  // status (see src/index.ts): never the session-tree tokenCount.
   const modelId = (ctx.model as { id?: string } | undefined)?.id ?? "default";
   const systemPromptText = ctx.getSystemPrompt?.() ?? "";
   const systemPromptTokens = systemPromptText ? defaultCountTokens(systemPromptText) : 0;
@@ -624,7 +624,7 @@ async function handleCompress(args: CompressArgs, runtime: AcpRuntime, ctx: Exte
     throw new Error(
       `Range ${rewriteSpans.join(", ")} only re-condenses terminal tier-3 block(s) — T3 is the highest tier, so rewriting it reclaims nothing and can repeat forever (dog/billion-context-pi#3). Nothing was compressed. ` +
         (hint ? `${hint} ` : "") +
-        `Use search_context or decompress to retrieve details, or pick a range containing uncompressed messages (acp_status lists compressible ranges).`,
+        `Use search or unfold to retrieve details, or pick a range containing uncompressed messages (status lists compressible ranges).`,
     );
   }
   await runtime.save(applied.state, ctx);
@@ -712,7 +712,7 @@ async function handleCompress(args: CompressArgs, runtime: AcpRuntime, ctx: Exte
   if (warnings.length > 0) lines.push("⚠️ " + warnings.join("; "));
   if (errors.length > 0) lines.push("Errors: " + errors.join("; "));
   // #420: carry the post-compression snapshot so a same-turn follow-up
-  // compress has its refs without a planning acp_status call. Computed from
+  // compress has its refs without a planning status call. Computed from
   // afterTurn (processTurn over the applied state), so the list reflects
   // what actually remains — not the pre-fold view.
   if (blocksCreated > 0) {
@@ -968,7 +968,7 @@ const RANGE_KEYS = ["startId", "endId", "startRef", "endRef", "messageId", "summ
  * because it renders the full text as separate `acp_summary_` messages, but
  * coreOutToAgentMessages drops those (pi has no slot for them), so without this
  * the main model only ever sees its own stubbed fallback — never the summary
- * the dedicated model wrote — and decompresses blocks just to read them.
+ * the dedicated model wrote — and unfolds blocks just to read them.
  * Arguments are parsed with normalizeRanges, so every shape the tool accepts
  * (bare objects, startRef/endRef, single-range, string content) is covered.
  * Ranges match blocks by start/end ref; a single-range call whose callId owns a

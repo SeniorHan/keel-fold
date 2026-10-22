@@ -16,10 +16,71 @@ type AnyMessage = {
 };
 
 // Refs are zero-padded to 5 digits below 100,000 and widen naturally above
-// (acp-kernel >= 0.0.101, up to m9999999).
-const REF_TAG_SOURCE = "(?:\x3cacp\\s[^>]*\x3em\\d{5,7}\x3c/acp\x3e|\\[m\\d{1,7}\\])";
+// (acp-kernel >= 0.0.101, up to m9999999). The kernel still mints the legacy
+// tag spelling; the schema-facing `<fold>` form is produced only at the
+// outbound boundary (rewriteRefTagsOutbound below), and both spellings are
+// accepted on the way back in.
+const REF_TAG_SOURCE = "(?:\x3cacp\\s[^>]*\x3em\\d{5,7}\x3c/acp\x3e|\x3cfold\\s[^>]*\x3em\\d{5,7}\x3c/fold\x3e|\\[m\\d{1,7}\\])";
 const REF_TAG = new RegExp(`^${REF_TAG_SOURCE}\\s?\\n?`);
 const TRAILING_REF_TAG = new RegExp(`\\n*${REF_TAG_SOURCE}\\s*$`);
+
+const LEGACY_OPEN_TAG = /\x3cacp\s([^>]*?)\x3e/g;
+
+/** Outbound-only tag rewrite (rename route B): the kernel keeps minting the
+ *  legacy tag spelling, and the single context-transform return point
+ *  (src/index.ts) rewrites it to the schema-facing form just before the
+ *  messages go upstream. Stored history and the kernel dist are untouched;
+ *  inbound parsing accepts both spellings (REF_TAG_SOURCE above). Tool-result
+ *  tags gain `type="tool" kind="<toolName>"`; user tags gain `kind="user"`. */
+function rewriteTagSpelling(role: string | undefined, toolName: string | undefined, text: string): string {
+  if (!text.includes("\x3cacp")) return text;
+  let out = text.replace(LEGACY_OPEN_TAG, (_tag, attrs: string) => {
+    if (role === "toolResult") {
+      const typeMatch = /\btype="([^"]*)"/.exec(attrs);
+      const kind = toolName ?? typeMatch?.[1];
+      let nextAttrs = typeMatch ? attrs.replace(typeMatch[0], ' type="tool"') : attrs;
+      if (kind) nextAttrs = `${nextAttrs} kind="${kind}"`;
+      return `\x3cfold ${nextAttrs.trim()}\x3e`;
+    }
+    const kind = role === "user" ? ' kind="user"' : "";
+    return `\x3cfold ${`${attrs} ${kind}`.trim()}\x3e`;
+  });
+  out = out.replaceAll("\x3c/acp\x3e", "\x3c/fold\x3e");
+  return out;
+}
+
+/** Rewrite legacy ref tags to the schema-facing spelling across a message
+ *  list (see rewriteTagSpelling). Returns `messages` itself when nothing
+ *  changes. */
+export function rewriteRefTagsOutbound<T>(messages: T[]): T[] {
+  let changed = false;
+  const out = messages.map((message) => {
+    const m = message as AnyMessage;
+    const content = m.content;
+    if (typeof content === "string") {
+      const next = rewriteTagSpelling(m.role, m.toolName, content);
+      if (next === content) return message;
+      changed = true;
+      return { ...message, content: next } as T;
+    }
+    if (Array.isArray(content)) {
+      let partChanged = false;
+      const parts = content.map((part) => {
+        const p = part as { type?: string; text?: unknown } | null;
+        if (p?.type !== "text" || typeof p.text !== "string") return part;
+        const next = rewriteTagSpelling(m.role, m.toolName, p.text);
+        if (next === p.text) return part;
+        partChanged = true;
+        return { ...p, text: next };
+      });
+      if (!partChanged) return message;
+      changed = true;
+      return { ...message, content: parts } as T;
+    }
+    return message;
+  });
+  return changed ? out : messages;
+}
 
 /** Host-injected status-panel custom messages (written by src/commands.ts) —
  *  UI-only, never projected into LLM context, so never user-like entries. */
@@ -80,11 +141,12 @@ export function entriesToCoreMessages(entries: SessionEntry[]): CoreMessage[] {
   return withFacadeResultNames(out);
 }
 
-/** Lean facade tool wrapping decompress/search_context/acp_status/acp_cache. */
-const FACADE_TOOL = "acp_context";
+/** Lean facade tool wrapping the unfold/search/status/cache operations (the
+ *  kernel still registers them under their legacy names; see lean/index.ts). */
+const FACADE_TOOL = "fold";
 
 /** The kernel keys recency policies (neverPreserveRecentTools, protected tool
- *  lists) on tool names; project acp_context calls under the operation they
+ *  lists) on tool names; project fold calls under the operation they
  *  wrap so those policies keep working behind the Lean facade. Only the
  *  projection changes — outgoing messages keep the real tool name. */
 function policyToolName(name: string, args: unknown): string {

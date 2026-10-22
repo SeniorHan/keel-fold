@@ -90,16 +90,16 @@ async function setupForkedChild(dir: string, levels: 1 | 2) {
   const leafJsonl = levels === 1 ? childJsonl : grandChildJsonl;
   const leafId = levels === 1 ? "child-sid" : "grand-sid";
   const leafEntries = levels === 1 ? childEntries : [userMsg("g1", filler("grand-one"))];
-  const decompressTool = api.tools.find((t: any) => t.name === "decompress")!;
-  return { decompressTool, leafJsonl, leafId, leafEntries, parentJsonl };
+  const unfoldTool = api.tools.find((t: any) => t.name === "unfold")!;
+  return { unfoldTool, leafJsonl, leafId, leafEntries, parentJsonl };
 }
 
-test("decompress restores an inherited block's content from the PARENT session log (forked child)", async () => {
+test("unfold restores an inherited block's content from the PARENT session log (forked child)", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "acp-decomp-anc1-"));
   try {
-    const { decompressTool, leafJsonl, leafId, leafEntries } = await setupForkedChild(dir, 1);
+    const { unfoldTool, leafJsonl, leafId, leafEntries } = await setupForkedChild(dir, 1);
     const leafCtx = fakeCtx(leafEntries, leafJsonl, leafId);
-    const res = await decompressTool.execute("tc2", { blockId: "b1", inline: true }, undefined, undefined, leafCtx);
+    const res = await unfoldTool.execute("tc2", { ref: "b1", inline: true }, undefined, undefined, leafCtx);
     const text = (res.content[0] as any).text as string;
 
     assert.match(text, /inline:/, "result signals inline mode");
@@ -109,12 +109,12 @@ test("decompress restores an inherited block's content from the PARENT session l
   }
 });
 
-test("decompress walks the chain to depth 2 (grandchild inherits a parent-compressed block)", async () => {
+test("unfold walks the chain to depth 2 (grandchild inherits a parent-compressed block)", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "acp-decomp-anc2-"));
   try {
-    const { decompressTool, leafJsonl, leafId, leafEntries } = await setupForkedChild(dir, 2);
+    const { unfoldTool, leafJsonl, leafId, leafEntries } = await setupForkedChild(dir, 2);
     const leafCtx = fakeCtx(leafEntries, leafJsonl, leafId);
-    const res = await decompressTool.execute("tc2", { blockId: "b1", inline: true }, undefined, undefined, leafCtx);
+    const res = await unfoldTool.execute("tc2", { ref: "b1", inline: true }, undefined, undefined, leafCtx);
     const text = (res.content[0] as any).text as string;
 
     assert.match(text, /inline:/, "result signals inline mode");
@@ -124,17 +124,17 @@ test("decompress walks the chain to depth 2 (grandchild inherits a parent-compre
   }
 });
 
-test("decompress by message ref finds a parent-only entry in a forked child", async () => {
+test("unfold by message ref finds a parent-only entry in a forked child", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "acp-decomp-anc3-"));
   try {
-    const { decompressTool, leafJsonl, leafId, leafEntries, parentJsonl } = await setupForkedChild(dir, 1);
+    const { unfoldTool, leafJsonl, leafId, leafEntries, parentJsonl } = await setupForkedChild(dir, 1);
     const sidecar = JSON.parse(await readFile(`${parentJsonl}.acp.json`, "utf8")) as { blocks: Array<{ effectiveMessageIds: string[] }> };
     const rawRef = sidecar.blocks[0]!.effectiveMessageIds[0]!;
     assert.ok(rawRef.length > 0, "inherited block carries a message ref");
 
     const leafCtx = fakeCtx(leafEntries, leafJsonl, leafId);
     const target = path.join(dir, "msg-out.txt");
-    const res = await decompressTool.execute("tc3", { blockId: rawRef, toFile: target }, undefined, undefined, leafCtx);
+    const res = await unfoldTool.execute("tc3", { ref: rawRef, toFile: target }, undefined, undefined, leafCtx);
     const text = (res.content[0] as any).text as string;
 
     assert.match(text, /written to/, "message-ref path resolves through the ancestor fallback");

@@ -12,13 +12,21 @@ export interface ToolPromptOverrides {
   promptGuidelines?: string | string[];
 }
 
-export type AcpToolName = "compress" | "decompress" | "search_context" | "acp_status" | "acp_cache";
+export type AcpToolName = "compress" | "unfold" | "search" | "status" | "cache";
 
 export type ToolPromptsConfig = Partial<Record<AcpToolName, ToolPromptOverrides>>;
 
 export type NudgeSectionsConfig = Partial<Record<"efficiencyNote" | "emergencyHeader" | "t2Guidance" | "t3Guidance", string | null>>;
 
-const TOOL_NAMES: ReadonlySet<string> = new Set(["compress", "decompress", "search_context", "acp_status", "acp_cache"]);
+const TOOL_NAMES: ReadonlySet<string> = new Set(["compress", "unfold", "search", "status", "cache"]);
+
+/** Legacy config keys (pre-rename) still accepted in toolPrompts/toolExtras. */
+const LEGACY_TOOL_KEYS: Record<string, AcpToolName> = {
+  decompress: "unfold",
+  search_context: "search",
+  acp_status: "status",
+  acp_cache: "cache",
+};
 
 const NUDGE_KEYS: ReadonlySet<string> = new Set(["efficiencyNote", "emergencyHeader", "t2Guidance", "t3Guidance"]);
 
@@ -30,7 +38,8 @@ export function sanitizeToolPrompts(raw: unknown): ToolPromptsConfig {
   const out: ToolPromptsConfig = {};
   if (!raw || typeof raw !== "object") return out;
   for (const [tool, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!TOOL_NAMES.has(tool) || !value || typeof value !== "object") continue;
+    const name = TOOL_NAMES.has(tool) ? tool : LEGACY_TOOL_KEYS[tool];
+    if (!name || !value || typeof value !== "object") continue;
     const src = value as Record<string, unknown>;
     const entry: ToolPromptOverrides = {};
     if (typeof src.description === "string") entry.description = src.description;
@@ -47,7 +56,7 @@ export function sanitizeToolPrompts(raw: unknown): ToolPromptsConfig {
       }
       if (Object.keys(params).length > 0) entry.paramDescriptions = params;
     }
-    if (Object.keys(entry).length > 0) out[tool as AcpToolName] = entry;
+    if (Object.keys(entry).length > 0) out[name as AcpToolName] = entry;
   }
   return out;
 }

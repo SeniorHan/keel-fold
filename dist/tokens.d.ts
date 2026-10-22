@@ -39,7 +39,7 @@ export interface SentViewMeterRecord {
     usable: boolean;
 }
 /** Block count plus each active block's id, coverage size, run, tier and
- *  summary length: a decompress + compress pair, an absorb that keeps the
+ *  summary length: an unfold + compress pair, an absorb that keeps the
  *  active count, or an in-place refold (same id and coverage, rewritten
  *  summary) still changes it. Length suffices — only the size is metered. */
 export declare function blockSignature(state: CompressionState): string;

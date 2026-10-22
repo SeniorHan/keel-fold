@@ -22,7 +22,7 @@ export const DEFAULT_IDLE_MINUTES = 29;
 /** Timer woke this much later than planned (machine slept): the cache is likely cold, skip. */
 export const IDLE_LATE_MS = 60_000;
 /** Tools the model may call during the check; everything else is blocked. */
-const IDLE_ALLOWED_TOOLS = new Set(["compress", "acp_context", "decompress", "search_context", "acp_status", "acp_cache"]);
+const IDLE_ALLOWED_TOOLS = new Set(["compress", "fold", "unfold", "search", "status", "cache"]);
 
 export interface IdleCompactConfig {
   enabled?: boolean;
@@ -53,7 +53,7 @@ export function resolveIdleCompact(cfg: boolean | IdleCompactConfig | undefined)
 export function idleCheckText(awayMinutes: number): string {
   return `[ACP idle compact] The user has been away for about ${awayMinutes} minutes. ` +
     "This is an automatic maintenance turn, not a user request: decide whether consumed history is worth compressing now, using the ranges listed below. " +
-    "Do not continue other work and do not call tools other than compress and acp_context. If nothing is worth compressing, reply with one short line.";
+    "Do not continue other work and do not call tools other than compress and fold. If nothing is worth compressing, reply with one short line.";
 }
 
 export interface IdleCompactHandle {
@@ -210,7 +210,7 @@ export function wireIdleCompact(pi: ExtensionAPI, runtime: AcpRuntime): IdleComp
   });
   pi.on("tool_call", (event) => {
     if (s.run !== "active" || IDLE_ALLOWED_TOOLS.has(event.toolName)) return undefined;
-    return { block: true, reason: "ACP idle compact: only compress and acp_context may run while the user is away. Reply with one short line instead." };
+    return { block: true, reason: "Fold idle compact: only compress and fold may run while the user is away. Reply with one short line instead." };
   });
   pi.on("agent_settled", (_event, ctx) => {
     bind(ctx);

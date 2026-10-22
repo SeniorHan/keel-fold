@@ -102,7 +102,7 @@ describe("proxied baseUrl stand-down (#296)", () => {
     const ctx = piCtx(() => {}, PROXIED_BASE_URL);
     await startSession(handlers, ctx);
 
-    for (const name of ["compress", "decompress", "search_context", "acp_status"]) {
+    for (const name of ["compress", "unfold", "search", "status"]) {
       const tool = api.tools.find((t: any) => t.name === name);
       assert.ok(tool, `${name} tool is registered`);
       const res = await (tool as any).execute("t1", {}, undefined, undefined, ctx);

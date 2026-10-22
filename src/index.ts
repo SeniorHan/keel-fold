@@ -14,7 +14,7 @@ import type { AdapterConfig } from "./config.js";
 import { createRuntime, type AcpRuntime } from "./runtime.js";
 import { makeCompressTool, isCompressSuccessText, isCompressNoopText, inlineBlockSummaries } from "./compress-tool.js";
 import { SESSION_MODEL_REF } from "./compress-model.js";
-import { makeDecompressTool } from "./decompress-tool.js";
+import { makeUnfoldTool } from "./decompress-tool.js";
 import { makeSearchTool } from "./search-tool.js";
 import { makeStatusTool } from "./status-tool.js";
 import { makeCacheTool } from "./cache-tool.js";
@@ -22,7 +22,7 @@ import { makeRuleTool } from "./rule-tool.js";
 import { makeCommands } from "./commands.js";
 import { mergeSurface, readToolSurfaceWithPacks, resolveActivePack, resolvePackName, surfaceMetaOf } from "./prompt-pack.js";
 import type { NudgeSectionsConfig } from "./surface.js";
-import { coreOutToAgentMessages, extractText, protectLatestUserMessage, ACP_NUDGE_CUSTOM_TYPE, type AcpNudgeRecord } from "./messages.js";
+import { coreOutToAgentMessages, extractText, protectLatestUserMessage, rewriteRefTagsOutbound, ACP_NUDGE_CUSTOM_TYPE, type AcpNudgeRecord } from "./messages.js";
 import { liveOnlyTailCached, dropLiveOnlyTailCache } from "./live-only-tail.js";
 import { carryHostSystemMessages } from "./system-passthrough.js";
 import { sanitizeToolPairing } from "./tool-pair-sanitizer.js";
@@ -119,10 +119,10 @@ export function createAcpExtension(adapter: AdapterConfig = {}): ExtensionFactor
     wireThrottleRetry(pi, runtime);
     const toolSurface = readToolSurfaceWithPacks(process.cwd());
     pi.registerTool(makeCompressTool(runtime, toolSurface.compress, pi));
-    pi.registerTool(makeDecompressTool(runtime, toolSurface.decompress));
-    pi.registerTool(makeSearchTool(runtime, toolSurface.search_context));
-    pi.registerTool(makeStatusTool(runtime, toolSurface.acp_status));
-    pi.registerTool(makeCacheTool(runtime, toolSurface.acp_cache));
+    pi.registerTool(makeUnfoldTool(runtime, toolSurface.unfold));
+    pi.registerTool(makeSearchTool(runtime, toolSurface.search));
+    pi.registerTool(makeStatusTool(runtime, toolSurface.status));
+    pi.registerTool(makeCacheTool(runtime, toolSurface.cache));
     for (const { name, options } of [...makeCommands(runtime, pi), makeConfigCommand(runtime, idle)]) {
       pi.registerCommand(name, options);
     }
@@ -389,7 +389,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
       // (structuredClone + whole-history pass) EVERY turn. Steady state now adopts
       // the previous turn's exact measured view (recorded after the real pass
       // below) whenever the signature matches; the probe only runs to resync —
-      // first turn, structural change (compress/decompress/window), or after a
+      // first turn, structural change (compress/unfold/window), or after a
       // truncation-band turn whose output under-reports.
       if (state.blocks.some((b) => b.active && b.effectiveMessageIds.length > 0)) {
         const meter = runtime.peekSentViewCount(sid);
@@ -782,6 +782,9 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
     // Always return the transformed array: every message needs its [mNNNNN] ref
     // tag applied, so there is no meaningful "no change" case to short-circuit.
     // Capture the provider-bound prefix for the `session` summary model (#241).
+    // Rename route B: the kernel keeps minting the legacy tag spelling; the
+    // schema-facing form is applied at this single outbound return point.
+    rebuilt = rewriteRefTagsOutbound(rebuilt);
     runtime.setLastSentMessages(sid, rebuilt);
     debug.event("context-out", { outMsgs: rebuilt.length, injected: turn.nudge?.shouldInject ?? false, emergency: turn.nudge?.breakdown?.emergencyOverride === 1 });
     return { messages: rebuilt };
@@ -853,7 +856,7 @@ A separate model reads the original messages of each range and writes the real s
 - Pick consumed content: finished tool outputs, dead ends, resolved threads, completed phases. Leave active work and anything the next step needs.
 - Prefer ranges of uncompressed messages. Fold existing blocks into a new range only to merge closely related ones; it rewrites their summaries again.
 - summary: a 1-2 sentence fallback naming what was done or examined in the range, why, and the outcome with its decisive values (e.g. "Read session X's log to check Y; found Z in 3 of 5 runs"). The summary model also reads it to understand the range's purpose; it is used as the summary only if that model fails. Do not write a detailed summary.
-- Give each range a short topic. Do not decompress a block you just created.`;
+- Give each range a short topic. Do not unfold a block you just created.`;
 
 function nudgePrompts(runtime: AcpRuntime): Prompts {
   const ref = runtime.getCompressionModelRef();

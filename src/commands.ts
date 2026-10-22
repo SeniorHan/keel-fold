@@ -323,7 +323,7 @@ async function statusReport(runtime: AcpRuntime, ctx: ExtensionCommandContext): 
   const anchorStale = usageAnchorPredatesCompression(entries ?? []);
 
   // Nudge arbitration on the SENT-VIEW scale — must match the context
-  // transform and acp_status: sent-view estimate floored at the host's real
+  // transform and status: sent-view estimate floored at the host's real
   // context usage (issue #257).
   const systemPromptText = ctx.getSystemPrompt?.() ?? "";
   const systemPromptTokens = systemPromptText ? defaultCountTokens(systemPromptText) : 0;
@@ -335,7 +335,7 @@ async function statusReport(runtime: AcpRuntime, ctx: ExtensionCommandContext): 
   const sentTokens = estimateTokens(coreMessages, coveredIds, imageTokens) + systemPromptTokens;
   // View-based recount (issue #289): with active blocks the raw-view estimate
   // can sit far above the sent view and mis-scale the panel's nudge — same
-  // arbitration as src/index.ts and acp_status.
+  // arbitration as src/index.ts and status.
   const viewSentTokens = adjustedTokenCount(runtime.core, coreMessages, state, config, sentTokens, imageTokens, systemPromptTokens);
   // issue #257: floor the meter at the host's real context usage so the
   // panel's nudge matches the real decision (same as src/index.ts).

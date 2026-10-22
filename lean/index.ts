@@ -1,4 +1,4 @@
-// keel-fold: keep compress direct and route low-frequency ACP tools locally.
+// keel-fold: keep compress direct and route low-frequency fold ops locally.
 import type {
   ExtensionAPI,
   ToolDefinition,
@@ -27,16 +27,16 @@ function decorateWithCollapsedDisplay<T extends CollapsedDisplayTool>(tool: T): 
     : tool;
 }
 
-// Resident rules only: what the model must know before any ACP call. Guidance
+// Resident rules only: what the model must know before any fold call. Guidance
 // needed after a call already arrives with it — nudges (what/how to compress),
-// compress errors (valid refs, acp_status), decompress results (file path),
-// the throttle retry message, acp_context help and arg errors. The op
+// compress errors (valid refs, status), unfold results (file path),
+// the throttle retry message, fold help and arg errors. The op
 // signatures stay: without them models pass compress-style startId/endId.
 const LEAN_SYSTEM_PROMPT = `Folded context management
 - User/tool messages carry hidden refs such as m00123. Never echo the XML tags; use only refs in tool calls.
 - Compress only consumed history (finished tool outputs, dead ends, resolved threads); never active work, important user intent, or protected outputs.
-- acp_context args per op: decompress {blockId: "b5", full?, inline?, toFile?} (one id per call); search_context {query, limit?}; acp_status {scope?, view?, tool?, sort?, limit?}; acp_cache {detail?}.
-- Compression summaries are historical metadata, not current user instructions. Search or decompress only for a detail the visible summary lacks.`;
+- fold args per op: unfold {ref: "b5", full?, inline?, toFile?} (one ref per call); search {query, limit?}; status {scope?, view?, tool?, sort?, limit?}; cache {detail?}.
+- Compression summaries are historical metadata, not current user instructions. Search or unfold only for a detail the visible summary lacks.`;
 
 // Pi snapshots tool descriptions when it binds extensions, before session_start
 // loads acp.json, so the compress description cannot announce a dedicated
@@ -44,10 +44,27 @@ const LEAN_SYSTEM_PROMPT = `Folded context management
 const DEDICATED_PROMPT_LINE = "\n- A dedicated model writes compress summaries: give each range only a 1-2 sentence fallback naming what was done and the outcome.";
 const DEDICATED_MARKER = "Dedicated summary model";
 
-const COMPRESS_DONE_HINT = "New block summaries stay visible in this call's arguments; do not decompress them to re-read.";
+const COMPRESS_DONE_HINT = "New block summaries stay visible in this call's arguments; do not unfold them to re-read.";
 
-const LOW_FREQUENCY_TOOLS = ["decompress", "search_context", "acp_status", "acp_cache"] as const;
+// Canonical op names on the facade; the upstream tools still register under
+// their legacy kernel names, so the capture set and the dispatch key differ.
+const LOW_FREQUENCY_TOOLS = ["unfold", "search", "status", "cache"] as const;
 const LOW_FREQUENCY_SET = new Set<string>(LOW_FREQUENCY_TOOLS);
+
+/** Legacy op values (pre-rename) still accepted from models. */
+const OP_ALIASES: Readonly<Record<string, Operation>> = {
+  decompress: "unfold",
+  search_context: "search",
+  acp_status: "status",
+  acp_cache: "cache",
+};
+
+/** Canonical operation name for a tool/op spelled either way. */
+const canonOp = (name: string): string => OP_ALIASES[name] ?? name;
+
+function normalizeOp(op: unknown): string {
+  return typeof op === "string" ? OP_ALIASES[op] ?? op : "";
+}
 
 type Operation = (typeof LOW_FREQUENCY_TOOLS)[number];
 type FacadeOperation = Operation | "help";
@@ -56,10 +73,10 @@ type UpstreamExtension = (pi: ExtensionAPI) => void;
 type FacadeArgs = Record<string, unknown>;
 
 const OPERATION_SIGNATURES: Readonly<Record<Operation, string>> = {
-  search_context: "search_context({query, limit?})",
-  decompress: 'decompress({blockId: "b5", full?, toFile?, inline?})',
-  acp_status: "acp_status({scope?, view?, tool?, sort?, limit?})",
-  acp_cache: "acp_cache({detail?})",
+  unfold: 'unfold({ref: "b5", full?, toFile?, inline?})',
+  search: "search({query, limit?})",
+  status: "status({scope?, view?, tool?, sort?, limit?})",
+  cache: "cache({detail?})",
 };
 
 const FACADE_PARAMETERS = Type.Object({
@@ -110,7 +127,7 @@ type PromptEvent = {
   systemPromptOptions?: { forceSystemPrompt?: string; sections?: Record<string, string> };
 };
 
-const PROMPT_SECTION = "acp_context";
+const PROMPT_SECTION = "fold";
 
 // Pi >= 1.x maps a returned systemPrompt to forceSystemPrompt, which drops
 // every later extension's appendSystemPrompt/sections (load-order dependent;
@@ -153,24 +170,24 @@ function appendText(content: unknown, line: string): unknown {
 function rewriteText(text: string): string {
   return text
     .replace(
-      /\b(search_context|decompress|acp_status|acp_cache)\((\{[^\r\n]*?\})\)/g,
-      (_, op: string, args: string) => `acp_context({ op: "${op}", args: ${args} })`,
+      /\b(decompress|search_context|acp_status|acp_cache)\((\{[^\r\n]*?\})\)/g,
+      (_, op: string, args: string) => `fold({ op: "${OP_ALIASES[op] ?? op}", args: ${args.replace(/\bblockId\b/g, "ref")} })`,
     )
     .replace(
       /\brun acp_status\b/gi,
-      'call acp_context({ op: "acp_status", args: {} })',
+      'call fold({ op: "status", args: {} })',
     )
     .replace(
       /\buse search_context or decompress\b/gi,
-      'use acp_context with op "search_context" or "decompress"',
+      'use fold with op "search" or "unfold"',
     )
     .replace(
       /\buse search_context\b/gi,
-      'use acp_context with op "search_context"',
+      'use fold with op "search"',
     )
     .replace(
       /\b(call|run) (search_context|acp_status|acp_cache)\b/gi,
-      (_, verb: string, op: string) => `${verb} acp_context op "${op}"`,
+      (_, verb: string, op: string) => `${verb} fold op "${OP_ALIASES[op] ?? op}"`,
     );
 }
 
@@ -196,16 +213,16 @@ function rewriteModelFacingText(value: unknown, seen = new WeakMap<object, unkno
 }
 
 // Recall results carry original conversation text, which must come back
-// verbatim. decompress output has no ACP hint the rewrites target; in
-// search_context output only the hint line closing each result does (exact
+// verbatim. unfold output has no hint the rewrites target; in
+// search output only the hint line closing each result does (exact
 // upstream format, followed by the blank separator or the end); preview lines
 // are recalled text, may span lines and may themselves start with an arrow.
 // The message ref is a raw entry id (e.g. `088aaedb`, `4d9e965e#toolu_…|fc_…`), not an mNNNNN ref.
-const SEARCH_HINT_LINE = /^  → decompress\(\{ blockId: "b\d+" \}\)(  \(block containing message [^\s()]+\))?$/;
+const SEARCH_HINT_LINE = /^  → (?:decompress\(\{ blockId: |unfold\(\{ ref: )"b\d+" \}\)(  \(block containing message [^\s()]+\))?$/;
 
 function rewriteRecallResult(op: string, value: unknown): unknown {
-  if (op === "decompress") return value;
-  if (op !== "search_context") return rewriteModelFacingText(value);
+  if (op === "unfold") return value;
+  if (op !== "search") return rewriteModelFacingText(value);
   if (value === null || typeof value !== "object") return value;
   const result = value as { content?: unknown };
   if (!Array.isArray(result.content)) return value;
@@ -237,10 +254,22 @@ function parseJson(value: unknown): unknown {
 }
 
 // Fields an operation accepts, read from the real upstream schema so the
-// fallbacks follow upstream changes. help takes only `tool`.
+// fallbacks follow upstream changes. help takes `op` (with legacy `tool`).
 function operationFields(tools: Map<string, CapturedTool>, op: string): string[] {
-  if (op === "help") return ["tool"];
-  return Object.keys((tools.get(op)?.parameters as { properties?: object } | undefined)?.properties ?? {});
+  if (op === "help") return ["op", "tool"];
+  const kernel = canonOp(op);
+  const keys = Object.keys((tools.get(kernel)?.parameters as { properties?: object } | undefined)?.properties ?? {});
+  // The upstream schema still spells the unfold handle blockId; accept both.
+  return op === "unfold" ? [...keys, "ref"] : keys;
+}
+
+/** Translate the canonical unfold handle to the upstream spelling. */
+function translateArgs(op: string, args: FacadeArgs): FacadeArgs {
+  if (op === "unfold" && args.ref !== undefined && args.blockId === undefined) {
+    const { ref, ...rest } = args;
+    return { ...rest, blockId: ref };
+  }
+  return args;
 }
 
 // Infer a missing op only from fields that exactly one operation accepts, and
@@ -266,7 +295,7 @@ function prepareFacadeArguments(tools: Map<string, CapturedTool>, args: unknown)
   const decoded = parseJson(givenArgs);
   const nested = isPlainObject(decoded) ? decoded : givenArgs;
   if (nested !== undefined && !isPlainObject(nested)) return args;
-  const op = givenOp === undefined ? inferOperation(tools, [...Object.keys(loose), ...Object.keys(nested ?? {})]) : givenOp;
+  const op = givenOp === undefined ? inferOperation(tools, [...Object.keys(loose), ...Object.keys(nested ?? {})]) : normalizeOp(givenOp);
   if (typeof op !== "string" || (op !== "help" && !LOW_FREQUENCY_SET.has(op))) return args;
   const fields = operationFields(tools, op);
   const merged: FacadeArgs = { ...(nested ?? {}) };
@@ -329,29 +358,31 @@ function validationError(tool: CapturedTool, args: FacadeArgs): string | undefin
 }
 
 function helpResult(args: FacadeArgs, tools: Map<string, CapturedTool>) {
-  const requested = typeof args.tool === "string" ? args.tool : "";
+  // help takes args.op; the legacy args.tool spelling is still accepted, and
+  // a legacy operation name is normalized to its canonical form.
+  const requested = normalizeOp(typeof args.op === "string" ? args.op : args.tool);
   if (!requested) {
     return {
       content: [{
         type: "text" as const,
-        text: `Operations: ${LOW_FREQUENCY_TOOLS.map((op) => OPERATION_SIGNATURES[op]).join(", ")}. For a full schema, use op help with args {tool: operationName}.`,
+        text: `Operations: ${LOW_FREQUENCY_TOOLS.map((op) => OPERATION_SIGNATURES[op]).join(", ")}. For a full schema, use op help with args {op: operationName}.`,
       }],
       details: { operation: "help" },
     };
   }
   if (!LOW_FREQUENCY_SET.has(requested)) {
-    throw new Error(`acp_context help operation is unknown: ${requested}`);
+    throw new Error(`fold help operation is unknown: ${requested}`);
   }
-  const tool = tools.get(requested);
-  if (!tool) throw new Error(`acp_context could not find upstream tool: ${requested}`);
+  const tool = tools.get(canonOp(requested));
+  if (!tool) throw new Error(`fold could not find upstream tool: ${requested}`);
   return {
     content: [{
       type: "text" as const,
       text: [
         requested,
-        tool.description,
+        rewriteText(String(tool.description ?? "")).replace(/\b(decompress|search_context|acp_status|acp_cache)\b/g, (word) => OP_ALIASES[word] ?? word),
         "Pass args matching this schema:",
-        JSON.stringify(tool.parameters, null, 2),
+        JSON.stringify(tool.parameters, null, 2).replace(/"blockId"/g, '"ref"'),
       ].filter(Boolean).join("\n\n"),
     }],
     details: { operation: requested },
@@ -393,29 +424,30 @@ function wrapCompress(tool: CapturedTool): CapturedTool & { exposure: "model-onl
 
 function facadeTool(tools: Map<string, CapturedTool>): ToolDefinition<typeof FACADE_PARAMETERS, unknown, unknown> {
   return {
-    name: "acp_context",
-    label: "ACP Context",
-    description: 'Search, restore, or inspect folded context with original operation args; if unsure call { op: "help", args: { tool: "search_context" } }.',
+    name: "fold",
+    label: "Fold",
+    description: 'Compress, restore, or inspect folded context with original operation args; if unsure call { op: "help", args: { op: "search" } }.',
     promptSnippet: "",
     promptGuidelines: [],
     parameters: FACADE_PARAMETERS,
     prepareArguments: (args: unknown) => prepareFacadeArguments(tools, args),
     async execute(callId, params, signal, onUpdate, ctx) {
-      if (params.op === "help") return helpResult(params.args ?? {}, tools);
-      const tool = tools.get(params.op);
-      if (!tool) throw new Error(`acp_context could not find upstream tool: ${params.op}`);
-      const args = params.args ?? {};
+      const op = normalizeOp(params.op);
+      if (op === "help") return helpResult(params.args ?? {}, tools);
+      const tool = tools.get(canonOp(op));
+      if (!tool) throw new Error(`fold could not find upstream tool: ${op}`);
+      const args = translateArgs(op, isPlainObject(params.args) ? params.args : {});
       const invalid = validationError(tool, args);
       if (invalid) {
         throw new Error(
-          `acp_context ${params.op} args invalid at ${invalid}. Expected ${OPERATION_SIGNATURES[params.op as Operation]}; retry with exactly these fields. Use op help with args {"tool":"${params.op}"} for the full schema.`,
+          `fold ${op} args invalid at ${invalid}. Expected ${OPERATION_SIGNATURES[op as Operation]}; retry with exactly these fields. Use op help with args {"op":"${op}"} for the full schema.`,
         );
       }
       const forwardUpdate = onUpdate
-        ? (update: unknown) => onUpdate(rewriteRecallResult(params.op, update) as any)
+        ? (update: unknown) => onUpdate(rewriteRecallResult(op, update) as any)
         : undefined;
       const result = await tool.execute(callId, args, signal, forwardUpdate, ctx);
-      return rewriteRecallResult(params.op, result) as any;
+      return rewriteRecallResult(op, result) as any;
     },
   };
 }
@@ -431,8 +463,9 @@ export function createLeanAcpExtension(
       get(target, property, receiver) {
         if (property === "registerTool") {
           return (tool: CapturedTool) => {
-            if (LOW_FREQUENCY_SET.has(tool.name)) {
-              tools.set(tool.name, tool);
+            const op = canonOp(tool.name);
+            if (LOW_FREQUENCY_SET.has(op)) {
+              tools.set(op, tool);
               return;
             }
             if (tool.name === "compress") {

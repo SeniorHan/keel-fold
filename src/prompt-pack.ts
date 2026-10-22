@@ -92,7 +92,11 @@ export function resolveSurfaceMeta(
   );
 }
 
-const ACP_TOOLS: ReadonlySet<string> = new Set(["compress", "decompress", "search_context", "acp_status"]);
+const ACP_TOOLS: ReadonlySet<string> = new Set([
+  "compress", "unfold", "search", "status",
+  // legacy pack keys (pre-rename) still accepted
+  "decompress", "search_context", "acp_status",
+]);
 
 export interface PiToolExtras {
   promptSnippet?: string;

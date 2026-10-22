@@ -60,14 +60,19 @@ test("sanitizeToolPrompts filters unknown tools and malformed fields", () => {
   const out = sanitizeToolPrompts({
     compress: { description: "d", promptGuidelines: "single", paramDescriptions: { startId: "s", endId: 3 }, promptSnippet: 9 },
     bash: { description: "nope" },
-    decompress: { promptGuidelines: ["ok", 5] },
-    search_context: {},
-    acp_status: { promptSnippet: "snip" },
+    unfold: { promptGuidelines: ["ok", 5] },
+    search: {},
+    status: { promptSnippet: "snip" },
   });
   assert.deepEqual(out, {
     compress: { description: "d", promptGuidelines: "single", paramDescriptions: { startId: "s" } },
-    acp_status: { promptSnippet: "snip" },
+    status: { promptSnippet: "snip" },
   });
+  // Legacy (pre-rename) config keys are still accepted and normalized.
+  assert.deepEqual(
+    sanitizeToolPrompts({ decompress: { promptSnippet: "x" }, acp_cache: { description: "y" } }),
+    { unfold: { promptSnippet: "x" }, cache: { description: "y" } },
+  );
 });
 
 test("applyToolPromptOverrides rewrites tool text and param descriptions, leaves the rest", () => {

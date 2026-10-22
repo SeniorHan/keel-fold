@@ -7,7 +7,7 @@ export interface ToolPromptOverrides {
     promptSnippet?: string;
     promptGuidelines?: string | string[];
 }
-export type AcpToolName = "compress" | "decompress" | "search_context" | "acp_status" | "acp_cache";
+export type AcpToolName = "compress" | "unfold" | "search" | "status" | "cache";
 export type ToolPromptsConfig = Partial<Record<AcpToolName, ToolPromptOverrides>>;
 export type NudgeSectionsConfig = Partial<Record<"efficiencyNote" | "emergencyHeader" | "t2Guidance" | "t3Guidance", string | null>>;
 export declare function sanitizeToolPrompts(raw: unknown): ToolPromptsConfig;

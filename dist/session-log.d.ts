@@ -5,7 +5,7 @@ export declare function parseSessionLog(text: string): SessionEntry[];
 /** Read-only lookup of entries in ANCESTOR sessions (issue #531): a session
  *  that inherited its parent's blocks through the parentSession header can
  *  cover message ids that exist only in the parent's session log, so
- *  decompress must fall back up the parentSession header chain. Walks upward from `sessionFile` (nearest
+ *  unfold must fall back up the parentSession header chain. Walks upward from `sessionFile` (nearest
  *  ancestor first), cycle-safe and depth-capped like state inheritance, and
  *  returns entries whose base id is in `wantedBaseIds`. The starting session
  *  itself is never included; nearest-ancestor entries win on duplicate ids. */

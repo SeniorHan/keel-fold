@@ -65,11 +65,11 @@ export async function cacheReportText(runtime: AcpRuntime, ctx: ExtensionContext
 
 export function makeCacheTool(runtime: AcpRuntime, overrides?: ToolPromptOverrides): ToolDefinition<typeof CacheParams> {
   return applyToolPromptOverrides({
-    name: "acp_cache",
-    label: "ACP Cache Report",
+    name: "cache",
+    label: "Cache Report",
     description:
       "Prompt-cache reconciliation: grand ledger (total input/cached/output, session hit rate) with every request's miss split into new content / compression re-pay / TTL expiry, plus per-fold economics (one-time cost, breakeven turns vs measured cadence). Defaults to a compact summary (totals + verdicts + anomalies only); pass detail=\"full\" for every fold and line item. Read-only.",
-    promptSnippet: "acp_cache({})",
+    promptSnippet: "cache({})",
     promptGuidelines: [
       "Call when asked about cache hits, cache invalidation, or what compression costs.",
       "Read-only: reports numbers, never mutates context.",

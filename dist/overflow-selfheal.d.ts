@@ -33,7 +33,7 @@ export interface NoBodyDecision {
 export declare const DEFAULT_OUTPUT_HEADROOM_MAX_PCT = 0.25;
 /** Resolve the user's `outputHeadroomMaxPct` (ratio or "N%" string) to a
  *  numeric cap, falling back to DEFAULT_OUTPUT_HEADROOM_MAX_PCT when unset.
- *  Shared by every headroom call site (context transform, /acp, acp_status)
+ *  Shared by every headroom call site (context transform, /acp, status)
  *  so they all measure against the SAME capped limit (issue #207/#267). */
 export declare function resolveOutputHeadroomCap(value: number | string | undefined): number;
 /**
@@ -74,7 +74,7 @@ export declare function shouldReserveOutputHeadroom(api: string | undefined): bo
  * (see reserveOutputHeadroom / shouldReserveOutputHeadroom). Returns a NEW config
  * (never mutates the input) so the shared resolved config stays untouched. Used
  * by BOTH the live context transform and the read-only panel surfaces (/acp,
- * acp_status) so every percentage is measured against the SAME real request
+ * status) so every percentage is measured against the SAME real request
  * limit — otherwise the panel reports against the full window while the nudge
  * bands run against (window − maxOutput) (issue #267).
  *

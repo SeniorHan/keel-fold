@@ -154,10 +154,10 @@ function getTool(pi, name) {
   return pi.tools.find((tool) => tool.name === name);
 }
 
-test("registers only compress and acp_context provider tools", () => {
+test("registers only compress and fold provider tools", () => {
   const pi = createPi();
   createLeanAcpExtension(fakeUpstream())(pi);
-  assert.deepEqual(pi.tools.map((tool) => tool.name), ["compress", "acp_context"]);
+  assert.deepEqual(pi.tools.map((tool) => tool.name), ["compress", "fold"]);
 });
 
 test("cooperates with an optional collapsed-display service without a local file dependency", () => {
@@ -175,7 +175,7 @@ test("cooperates with an optional collapsed-display service without a local file
   try {
     const pi = createPi();
     createLeanAcpExtension(fakeUpstream())(pi);
-    assert.deepEqual(decorated, ["compress", "acp_context"]);
+    assert.deepEqual(decorated, ["compress", "fold"]);
   } finally {
     if (previous === undefined) delete globalThis[serviceKey];
     else globalThis[serviceKey] = previous;
@@ -210,16 +210,16 @@ test("keeps compress direct, retains concise critical descriptions, and rewrites
   assert.match(entries.topic.description, /label/i);
   assert.doesNotMatch(JSON.stringify(schema), /large .* description/);
   const rewritten = result.content[0].text;
-  assert.match(rewritten, /acp_context\(\{ op: "acp_status", args: \{\} \}\)/);
-  assert.match(rewritten, /use acp_context with op "search_context" or "decompress"/i);
-  assert.match(rewritten, /acp_context\(\{ op: "search_context", args: \{ query: "auth token" \} \}\)/);
+  assert.match(rewritten, /fold\(\{ op: "status", args: \{\} \}\)/);
+  assert.match(rewritten, /use fold with op "search" or "unfold"/i);
+  assert.match(rewritten, /fold\(\{ op: "search", args: \{ query: "auth token" \} \}\)/);
   assert.doesNotMatch(rewritten, /\b(?:search_context|decompress|acp_status|acp_cache)\s*\(/);
   assert.doesNotMatch(rewritten, /\brun acp_status\b/i);
   assert.doesNotMatch(rewritten, /\buse search_context\b/i);
   assert.doesNotMatch(rewritten, /\bcall acp_status\b/i);
-  assert.match(rewritten, /call acp_context op "acp_status" for the full picture/);
-  assert.match(rewritten, /acp_context\(\{ op: "acp_cache", args: \{\} \}\)/);
-  assert.match(rewritten, /\nNew block summaries stay visible in this call's arguments; do not decompress them to re-read\.$/);
+  assert.match(rewritten, /call fold op "status" for the full picture/);
+  assert.match(rewritten, /fold\(\{ op: "cache", args: \{\} \}\)/);
+  assert.match(rewritten, /\nNew block summaries stay visible in this call's arguments; do not unfold them to re-read\.$/);
   assert.equal(calls[0][0], "compress");
   assert.deepEqual(calls[0][2], { content: [{ startId: "m1", endId: "m2", summary: "done" }] });
   // details hold the recorded fold used to rebuild state: never rewritten.
@@ -298,27 +298,29 @@ test("per-turn dedicated-model rule follows the live upstream description, not a
 });
 
 test("routes all four low-frequency operations with original args and execution context", async () => {
+  // Canonical op names on the facade; upstream still executes under the
+  // legacy kernel names, and the unfold ref is translated to blockId.
   const cases = [
-    ["search_context", { query: "architecture", limit: 8 }],
-    ["decompress", { blockId: "b11", toFile: "R:/Temp/history.txt", full: true }],
-    ["acp_status", { scope: "uncompressed", view: "messages", sort: "size", limit: 30 }],
-    ["acp_cache", { detail: "full" }],
+    ["search", "search_context", { query: "architecture", limit: 8 }],
+    ["unfold", "decompress", { blockId: "b11", toFile: "R:/Temp/history.txt", full: true }],
+    ["status", "acp_status", { scope: "uncompressed", view: "messages", sort: "size", limit: 30 }],
+    ["cache", "acp_cache", { detail: "full" }],
   ];
 
-  for (const [op, args] of cases) {
+  for (const [op, kernel, args] of cases) {
     const calls = [];
     const pi = createPi();
     createLeanAcpExtension(fakeUpstream(calls))(pi);
     const signal = new AbortController().signal;
     const context = { cwd: "C:/work" };
-    await getTool(pi, "acp_context").execute(
+    await getTool(pi, "fold").execute(
       `call-${op}`,
       { op, args },
       signal,
       undefined,
       context,
     );
-    assert.equal(calls[0][0], op);
+    assert.equal(calls[0][0], kernel);
     assert.equal(calls[0][1], `call-${op}`);
     assert.deepEqual(calls[0][2], args);
     assert.equal(calls[0][3], signal);
@@ -329,9 +331,9 @@ test("routes all four low-frequency operations with original args and execution 
 test("rewrites search results to the facade call syntax", async () => {
   const pi = createPi();
   createLeanAcpExtension(fakeUpstream())(pi);
-  const result = await getTool(pi, "acp_context").execute(
+  const result = await getTool(pi, "fold").execute(
     "search-1",
-    { op: "search_context", args: { query: "needle" } },
+    { op: "search", args: { query: "needle" } },
   );
   assert.equal(
     result.content[0].text,
@@ -341,20 +343,21 @@ test("rewrites search results to the facade call syntax", async () => {
       'block b12 T1 score:1.00 2.0K  "needle"',
       '  → decompress({ blockId: "b12" })',
       "user wrote: run acp_status, then search_context({ query: \"x\" })",
-      '  → acp_context({ op: "decompress", args: { blockId: "b12" } })',
+      '  → fold({ op: "unfold", args: { ref: "b12" } })',
       "",
       'message 4d9e965e#toolu_01GX|fc_toolu_01GX (user) T1 score:0.50  "needle"',
       "  needle",
-      '  → acp_context({ op: "decompress", args: { blockId: "b12" } })  (block containing message 4d9e965e#toolu_01GX|fc_toolu_01GX)',
+      '  → fold({ op: "unfold", args: { ref: "b12" } })  (block containing message 4d9e965e#toolu_01GX|fc_toolu_01GX)',
     ].join("\n"),
     "only the hint line is rewritten; the recalled preview stays verbatim",
   );
 });
 
-test("returns decompressed content verbatim", async () => {
+test("returns unfolded content verbatim", async () => {
   const pi = createPi();
   createLeanAcpExtension(fakeUpstream())(pi);
-  const result = await getTool(pi, "acp_context").execute("dec-1", { op: "decompress", args: { blockId: "b3", inline: true } });
+  // Canonical ref is translated to the upstream blockId at the boundary.
+  const result = await getTool(pi, "fold").execute("dec-1", { op: "unfold", args: { ref: "b3", inline: true } });
   assert.equal(result.content[0].text, 'Restored block b3 (1 item) inline:\n\nTry search_context({ query: "x" }) and run acp_status');
 });
 
@@ -362,18 +365,22 @@ test("facade advertises help syntax and discloses an upstream schema without exe
   const executions = { count: 0 };
   const pi = createPi();
   createLeanAcpExtension(fakeUpstream([], executions))(pi);
-  const tool = getTool(pi, "acp_context");
+  const tool = getTool(pi, "fold");
   assert.match(
     tool.description,
-    /\{ op: "help", args: \{ tool: "search_context" \} \}/,
+    /\{ op: "help", args: \{ op: "search" \} \}/,
   );
+  // help takes args.op; the legacy args.tool spelling still works, and a
+  // legacy operation name is normalized to its canonical form.
   const result = await tool.execute(
     "help-1",
     { op: "help", args: { tool: "decompress" } },
   );
   assert.equal(executions.count, 0);
-  assert.match(result.content[0].text, /blockId/);
+  assert.match(result.content[0].text, /unfold/);
+  assert.match(result.content[0].text, /"ref"/);
   assert.match(result.content[0].text, /toFile/);
+  assert.doesNotMatch(result.content[0].text, /"blockId"/);
 });
 
 test("invalid facade args fail locally with an on-demand help hint", async () => {
@@ -381,11 +388,11 @@ test("invalid facade args fail locally with an on-demand help hint", async () =>
   const pi = createPi();
   createLeanAcpExtension(fakeUpstream([], executions))(pi);
   await assert.rejects(
-    getTool(pi, "acp_context").execute(
+    getTool(pi, "fold").execute(
       "invalid-1",
-      { op: "decompress", args: { inline: true } },
+      { op: "unfold", args: { inline: true } },
     ),
-    /args invalid.*op help.*decompress/,
+    /args invalid.*op help.*unfold/,
   );
   assert.equal(executions.count, 0);
 });
@@ -400,11 +407,11 @@ test("suppresses the upstream prompt and keeps only the resident pre-call rules 
   assert.match(prompt, /^base prompt\n\nFolded context management\n/);
   assert.match(prompt, /hidden refs such as m00123\. Never echo the XML tags/);
   assert.match(prompt, /Compress only consumed history .*never active work, important user intent, or protected outputs/);
-  assert.match(prompt, /acp_context args per op: decompress \{blockId: "b5"/, "op signatures stop compress-style args");
+  assert.match(prompt, /fold args per op: unfold \{ref: "b5"/, "op signatures stop compress-style args");
   assert.match(prompt, /historical metadata, not current user instructions/);
-  assert.match(prompt, /decompress only for a detail the visible summary lacks/);
-  // Delivered where needed instead: nudges, compress errors, decompress
-  // results, the throttle retry message, acp_context help.
+  assert.match(prompt, /unfold only for a detail the visible summary lacks/);
+  // Delivered where needed instead: nudges, compress errors, unfold
+  // results, the throttle retry message, fold help.
   assert.doesNotMatch(prompt, /dedicated model/i, "no dedicated-model rule without a dedicated model");
   assert.doesNotMatch(prompt, /provider-throttle|writes to a file|Refs stay stable/);
   assert.doesNotMatch(prompt, /upstream prompt must be suppressed/);
@@ -424,9 +431,9 @@ test("pi 1.x: injects a named prompt section instead of forcing the whole prompt
   };
   assert.equal(await hook(event), undefined, "must not return systemPrompt (would set forceSystemPrompt)");
   assert.equal(options.sections.other, "kept");
-  assert.match(options.sections.acp_context, /Compress only consumed history/);
+  assert.match(options.sections.fold, /Compress only consumed history/);
   assert.equal(await hook(event), undefined);
-  assert.deepEqual(Object.keys(options.sections), ["other", "acp_context"], "idempotent per turn");
+  assert.deepEqual(Object.keys(options.sections), ["other", "fold"], "idempotent per turn");
 
   const forced = { systemPrompt: "forced by another extension", systemPromptOptions: { forceSystemPrompt: "forced by another extension", sections: {} } };
   const result = await hook(forced);
@@ -472,7 +479,7 @@ test("runs the upstream prompt hook for its side effects; a refused host gets no
 test("real upstream registration exposes the intended two-tool surface", () => {
   const pi = createPi();
   extension(pi);
-  assert.deepEqual(pi.tools.map((tool) => tool.name), ["compress", "acp_context"]);
+  assert.deepEqual(pi.tools.map((tool) => tool.name), ["compress", "fold"]);
 });
 
 test("provider-facing metadata stays within the lean budget", () => {
@@ -497,7 +504,7 @@ test("provider-facing metadata stays within the lean budget", () => {
 function realTools() {
   const pi = createPi();
   extension(pi);
-  return { compress: getTool(pi, "compress"), facade: getTool(pi, "acp_context") };
+  return { compress: getTool(pi, "compress"), facade: getTool(pi, "fold") };
 }
 
 const validated = (tool, raw) => validateToolArguments(tool, { id: "t", type: "toolCall", name: tool.name, arguments: tool.prepareArguments(raw) });
@@ -508,39 +515,45 @@ const RANGE2 = { startId: "m00020", endId: "m00030", summary: "s2" };
 
 test("facade prepareArguments decodes args given as a JSON string", () => {
   const { facade } = realTools();
-  assert.deepEqual(validated(facade, { op: "decompress", args: '{"blockId":"b5","full":true}' }), { op: "decompress", args: { blockId: "b5", full: true } });
-  assert.deepEqual(facade.prepareArguments({ op: "acp_cache", args: "not json" }), { op: "acp_cache", args: "not json" });
-  assert.deepEqual(facade.prepareArguments({ op: "acp_cache", args: "[1]" }), { op: "acp_cache", args: "[1]" });
+  assert.deepEqual(validated(facade, { op: "unfold", args: '{"ref":"b5","full":true}' }), { op: "unfold", args: { ref: "b5", full: true } });
+  assert.deepEqual(facade.prepareArguments({ op: "cache", args: "not json" }), { op: "cache", args: "not json" });
+  assert.deepEqual(facade.prepareArguments({ op: "cache", args: "[1]" }), { op: "cache", args: "[1]" });
+  // legacy (pre-rename) op values normalize to their canonical spelling
+  assert.deepEqual(facade.prepareArguments({ op: "acp_cache", args: "{}" }), { op: "cache", args: {} });
+  assert.deepEqual(facade.prepareArguments({ op: "decompress", args: '{"blockId":"b5"}' }), { op: "unfold", args: { blockId: "b5" } });
 });
 
 test("facade prepareArguments moves top-level op fields into args without overriding", () => {
   const { facade } = realTools();
-  assert.deepEqual(validated(facade, { op: "decompress", blockId: "b5" }), { op: "decompress", args: { blockId: "b5" } });
-  assert.deepEqual(validated(facade, { op: "search_context", query: "x", args: { limit: 3 } }), { op: "search_context", args: { limit: 3, query: "x" } });
-  assert.deepEqual(validated(facade, { op: "acp_status", args: '{"scope":"compressed"}', limit: 5 }), { op: "acp_status", args: { scope: "compressed", limit: 5 } });
+  assert.deepEqual(validated(facade, { op: "unfold", ref: "b5" }), { op: "unfold", args: { ref: "b5" } });
+  assert.deepEqual(validated(facade, { op: "search", query: "x", args: { limit: 3 } }), { op: "search", args: { limit: 3, query: "x" } });
+  assert.deepEqual(validated(facade, { op: "status", args: '{"scope":"compressed"}', limit: 5 }), { op: "status", args: { scope: "compressed", limit: 5 } });
   assert.deepEqual(facade.prepareArguments({ op: "help", tool: "decompress" }), { op: "help", args: { tool: "decompress" } });
-  assert.deepEqual(facade.prepareArguments({ op: "decompress", blockId: "b5", args: { blockId: "b5" } }), { op: "decompress", args: { blockId: "b5" } });
+  assert.deepEqual(facade.prepareArguments({ op: "unfold", ref: "b5", args: { ref: "b5" } }), { op: "unfold", args: { ref: "b5" } });
   // conflicting value: args wins, the top-level one stays put and is not applied
-  assert.deepEqual(facade.prepareArguments({ op: "decompress", blockId: "b9", args: { blockId: "b5" } }), { op: "decompress", blockId: "b9", args: { blockId: "b5" } });
+  assert.deepEqual(facade.prepareArguments({ op: "unfold", ref: "b9", args: { ref: "b5" } }), { op: "unfold", ref: "b9", args: { ref: "b5" } });
   // fields the operation does not accept stay where they are
-  assert.deepEqual(facade.prepareArguments({ op: "decompress", blockId: "b5", query: "x" }), { op: "decompress", query: "x", args: { blockId: "b5" } });
+  assert.deepEqual(facade.prepareArguments({ op: "unfold", ref: "b5", query: "x" }), { op: "unfold", query: "x", args: { ref: "b5" } });
+  // legacy spellings: op alias plus the old blockId handle
+  assert.deepEqual(facade.prepareArguments({ op: "decompress", blockId: "b5" }), { op: "unfold", args: { blockId: "b5" } });
 });
 
 test("facade prepareArguments infers an omitted op only from unambiguous fields", () => {
   const { facade } = realTools();
   const infer = (raw) => facade.prepareArguments(raw).op;
-  assert.equal(infer({ blockId: "b5" }), "decompress");
-  assert.equal(infer({ args: { blockId: "b5", inline: true } }), "decompress");
-  assert.equal(infer({ args: '{"query":"x"}' }), "search_context");
-  assert.equal(infer({ query: "x", limit: 3 }), "search_context");
-  assert.equal(infer({ scope: "compressed" }), "acp_status");
-  assert.equal(infer({ view: "messages", limit: 3 }), "acp_status");
-  assert.equal(infer({ sort: "size" }), "acp_status");
-  assert.equal(infer({ detail: "full" }), "acp_cache");
-  assert.deepEqual(validated(facade, { blockId: "b5" }), { op: "decompress", args: { blockId: "b5" } });
-  assert.deepEqual(validated(facade, { query: "x", limit: 3 }), { op: "search_context", args: { query: "x", limit: 3 } });
+  assert.equal(infer({ ref: "b5" }), "unfold");
+  assert.equal(infer({ args: { ref: "b5", inline: true } }), "unfold");
+  assert.equal(infer({ blockId: "b5" }), "unfold", "legacy handle still infers");
+  assert.equal(infer({ args: '{"query":"x"}' }), "search");
+  assert.equal(infer({ query: "x", limit: 3 }), "search");
+  assert.equal(infer({ scope: "compressed" }), "status");
+  assert.equal(infer({ view: "messages", limit: 3 }), "status");
+  assert.equal(infer({ sort: "size" }), "status");
+  assert.equal(infer({ detail: "full" }), "cache");
+  assert.deepEqual(validated(facade, { ref: "b5" }), { op: "unfold", args: { ref: "b5" } });
+  assert.deepEqual(validated(facade, { query: "x", limit: 3 }), { op: "search", args: { query: "x", limit: 3 } });
   // shared (limit, tool), mixed, unknown and empty inputs are not guessed
-  for (const raw of [{ limit: 3 }, { tool: "bash" }, { blockId: "b5", query: "x" }, { blockId: "b5", limit: 3 }, { foo: 1 }, {}]) {
+  for (const raw of [{ limit: 3 }, { tool: "bash" }, { ref: "b5", query: "x" }, { ref: "b5", limit: 3 }, { foo: 1 }, {}]) {
     assert.deepEqual(facade.prepareArguments(raw), raw);
     rejected(facade, raw);
   }
@@ -548,18 +561,21 @@ test("facade prepareArguments infers an omitted op only from unambiguous fields"
 
 test("facade prepareArguments keeps explicit and invalid ops and never throws or mutates", () => {
   const { facade } = realTools();
-  const explicit = { op: "search_context", blockId: "b5" };
-  assert.deepEqual(facade.prepareArguments(explicit), { op: "search_context", blockId: "b5" }, "explicit op is not re-inferred");
-  const invalid = { op: "buildStatusReport", blockId: "b5", args: '{"x":1}' };
+  const explicit = { op: "search", ref: "b5" };
+  assert.deepEqual(facade.prepareArguments(explicit), { op: "search", ref: "b5" }, "explicit op is not re-inferred");
+  const invalid = { op: "buildStatusReport", ref: "b5", args: '{"x":1}' };
   assert.deepEqual(facade.prepareArguments(invalid), invalid, "invalid op is not guessed");
   rejected(facade, invalid);
   assert.equal(facade.prepareArguments({ op: "help" }).args, undefined, "help is never inferred and gets no args");
   for (const raw of [undefined, null, "x", 5, ["a"]]) assert.equal(facade.prepareArguments(raw), raw);
-  const input = { blockId: "b5", args: '{"full":true}' };
+  const input = { ref: "b5", args: '{"full":true}' };
   const snapshot = structuredClone(input);
   const once = facade.prepareArguments(input);
   assert.deepEqual(input, snapshot);
   assert.deepEqual(facade.prepareArguments(once), once, "idempotent");
+  // legacy aliases stay accepted end to end
+  assert.deepEqual(facade.prepareArguments({ op: "search_context" }), { op: "search" });
+  assert.deepEqual(facade.prepareArguments({ op: "acp_status" }), { op: "status" });
 });
 
 test("compress prepareArguments parses a stringified content array", () => {

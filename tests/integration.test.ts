@@ -53,7 +53,7 @@ function userMsg(id: string, text: string) {
   createAcpExtension()(api as any);
 
   assert.ok(api.tools.some((t) => t.name === "compress"), "compress tool registered");
-  assert.ok(api.tools.some((t) => t.name === "acp_cache"), "acp_cache tool registered");
+  assert.ok(api.tools.some((t) => t.name === "cache"), "cache tool registered");
   assert.deepEqual([...api.commands.keys()].sort(), ["acp", "acp-cache", "acp-config", "acp-decompress", "acp-export", "acp-rule", "acp-search", "acp-status"]);
   assert.ok(handlers.has("context"), "context event wired");
   assert.ok(handlers.has("session_before_compact"), "compaction-disable wired");
@@ -73,7 +73,7 @@ test("before_agent_start appends the ACP system prompt", () => {
   const result = handlers.get("before_agent_start")![0]!({ systemPrompt: "BASE" }, {});
   assert.ok(result.systemPrompt.startsWith("BASE"));
   assert.ok(result.systemPrompt.includes("compress"));
-  assert.ok(result.systemPrompt.includes("acp"));
+  assert.ok(result.systemPrompt.includes("fold"));
 });
 
 test("context handler tags every message with a ref even when length matches event.messages", async () => {
@@ -94,19 +94,19 @@ test("context handler tags every message with a ref even when length matches eve
   assert.ok(firstContent.some((b: any) => b.type === "text" && b.text.includes("m0000")), "first msg ref-tagged");
 });
 
-test("acp_status refs remain usable by the next compress call", async () => {
+test("status refs remain usable by the next compress call", async () => {
   const { api } = captureApi();
   createAcpExtension({ modelContextLimit: 200_000 })(api);
   const stateFile = tmpPath("nonexistent-pai-acp-status-compress.session.json");
   await rm(`${stateFile}.acp.json`, { force: true });
-  const originalText = "This range is reported by acp_status and must remain addressable by compress. ".repeat(130);
+  const originalText = "This range is reported by status and must remain addressable by compress. ".repeat(130);
   const persisted = [userMsg("e1", originalText), ...["two", "three", "four", "five", "six", "seven"].map((n, index) => userMsg(`e${index + 2}`, `filler ${n} `.repeat(400)))];
   const ctx = { ...fakeCtx(persisted, stateFile), sessionManager: { buildContextEntries: () => persisted, getSessionId: () => "test-session", getSessionFile: () => stateFile } };
-  const statusTool = api.tools.find((tool: { name: string }) => tool.name === "acp_status")!;
+  const statusTool = api.tools.find((tool: { name: string }) => tool.name === "status")!;
   const status = await statusTool.execute("tc-status", {}, undefined, undefined, ctx);
   const targetRef = status.content[0].text.match(/m\d{5}/)![0];
   const compressTool = api.tools.find((tool: { name: string }) => tool.name === "compress")!;
-  const result = await compressTool.execute("tc-status-compress", { content: [{ startId: targetRef, endId: targetRef, summary: "This range was selected by acp_status and is now safely compressed from the original entry." }] }, undefined, undefined, ctx);
+  const result = await compressTool.execute("tc-status-compress", { content: [{ startId: targetRef, endId: targetRef, summary: "This range was selected by status and is now safely compressed from the original entry." }] }, undefined, undefined, ctx);
   assert.match(result.content[0].text, /blocks: b\d+=/, result.content[0].text);
 });
 

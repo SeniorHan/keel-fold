@@ -56,7 +56,7 @@ function fakeCtxFullTree(allEntries: any[], activeEntries: any[], stateFile: str
 }
 
 // Shared setup: assign refs + compress m00001 into block b1, return the tool
-// handles + ctx so each test can drive the decompress tool.
+// handles + ctx so each test can drive the unfold tool.
 async function setupWithCompressedBlock() {
   const { api, handlers } = captureApi();
   createAcpExtension({ modelContextLimit: 200_000 })(api as any);
@@ -82,13 +82,13 @@ async function setupWithCompressedBlock() {
     undefined, undefined, ctx,
   );
 
-  const decompressTool = api.tools.find((t: any) => t.name === "decompress")!;
-  return { decompressTool, ctx, stateFile };
+  const unfoldTool = api.tools.find((t: any) => t.name === "unfold")!;
+  return { unfoldTool, ctx, stateFile };
 }
 
-test("decompress default writes content to an auto-generated file (no context bloat)", async () => {
-  const { decompressTool, ctx } = await setupWithCompressedBlock();
-  const res = await decompressTool.execute("tc2", { blockId: "b1" }, undefined, undefined, ctx);
+test("unfold default writes content to an auto-generated file (no context bloat)", async () => {
+  const { unfoldTool, ctx } = await setupWithCompressedBlock();
+  const res = await unfoldTool.execute("tc2", { ref: "b1" }, undefined, undefined, ctx);
   const text = (res.content[0] as any).text as string;
 
   assert.match(text, /written to/, "result reports a file path");
@@ -103,9 +103,9 @@ test("decompress default writes content to an auto-generated file (no context bl
     `inline content must NOT be the full restored text (result was ${text.length} chars)`);
 });
 
-test("decompress inline:true returns the full content in the tool result", async () => {
-  const { decompressTool, ctx } = await setupWithCompressedBlock();
-  const res = await decompressTool.execute("tc3", { blockId: "b1", inline: true }, undefined, undefined, ctx);
+test("unfold inline:true returns the full content in the tool result", async () => {
+  const { unfoldTool, ctx } = await setupWithCompressedBlock();
+  const res = await unfoldTool.execute("tc3", { ref: "b1", inline: true }, undefined, undefined, ctx);
   const text = (res.content[0] as any).text as string;
 
   assert.match(text, /inline:/, "result signals inline mode");
@@ -113,11 +113,11 @@ test("decompress inline:true returns the full content in the tool result", async
     "full restored content present in the tool result");
 });
 
-test("decompress toFile writes to the specified path", async () => {
-  const { decompressTool, ctx } = await setupWithCompressedBlock();
+test("unfold toFile writes to the specified path", async () => {
+  const { unfoldTool, ctx } = await setupWithCompressedBlock();
   const dir = await mkdtemp(join(tmpdir(), "pai-acp-decompress-"));
   const target = join(dir, "custom.txt");
-  const res = await decompressTool.execute("tc4", { blockId: "b1", toFile: target }, undefined, undefined, ctx);
+  const res = await unfoldTool.execute("tc4", { ref: "b1", toFile: target }, undefined, undefined, ctx);
   const text = (res.content[0] as any).text as string;
 
   assert.match(text, new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "result mentions the custom path");
@@ -126,15 +126,15 @@ test("decompress toFile writes to the specified path", async () => {
     "file contains the full restored content");
 });
 
-test("decompress toFile rejects paths outside allowed roots", async () => {
-  const { decompressTool, ctx } = await setupWithCompressedBlock();
-  const res = await decompressTool.execute("tc5", { blockId: "b1", toFile: "/etc/passwd" }, undefined, undefined, ctx);
+test("unfold toFile rejects paths outside allowed roots", async () => {
+  const { unfoldTool, ctx } = await setupWithCompressedBlock();
+  const res = await unfoldTool.execute("tc5", { ref: "b1", toFile: "/etc/passwd" }, undefined, undefined, ctx);
   const text = (res.content[0] as any).text as string;
   assert.match(text, /must be under/i, "rejects arbitrary filesystem path");
 });
 
-test("decompress toFile rejects paths that escape an allowed root via a symlink", async () => {
-  const { decompressTool, ctx } = await setupWithCompressedBlock();
+test("unfold toFile rejects paths that escape an allowed root via a symlink", async () => {
+  const { unfoldTool, ctx } = await setupWithCompressedBlock();
   const jail = await mkdtemp(join(tmpdir(), "pai-acp-jail-"));
   // A symlink inside the (allowed) jail that points OUTSIDE all allowed roots.
   // /etc exists on both Linux and macOS, so realpath can follow the link.
@@ -143,13 +143,13 @@ test("decompress toFile rejects paths that escape an allowed root via a symlink"
   const link = join(jail, "evil-link");
   await symlink("/etc", link);
   const target = join(link, "passwd.txt");
-  const res = await decompressTool.execute("tc-sym", { blockId: "b1", toFile: target }, undefined, undefined, ctx);
+  const res = await unfoldTool.execute("tc-sym", { ref: "b1", toFile: target }, undefined, undefined, ctx);
   const text = (res.content[0] as any).text as string;
   assert.match(text, /must be under/i, "rejects path escaping an allowed root through a symlink");
 });
 
-test("decompress toFile rejects a dangling symlink whose target escapes the allowed roots", async () => {
-  const { decompressTool, ctx } = await setupWithCompressedBlock();
+test("unfold toFile rejects a dangling symlink whose target escapes the allowed roots", async () => {
+  const { unfoldTool, ctx } = await setupWithCompressedBlock();
   const jail = await mkdtemp(join(tmpdir(), "pai-acp-jail-dangling-"));
   const link = join(jail, "dangling-link");
   // Filesystem root of the temp dir: outside every allowed root regardless of
@@ -157,24 +157,24 @@ test("decompress toFile rejects a dangling symlink whose target escapes the allo
   const escapedTarget = join(parse(tmpdir()).root, `acp-dangling-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   await symlink(escapedTarget, link);
   const target = join(link, "out.txt");
-  const res = await decompressTool.execute("tc-sym2", { blockId: "b1", toFile: target }, undefined, undefined, ctx);
+  const res = await unfoldTool.execute("tc-sym2", { ref: "b1", toFile: target }, undefined, undefined, ctx);
   const text = (res.content[0] as any).text as string;
   assert.match(text, /must be under/i, "rejects a dangling symlink that would write outside allowed roots");
 });
 
-test("decompress keeps the block active after a file-mode call", async () => {
-  const { decompressTool, ctx } = await setupWithCompressedBlock();
-  await decompressTool.execute("tc6", { blockId: "b1" }, undefined, undefined, ctx);
+test("unfold keeps the block active after a file-mode call", async () => {
+  const { unfoldTool, ctx } = await setupWithCompressedBlock();
+  await unfoldTool.execute("tc6", { ref: "b1" }, undefined, undefined, ctx);
   // Run the status tool to confirm b1 is still folded (active).
   const { api } = captureApi();
   // re-query via the same ctx's persisted state: simpler to just call decompress
   // again — a second file-mode call should succeed identically (block still there).
-  const res2 = await decompressTool.execute("tc7", { blockId: "b1" }, undefined, undefined, ctx);
+  const res2 = await unfoldTool.execute("tc7", { ref: "b1" }, undefined, undefined, ctx);
   const text2 = (res2.content[0] as any).text as string;
   assert.doesNotMatch(text2, /not found/i, "block still present after first decompress");
 });
 
-test("decompress restores a block's original text via getEntry fallback after tree navigation (undo)", async () => {
+test("unfold restores a block's original text via getEntry fallback after tree navigation (undo)", async () => {
   const { api, handlers } = captureApi();
   createAcpExtension({ modelContextLimit: 200_000 })(api as any);
   const stateFile = tmpPath("pai-acp-decompress-fallback-undo.session.json");
@@ -202,8 +202,8 @@ test("decompress restores a block's original text via getEntry fallback after tr
   // full tree (getEntry finds it) — like after /undo, /redo, or /tree.
   const activeAfterUndo = allEntries.filter((e) => e.id !== "e1");
   const undoCtx = fakeCtxFullTree(allEntries, activeAfterUndo, stateFile);
-  const decompressTool = api.tools.find((t: any) => t.name === "decompress")!;
-  const res = await decompressTool.execute("tc2", { blockId: "b1", inline: true }, undefined, undefined, undoCtx);
+  const unfoldTool = api.tools.find((t: any) => t.name === "unfold")!;
+  const res = await unfoldTool.execute("tc2", { ref: "b1", inline: true }, undefined, undefined, undoCtx);
   const text = (res.content[0] as any).text as string;
 
   assert.match(text, /inline:/, "result signals inline mode");
@@ -211,7 +211,7 @@ test("decompress restores a block's original text via getEntry fallback after tr
     "fallback restored the original text from the full session tree");
 });
 
-test("decompress keeps the degraded message when the ref is gone from both branch and full tree", async () => {
+test("unfold keeps the degraded message when the ref is gone from both branch and full tree", async () => {
   const { api, handlers } = captureApi();
   createAcpExtension({ modelContextLimit: 200_000 })(api as any);
   const stateFile = tmpPath("pai-acp-decompress-fallback-gone.session.json");
@@ -233,14 +233,14 @@ test("decompress keeps the degraded message when the ref is gone from both branc
   // e1 vanished from the full tree entirely: getEntry → undefined AND the
   // active branch is empty — nothing to fall back to.
   const goneCtx = fakeCtxFullTree(allEntries.filter((e) => e.id !== "e1"), [], stateFile);
-  const decompressTool = api.tools.find((t: any) => t.name === "decompress")!;
-  const res = await decompressTool.execute("tc2", { blockId: "b1", inline: true }, undefined, undefined, goneCtx);
+  const unfoldTool = api.tools.find((t: any) => t.name === "unfold")!;
+  const res = await unfoldTool.execute("tc2", { ref: "b1", inline: true }, undefined, undefined, goneCtx);
   const text = (res.content[0] as any).text as string;
 
   assert.match(text, /no restorable message content/, "degraded message preserved when nothing can be restored");
 });
 
-test("decompress restores multi tool-call assistant messages (refs carry # suffix) after undo", async () => {
+test("unfold restores multi tool-call assistant messages (refs carry # suffix) after undo", async () => {
   const { api, handlers } = captureApi();
   createAcpExtension({ modelContextLimit: 200_000 })(api as any);
   const stateFile = tmpPath("pai-acp-decompress-fallback-tools.session.json");
@@ -278,15 +278,15 @@ test("decompress restores multi tool-call assistant messages (refs carry # suffi
 
   const activeAfterUndo = allEntries.filter((e) => e.id !== "e1");
   const undoCtx = fakeCtxFullTree(allEntries, activeAfterUndo, stateFile);
-  const decompressTool = api.tools.find((t: any) => t.name === "decompress")!;
-  const res = await decompressTool.execute("tc2", { blockId: "b1", inline: true }, undefined, undefined, undoCtx);
+  const unfoldTool = api.tools.find((t: any) => t.name === "unfold")!;
+  const res = await unfoldTool.execute("tc2", { ref: "b1", inline: true }, undefined, undefined, undoCtx);
   const text = (res.content[0] as any).text as string;
 
   assert.ok(text.includes("read") && text.includes("bash"),
     "both multi tool-call CoreMessages restored via base-id normalization");
 });
 
-test("decompress survives repeated compress → navigate → decompress cycles (state not lost)", async () => {
+test("unfold survives repeated compress → navigate → decompress cycles (state not lost)", async () => {
   const { api, handlers } = captureApi();
   createAcpExtension({ modelContextLimit: 200_000 })(api as any);
   const stateFile = tmpPath("pai-acp-decompress-fallback-cycles.session.json");
@@ -301,7 +301,7 @@ test("decompress survives repeated compress → navigate → decompress cycles (
   ];
 
   const compressTool = api.tools.find((t: any) => t.name === "compress")!;
-  const decompressTool = api.tools.find((t: any) => t.name === "decompress")!;
+  const unfoldTool = api.tools.find((t: any) => t.name === "unfold")!;
 
   // Cycle 1: compress e1 → navigate away → decompress (fallback restores).
   const compressCtx = fakeCtxFullTree(allEntries, allEntries, stateFile);
@@ -309,7 +309,7 @@ test("decompress survives repeated compress → navigate → decompress cycles (
   await compressTool.execute("tc1", { content: [{ startId: "m00001", endId: "m00001", summary: "First compression cycle summary for the repeated round-trip navigation test." }] }, undefined, undefined, compressCtx);
 
   let active = allEntries.filter((e) => e.id !== "e1");
-  let res = await decompressTool.execute("tc2", { blockId: "b1", inline: true }, undefined, undefined, fakeCtxFullTree(allEntries, active, stateFile));
+  let res = await unfoldTool.execute("tc2", { ref: "b1", inline: true }, undefined, undefined, fakeCtxFullTree(allEntries, active, stateFile));
   assert.ok(((res.content[0] as any).text as string).includes("This is a detailed message"),
     "cycle 1: fallback restored the original text after undo");
 
@@ -320,38 +320,38 @@ test("decompress survives repeated compress → navigate → decompress cycles (
   await compressTool.execute("tc3", { content: [{ startId: "m00002", endId: "m00002", summary: "Second compression cycle summary covering the filler two message for the test." }] }, undefined, undefined, redoCtx);
 
   active = allEntries.filter((e) => e.id !== "e2");
-  res = await decompressTool.execute("tc4", { blockId: "b2", inline: true }, undefined, undefined, fakeCtxFullTree(allEntries, active, stateFile));
+  res = await unfoldTool.execute("tc4", { ref: "b2", inline: true }, undefined, undefined, fakeCtxFullTree(allEntries, active, stateFile));
   assert.ok(((res.content[0] as any).text as string).includes("filler two"),
     "cycle 2: newly compressed block also restores after navigate-away");
 });
 
 // ─── #535 P2: re-fold hint on inline restore ───────────────────────────────
 
-test("decompress inline:true appends the re-fold hint with exact restored refs (#535 P2)", async () => {
-  const { decompressTool, ctx } = await setupWithCompressedBlock();
-  const res = await decompressTool.execute("tc-p2-1", { blockId: "b1", inline: true }, undefined, undefined, ctx);
+test("unfold inline:true appends the re-fold hint with exact restored refs (#535 P2)", async () => {
+  const { unfoldTool, ctx } = await setupWithCompressedBlock();
+  const res = await unfoldTool.execute("tc-p2-1", { ref: "b1", inline: true }, undefined, undefined, ctx);
   const text = (res.content[0] as any).text as string;
   const hint = 'Re-fold: call compress("m00001–m00001", <fresh summary>) → updates block b1 in place (same id, new summary).';
   assert.ok(text.endsWith(`\n\n${hint}`), `re-fold hint missing or malformed at end:\n---\n${text}\n---`);
 });
 
-test("decompress inline persists restoredInline=true on the block in the sidecar (kernel K2 precondition)", async () => {
-  const { decompressTool, ctx, stateFile } = await setupWithCompressedBlock();
-  await decompressTool.execute("tc-p2-2", { blockId: "b1", inline: true }, undefined, undefined, ctx);
+test("unfold inline persists restoredInline=true on the block in the sidecar (kernel K2 precondition)", async () => {
+  const { unfoldTool, ctx, stateFile } = await setupWithCompressedBlock();
+  await unfoldTool.execute("tc-p2-2", { ref: "b1", inline: true }, undefined, undefined, ctx);
   const raw = JSON.parse(await readFile(`${stateFile}.acp.json`, "utf8"));
   const block = (raw.blocks as any[]).find((b) => b.blockId === "b1");
   assert.ok(block, "b1 persisted");
   assert.equal(block.restoredInline, true, "inline restore must flag the block so a later refold updates it in place");
 });
 
-test("decompress file modes add no re-fold hint and do not set restoredInline (#535 P2 scope)", async () => {
-  const { decompressTool, ctx, stateFile } = await setupWithCompressedBlock();
+test("unfold file modes add no re-fold hint and do not set restoredInline (#535 P2 scope)", async () => {
+  const { unfoldTool, ctx, stateFile } = await setupWithCompressedBlock();
   const dir = await mkdtemp(join(tmpdir(), "pai-acp-refold-filemode-"));
   const target = join(dir, "out.txt");
-  const r1 = await decompressTool.execute("tc-p2-3", { blockId: "b1" }, undefined, undefined, ctx);
+  const r1 = await unfoldTool.execute("tc-p2-3", { ref: "b1" }, undefined, undefined, ctx);
   const d1 = (r1.content[0] as any).text as string;
   assert.doesNotMatch(d1, /Re-fold:/, "default file mode receipt must stay unchanged");
-  const r2 = await decompressTool.execute("tc-p2-4", { blockId: "b1", toFile: target }, undefined, undefined, ctx);
+  const r2 = await unfoldTool.execute("tc-p2-4", { ref: "b1", toFile: target }, undefined, undefined, ctx);
   const d2 = (r2.content[0] as any).text as string;
   assert.doesNotMatch(d2, /Re-fold:/, "toFile mode receipt must stay unchanged");
   const raw = JSON.parse(await readFile(`${stateFile}.acp.json`, "utf8"));

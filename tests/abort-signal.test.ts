@@ -91,7 +91,7 @@ test("compress rejects with AbortError on a pre-aborted signal and persists noth
   await rm(`${stateFile}.acp.json`, { force: true });
 });
 
-test("decompress rejects with AbortError on a pre-aborted signal", async () => {
+test("unfold rejects with AbortError on a pre-aborted signal", async () => {
   const { api, handlers } = captureApi();
   createAcpExtension({ modelContextLimit: 200_000 })(api as any);
   const stateFile = statePath("abort-decompress");
@@ -103,9 +103,9 @@ test("decompress rejects with AbortError on a pre-aborted signal", async () => {
 
   const ctrl = new AbortController();
   ctrl.abort();
-  const decompressTool = api.tools.find((t: any) => t.name === "decompress")!;
+  const unfoldTool = api.tools.find((t: any) => t.name === "unfold")!;
   await assert.rejects(
-    () => decompressTool.execute("tc1", { blockId: "b1" }, ctrl.signal, () => {}, ctx),
+    () => unfoldTool.execute("tc1", { ref: "b1" }, ctrl.signal, () => {}, ctx),
     (e: Error) => e.name === "AbortError" && e.message === "Operation aborted",
   );
   await rm(`${stateFile}.acp.json`, { force: true });
