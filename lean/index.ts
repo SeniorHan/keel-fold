@@ -395,7 +395,7 @@ function facadeTool(tools: Map<string, CapturedTool>): ToolDefinition<typeof FAC
   return {
     name: "acp_context",
     label: "ACP Context",
-    description: 'Search, restore, or inspect ACP context with original operation args; if unsure call { op: "help", args: { tool: "search_context" } }.',
+    description: 'Search, restore, or inspect ACP context (folded blocks created by compress) with original operation args; call op "help" when unsure.',
     promptSnippet: "",
     promptGuidelines: [],
     parameters: FACADE_PARAMETERS,
