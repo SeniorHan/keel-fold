@@ -26,14 +26,14 @@ function formatK(n: number): string {
 }
 
 const RangeSpec = Type.Object({
-  startId: Type.String({ description: 'Message ref, e.g. "m00005" (from the acp tag), or a block id "b3".' }),
+  startId: Type.String({ description: 'Inclusive first ref: message ref, e.g. "m00005" (from the fold tag), or a block id "b3".' }),
   endId: Type.String({ description: 'Inclusive end ref. Must be at or after startId.' }),
   summary: Type.String({ description: "Complete technical summary replacing all content in range. Keep only essential details (conclusions, file paths, decisions, exact values, etc.)." }),
-  topic: Type.Optional(Type.String({ description: "Short label (3-5 words) for THIS range, e.g. 'Auth System Exploration'. Omit to use top-level topic. When compressing multiple unrelated ranges, give each its own topic for better quality." })),
+  topic: Type.Optional(Type.String({ description: "Short label (3-5 words) for THIS range, e.g. 'Auth System Exploration'." })),
 });
 
 const CompressParams = Type.Object({
-  topic: Type.Optional(Type.String({ description: "Fallback topic for entries without their own. Omit when each content entry specifies its own topic." })),
+  topic: Type.Optional(Type.String({ description: "Fallback topic label (3-5 words), used for ranges without a topic of their own." })),
   content: Type.Union([
     Type.Array(RangeSpec),
     // Non-strict-tool providers (vLLM openai-completions, supportsStrictTools:
@@ -43,8 +43,8 @@ const CompressParams = Type.Object({
     // only compress attempt was lost. Accept the JSON-encoded form and parse
     // it in normalizeRanges below.
     Type.String({ description: "JSON-encoded array of ranges — accepted because non-strict-tool providers sometimes stringify array arguments; parsed automatically." }),
-  ], { description: "One or more ranges to compress, each with start/end boundaries and a summary. When compressing multiple unrelated ranges in one call, give each its own topic." }),
-  summaryMaxChars: Type.Optional(Type.Number({ description: "Override max summary length (default max: 20000 chars). Use when content is important and needs more detail — don't lose critical info just to fit the limit." })),
+  ], { description: "One or more ranges to compress, each with start/end boundaries and a summary replacing that range." }),
+  summaryMaxChars: Type.Optional(Type.Number({ description: "Override max summary length in chars (default 20000)." })),
 });
 
 type CompressArgs = Static<typeof CompressParams>;
@@ -55,13 +55,12 @@ type CompressArgs = Static<typeof CompressParams>;
  *  would become a permanent, useless block summary on failure. */
 function compressDescription(ref: string | undefined): string {
   if (!ref) {
-    return "Replace older conversation ranges with detailed summaries you write. Single range: compress({ content: [{ startId, endId, summary }] }). Batch: compress({ content: [{ topic, startId, endId, summary }, ...] }) — each entry gets its own summary.";
+    return "Replace older conversation ranges with detailed summaries you write. Batch several ranges in one call; each range carries its own startId/endId refs, self-contained summary, and optional topic (per-range topic overrides the top-level one).";
   }
   return (
     `Replace older conversation ranges. Dedicated summary model ${ref} normally replaces each summary. ` +
-    "Choose the ranges and provide a concise but meaningful 1–2 sentence fallback summary for each range; never use a bare placeholder. " +
-    "Preserve the goal, key decisions, exact paths/versions/errors, current state, and TODOs in that fallback. " +
-    "Example: compress({ content: [{ startId, endId, summary: \"Concise fallback...\" }] })."
+    "Give each range a concise but meaningful 1–2 sentence fallback summary; never use a bare placeholder. " +
+    "Preserve the goal, key decisions, exact paths/versions/errors, current state, and TODOs in that fallback."
   );
 }
 
@@ -309,7 +308,7 @@ function jsonParseError(content: CompressArgs["content"]): string | undefined {
  *  "… B blocks)" form (0-block runs; historical transcripts replayed by
  *  index/floor-stale) and the #376 "… blocks: b3=m00044–m00097*, …" form. */
 export function compressPanelBlocks(text: string): number {
-  if (!text.trimStart().startsWith("▣ ACP |")) return -1;
+  if (!text.trimStart().startsWith("▣ Fold |") && !text.trimStart().startsWith("▣ ACP |")) return -1; // "▣ ACP |" = panels recorded by older builds; still parsed for session-log rebuild
   const m = text.match(/, (\d+) blocks?\)/);
   if (m) return Number(m[1]);
   // Count span-form entries by their label tokens (bN= / bN(Tn)=), NOT by
@@ -438,8 +437,8 @@ function compressibleSnapshotText(nudge: NudgeDecision | undefined): string {
 
 function deadRepeatRejectionText(spans: string[], count: number, snapshot: string): string {
   return [
-    "▣ ACP | 0 → 0 tokens (~0 reclaimed, 0 blocks)",
-    `[ACP] REJECTED — this exact compress call has now failed ${count}× (ranges ${spans.join(", ")}). Those refs are stale: they point at content already compressed into an active block, or at refs that no longer exist. Repeating this call cannot succeed — do not retry it.`,
+    "▣ Fold | 0 → 0 tokens (~0 reclaimed, 0 blocks)",
+    `[Fold] REJECTED — this exact compress call has now failed ${count}× (ranges ${spans.join(", ")}). Those refs are stale: they point at content already compressed into an active block, or at refs that no longer exist. Repeating this call cannot succeed — do not retry it.`,
     "",
     "Current compressible ranges (use these refs exactly as listed):",
     snapshot,
@@ -450,8 +449,8 @@ function deadRepeatRejectionText(spans: string[], count: number, snapshot: strin
 
 function cappedRejectionText(snapshot: string): string {
   return [
-    "▣ ACP | 0 → 0 tokens (~0 reclaimed, 0 blocks)",
-    `[ACP] PAUSED — ${MAX_COMPRESS_ATTEMPTS} compress attempts already failed this turn; further compress calls are rejected until the next user message.`,
+    "▣ Fold | 0 → 0 tokens (~0 reclaimed, 0 blocks)",
+    `[Fold] PAUSED — ${MAX_COMPRESS_ATTEMPTS} compress attempts already failed this turn; further compress calls are rejected until the next user message.`,
     "",
     "Current compressible ranges (use these refs exactly as listed):",
     snapshot,
@@ -704,7 +703,7 @@ async function handleCompress(args: CompressArgs, runtime: AcpRuntime, ctx: Exte
   const spanClause = blocksCreated > 0
     ? `blocks: ${newBlocks.map((b) => blockSpanLabel(b, applied.state)).join(", ")}`
     : "0 blocks";
-  const lines = [`▣ ACP | ${formatK(beforeTokens)} → ${formatK(afterTokens)} tokens (~${formatK(reclaimed)} reclaimed, ${spanClause})`];
+  const lines = [`▣ Fold | ${formatK(beforeTokens)} → ${formatK(afterTokens)} tokens (~${formatK(reclaimed)} reclaimed, ${spanClause})`];
   if (blocksCreated > 0) {
     for (const b of newBlocks) lines.push(summaryFingerprintLine(b.blockId, b.summary));
   }

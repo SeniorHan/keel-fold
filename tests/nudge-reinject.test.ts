@@ -37,7 +37,7 @@ function msg(id: string, role: string, text: string, over: Record<string, unknow
 }
 
 const MID = "lorem ".repeat(3000);
-const COMPRESS_PANEL = "▣ ACP | 120.5K → 55.1K tokens (~65.4K reclaimed, 2 blocks)";
+const COMPRESS_PANEL = "▣ Fold | 120.5K → 55.1K tokens (~65.4K reclaimed, 2 blocks)";
 
 let branchEntries: any[] = [];
 let stateFile = "";

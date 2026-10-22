@@ -140,7 +140,7 @@ const staleStream = (): any[] => {
   const entries = [msg("e0", "user", "start " + MID)];
   for (let i = 1; i <= 18; i++) entries.push(msg(`e${i}`, i % 2 ? "assistant" : "user", `f${i} ` + MID));
   entries.push({ type: "message", id: "e19", parentId: null, timestamp: "", message: { role: "assistant", content: "f19 " + MID, timestamp: Date.now(), usage: { input: 175_000, cacheRead: 0, cacheWrite: 0 } } });
-  entries.push({ type: "message", id: "e20", parentId: null, timestamp: "", message: { role: "toolResult", toolName: "compress", toolCallId: "c1", content: [{ type: "text", text: "▣ ACP | 42.3K → 18.9K tokens (~23.4K reclaimed, 3 blocks)" }], timestamp: Date.now() } });
+  entries.push({ type: "message", id: "e20", parentId: null, timestamp: "", message: { role: "toolResult", toolName: "compress", toolCallId: "c1", content: [{ type: "text", text: "▣ Fold | 42.3K → 18.9K tokens (~23.4K reclaimed, 3 blocks)" }], timestamp: Date.now() } });
   return entries;
 };
 

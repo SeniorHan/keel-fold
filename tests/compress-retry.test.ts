@@ -60,9 +60,9 @@ function toolResultMsg(id: string, toolCallId: string, text: string, isError: bo
 // call looks like in entries — whether thrown by pi-ai validation or by
 // handleCompress's own argument checks).
 const VALIDATION_ERR = 'Validation failed for tool "compress":\n  - content.0: must be object\n\nReceived arguments:\n{"content":"[{\\"topic\\":\\"x\\"}]"}';
-const SUCCESS_PANEL = "▣ ACP | 58.5K → 5.7K tokens (~52.8K reclaimed, 4 blocks)";
-const PARTIAL_PANEL = "▣ ACP | 58.5K → 30K tokens (~28.5K reclaimed, 3 blocks)\nErrors: range m00009..m00012: Summary too long";
-const NOOP_PANEL = "▣ ACP | 58.5K → 58.5K tokens (~0 reclaimed, 0 blocks)\nErrors: range m00001..m00002: Requested range(s) already compressed; nothing to compress";
+const SUCCESS_PANEL = "▣ Fold | 58.5K → 5.7K tokens (~52.8K reclaimed, 4 blocks)";
+const PARTIAL_PANEL = "▣ Fold | 58.5K → 30K tokens (~28.5K reclaimed, 3 blocks)\nErrors: range m00009..m00012: Summary too long";
+const NOOP_PANEL = "▣ Fold | 58.5K → 58.5K tokens (~0 reclaimed, 0 blocks)\nErrors: range m00001..m00002: Requested range(s) already compressed; nothing to compress";
 const NEUTRAL_TEXT = "No ranges provided.";
 
 function fakeCtx(getEntries: () => any[], stateFile: string) {
@@ -159,7 +159,7 @@ test("compress tool accepts JSON-encoded string content (non-strict-tool provide
     undefined, undefined, ctx,
   );
   const text = typeof out === "string" ? out : out.content?.[0]?.text ?? String(out);
-  assert.ok(/ACP \|/.test(text), `expected success panel: ${text}`);
+  assert.ok(/Fold \|/.test(text), `expected success panel: ${text}`);
   await rm(`${stateFile}.acp.json`, { force: true });
 });
 
@@ -259,7 +259,7 @@ test("neutral and no-op outcomes inject nothing; only the counter state changes"
 
 // ─── issue #6: no-op compress runs must not bypass the nudge cap ────────────
 //
-// handleCompress returns a "▣ ACP | …" panel even when blocksCreated === 0
+// handleCompress returns a "▣ Fold | …" panel even when blocksCreated === 0
 // (every range skipped: already compressed / below min). The old
 // isCompressSuccessText matched ANY panel prefix → no-op runs counted as
 // success → counter reset → the (dedup-exempt) emergency nudge re-fired on

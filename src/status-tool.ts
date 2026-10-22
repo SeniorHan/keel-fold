@@ -11,9 +11,9 @@ import { logThrow } from "./log.js";
 import { PROXY_STAND_DOWN_MESSAGE } from "./proxy-detect.js";
 
 const StatusParams = Type.Object({
-  scope: Type.Optional(Type.Union([Type.Literal("compressed"), Type.Literal("uncompressed")], { description: '"compressed" = drill into blocks; "uncompressed" = show visible messages/ranges. Default: overview.' })),
-  view: Type.Optional(Type.Union([Type.Literal("ranges"), Type.Literal("messages")], { description: 'For uncompressed scope: "ranges" (default) or "messages" (per-message listing).' })),
-  tool: Type.Optional(Type.String({ description: 'Filter by tool name (e.g. "bash", "read"). Only for uncompressed+messages.' })),
+  scope: Type.Optional(Type.Union([Type.Literal("compressed"), Type.Literal("uncompressed")], { description: '"compressed" = drill into blocks; "uncompressed" = show visible messages/ranges. Default (omitted): overview.' })),
+  view: Type.Optional(Type.Union([Type.Literal("ranges"), Type.Literal("messages")], { description: '"ranges" (default) or "messages" (per-message listing).' })),
+  tool: Type.Optional(Type.String({ description: 'Filter messages by producer tool name (e.g. "bash", "read").' })),
   sort: Type.Optional(Type.Union([Type.Literal("size"), Type.Literal("time"), Type.Literal("tool"), Type.Literal("age")], { description: "Sort order. Default: size." })),
   limit: Type.Optional(Type.Number({ description: "Max items to show (default: 30)." })),
 });
@@ -25,7 +25,7 @@ export function makeStatusTool(runtime: AcpRuntime, overrides?: ToolPromptOverri
     name: "status",
     label: "Status",
     description:
-      "Context status: overview, compressed blocks, or uncompressed ranges/messages. No args = overview + totals + compressible ranges. scope:'uncompressed' + view:'messages' for per-message listing. scope:'compressed' for block drilldown.",
+      "Context status report. No args = overview plus estimate-vs-provider-reported usage, the active nudge, and compressible/protected ranges. tool filtering applies only to scope:'uncompressed' + view:'messages'. sort support depends on scope/view: ranges accept size|time, messages size|time|tool, blocks size|time|age (most-survived tiers first); unsupported values silently fall back to size.",
     promptSnippet: 'status({}) or status({ scope: "uncompressed", view: "messages" })',
     promptGuidelines: [
       "Call with no args for a quick overview of context usage.",

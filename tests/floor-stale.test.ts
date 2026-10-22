@@ -9,8 +9,8 @@ import { usageAnchorPredatesCompression, compressionAnchorStaleness } from "../s
 // reflects the pre-compress (larger) request.
 
 const USAGE = { input: 175_000, cacheRead: 0, cacheWrite: 0 };
-const PANEL_OK = "▣ ACP | 42.3K → 18.9K tokens (~23.4K reclaimed, 3 blocks)";
-const PANEL_NOOP = "▣ ACP | 42.3K → 42.3K tokens (~0 reclaimed, 0 blocks)";
+const PANEL_OK = "▣ Fold | 42.3K → 18.9K tokens (~23.4K reclaimed, 3 blocks)";
+const PANEL_NOOP = "▣ Fold | 42.3K → 42.3K tokens (~0 reclaimed, 0 blocks)";
 
 const msg = (id: string, message: Record<string, unknown>) => ({
   type: "message",

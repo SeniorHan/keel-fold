@@ -19,7 +19,7 @@ export function makeSearchTool(runtime: AcpRuntime, overrides?: ToolPromptOverri
         name: "search",
         label: "Search",
         description:
-            "Search compressed blocks AND historical messages by keyword. Use to cheaply locate detail before unfolding. Returns ranked results with ref, size, preview, and the unfold command to retrieve full content.",
+            "Search compressed blocks AND historical messages by keyword — currently visible (uncompressed) messages are NOT searched. Use to cheaply locate detail before unfolding. Returns ranked results with ref, size, preview, and the unfold command to retrieve full content.",
         promptSnippet: 'search({ query: "auth token" })',
         promptGuidelines: [
             "Search locates detail folded into summaries or past messages — cheaper than unfolding blind.",

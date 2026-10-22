@@ -426,7 +426,7 @@ function facadeTool(tools: Map<string, CapturedTool>): ToolDefinition<typeof FAC
   return {
     name: "fold",
     label: "Fold",
-    description: 'Compress, restore, or inspect folded context with original operation args; if unsure call { op: "help", args: { op: "search" } }.',
+    description: 'Fold ops via op+args; args normalized (JSON decoded, fields merged, legacy names mapped), schema-validated; if unsure call { op: "help", args: { op: "search" } }.',
     promptSnippet: "",
     promptGuidelines: [],
     parameters: FACADE_PARAMETERS,

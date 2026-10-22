@@ -29,7 +29,7 @@ test("saved sidecar carries schemaVersion/producer and BcpBlockV1-shaped blocks"
     undefined, undefined, ctx,
   );
   const text = typeof out === "string" ? out : out.content?.[0]?.text ?? String(out);
-  assert.ok(text.includes("▣ ACP"), `compress failed: ${text}`);
+  assert.ok(text.includes("▣ Fold"), `compress failed: ${text}`);
 
   const sidecar = JSON.parse(await readFile(`${stateFile}.acp.json`, "utf8")) as BcpSidecarV1;
   assert.equal(sidecar.schemaVersion, SIDECAR_SCHEMA_VERSION);

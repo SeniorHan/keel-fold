@@ -50,7 +50,7 @@ const ZH2 = "中".repeat(150);  // 150 CJK tokens
 
 function beforeTokensFrom(out: string): number {
   // Panel renders ≥1000 compactly ("1.0K") — normalize to tokens.
-  const m = /▣ ACP \| ([\d.]+)(K?) →/.exec(out);
+  const m = /▣ Fold \| ([\d.]+)(K?) →/.exec(out);
   assert.ok(m, `no beforeTokens in output: ${out}`);
   const n = Number(m![1]!);
   return m![2] === "K" ? Math.round(n * 1000) : n;
@@ -112,8 +112,8 @@ test("compress afterTokens is measured on the same sent-view scale as beforeToke
   const first = await doCompress("tc1", { startId: "m00001", endId: "m00001", summary: "中".repeat(300) });
   const text = await doCompress("tc2", { startId: "m00003", endId: "m00003", summary: "文".repeat(300) });
 
-  assert.ok(first.includes("▣ ACP") && !first.includes("Errors:"), `tc1 not compressed — guard would be vacuous: ${first}`);
-  assert.ok(text.includes("▣ ACP") && !text.includes("Errors:"), `tc2 not compressed — guard would be vacuous: ${text}`);
+  assert.ok(first.includes("▣ Fold") && !first.includes("Errors:"), `tc1 not compressed — guard would be vacuous: ${first}`);
+  assert.ok(text.includes("▣ Fold") && !text.includes("Errors:"), `tc2 not compressed — guard would be vacuous: ${text}`);
   const stored = JSON.parse(await readFile(`${stateFile}.acp.json`, "utf8"));
   const blocks = stored.blocks as any[];
   assert.equal(blocks.length, 2, "both compressions must have created stored blocks");
@@ -121,7 +121,7 @@ test("compress afterTokens is measured on the same sent-view scale as beforeToke
     assert.ok(typeof b.summary === "string" && b.summary.length > 0, `block ${b.blockId} missing stored summary`);
   }
 
-  const m = /▣ ACP \| (\d+(?:\.\d+)?)(K?) → (\d+(?:\.\d+)?)(K?) tokens \(~(\d+(?:\.\d+)?)(K?) reclaimed/.exec(text);
+  const m = /▣ Fold \| (\d+(?:\.\d+)?)(K?) → (\d+(?:\.\d+)?)(K?) tokens \(~(\d+(?:\.\d+)?)(K?) reclaimed/.exec(text);
   assert.ok(m, `no ACP line in output: ${text}`);
   const toTok = (n: string, k?: string) => (k === "K" ? Number(n) * 1000 : Number(n));
   const before = toTok(m![1]!, m![2]);
@@ -166,7 +166,7 @@ test("compress normalizes double-escaped \\uXXXX summaries before storage", asyn
     undefined, undefined, ctx,
   );
   const text = typeof out === "string" ? out : out.content?.[0]?.text ?? String(out);
-  assert.ok(text.includes("▣ ACP"), `compress failed: ${text}`);
+  assert.ok(text.includes("▣ Fold"), `compress failed: ${text}`);
   assert.ok(!text.includes("Errors:"), `compress was rejected: ${text}`);
 
   const raw = JSON.parse(await readFile(`${stateFile}.acp.json`, "utf8"));
@@ -205,7 +205,7 @@ test("compress in an in-memory session (no session file) survives to the next co
   }
 
   const first = await doCompress("tc1", { startId: "m00001", endId: "m00001", summary: "first block: initial context round compressed for the in-memory session test" });
-  assert.ok(first.includes("▣ ACP"), `first compress failed: ${first}`);
+  assert.ok(first.includes("▣ Fold"), `first compress failed: ${first}`);
   assert.ok(!first.includes("Errors:"), `first compress rejected: ${first}`);
 
   await runContextRound(handlers, ctx); // next turn — the bug lost state here
@@ -214,7 +214,7 @@ test("compress in an in-memory session (no session file) survives to the next co
   assert.match(report, /b1 \(T1\)/, `next round must still show block b1: ${report}`);
 
   const second = await doCompress("tc2", { startId: "m00002", endId: "m00002", summary: "second block: follow-up context round compressed for the in-memory session test" });
-  assert.ok(second.includes("▣ ACP"), `second compress failed: ${second}`);
+  assert.ok(second.includes("▣ Fold"), `second compress failed: ${second}`);
   assert.ok(!second.includes("Errors:"), `second compress rejected: ${second}`);
 
   report = await statusText();
@@ -247,7 +247,7 @@ test("compress panel lists every new block id with its actual ref span (#376)", 
     undefined, undefined, ctx,
   );
   const text = typeof out === "string" ? out : out.content?.[0]?.text ?? String(out);
-  assert.ok(text.includes("▣ ACP"), `compress failed: ${text}`);
+  assert.ok(text.includes("▣ Fold"), `compress failed: ${text}`);
   assert.ok(!text.includes("Errors:"), `compress rejected: ${text}`);
 
   const m = /reclaimed, blocks: (.+)\)$/.exec(text.split("\n")[0]!);
@@ -347,23 +347,26 @@ test("blockSpanLabel: unresolvable ids fall back to the bare block id", () => {
 });
 
 test("panel parser accepts both legacy count form and #376 span form", () => {
-  assert.equal(isCompressSuccessText("▣ ACP | 58.5K → 5.7K tokens (~52.8K reclaimed, 4 blocks)"), true);
-  assert.equal(isCompressSuccessText("▣ ACP | 61.1K → 13.7K tokens (~47.4K reclaimed, blocks: b3=m00044–m00097*, b4=m00103–m00123*)"), true);
-  assert.equal(isCompressNoopText("▣ ACP | 58.5K → 58.5K tokens (~0 reclaimed, 0 blocks)"), true);
-  assert.equal(isCompressNoopText("▣ ACP | 61.1K → 13.7K tokens (~47.4K reclaimed, blocks: b3=m00044–m00097*, b4=m00103–m00123*)"), false);
+  assert.equal(isCompressSuccessText("▣ Fold | 58.5K → 5.7K tokens (~52.8K reclaimed, 4 blocks)"), true);
+  assert.equal(isCompressSuccessText("▣ Fold | 61.1K → 13.7K tokens (~47.4K reclaimed, blocks: b3=m00044–m00097*, b4=m00103–m00123*)"), true);
+  assert.equal(isCompressNoopText("▣ Fold | 58.5K → 58.5K tokens (~0 reclaimed, 0 blocks)"), true);
+  assert.equal(isCompressNoopText("▣ Fold | 61.1K → 13.7K tokens (~47.4K reclaimed, blocks: b3=m00044–m00097*, b4=m00103–m00123*)"), false);
   assert.equal(isCompressSuccessText("No ranges provided."), false);
   assert.equal(isCompressNoopText("No ranges provided."), false);
+  // Pre-rename panels recorded in old session logs must still parse.
+  assert.equal(isCompressSuccessText("▣ ACP | 58.5K → 5.7K tokens (~52.8K reclaimed, 4 blocks)"), true);
+  assert.equal(isCompressNoopText("▣ ACP | 58.5K → 58.5K tokens (~0 reclaimed, 0 blocks)"), true);
 });
 
 test("compressPanelBlocks counts tier labels correctly ((Tn) carries a paren)", () => {
-  assert.equal(compressPanelBlocks("▣ ACP | 58.5K → 5.7K tokens (~52.8K reclaimed, 4 blocks)"), 4);
-  assert.equal(compressPanelBlocks("▣ ACP | 58.5K → 5.7K tokens (~52.8K reclaimed, 1 block)"), 1);
-  assert.equal(compressPanelBlocks("▣ ACP | 58.5K → 58.5K tokens (~0 reclaimed, 0 blocks)"), 0);
-  assert.equal(compressPanelBlocks("▣ ACP | 61.1K → 13.7K tokens (~47.4K reclaimed, blocks: b3=m00044–m00097*)"), 1);
-  assert.equal(compressPanelBlocks("▣ ACP | 61.1K → 13.7K tokens (~47.4K reclaimed, blocks: b3=m00044–m00097*, b4=m00103–m00123*)"), 2);
-  assert.equal(compressPanelBlocks("▣ ACP | 61.1K → 13.7K tokens (~47.4K reclaimed, blocks: b3=m00044–m00097*, b4(T2)=m00103–m00123*)"), 2);
+  assert.equal(compressPanelBlocks("▣ Fold | 58.5K → 5.7K tokens (~52.8K reclaimed, 4 blocks)"), 4);
+  assert.equal(compressPanelBlocks("▣ Fold | 58.5K → 5.7K tokens (~52.8K reclaimed, 1 block)"), 1);
+  assert.equal(compressPanelBlocks("▣ Fold | 58.5K → 58.5K tokens (~0 reclaimed, 0 blocks)"), 0);
+  assert.equal(compressPanelBlocks("▣ Fold | 61.1K → 13.7K tokens (~47.4K reclaimed, blocks: b3=m00044–m00097*)"), 1);
+  assert.equal(compressPanelBlocks("▣ Fold | 61.1K → 13.7K tokens (~47.4K reclaimed, blocks: b3=m00044–m00097*, b4=m00103–m00123*)"), 2);
+  assert.equal(compressPanelBlocks("▣ Fold | 61.1K → 13.7K tokens (~47.4K reclaimed, blocks: b3=m00044–m00097*, b4(T2)=m00103–m00123*)"), 2);
   // regression: FIRST listed block is tier >= 2 — a capture-to-next-")" parse returns 1 here
-  assert.equal(compressPanelBlocks("▣ ACP | 61.1K → 13.7K tokens (~47.4K reclaimed, blocks: b3(T2)=m00044–m00097, b4(T2)=m00103–m00123*)"), 2);
+  assert.equal(compressPanelBlocks("▣ Fold | 61.1K → 13.7K tokens (~47.4K reclaimed, blocks: b3(T2)=m00044–m00097, b4(T2)=m00103–m00123*)"), 2);
   assert.equal(compressPanelBlocks("No ranges provided."), -1);
 });
 
@@ -389,7 +392,7 @@ test("compress success result lists remaining compressible ranges, then goes qui
   }
 
   const first = await doCompress("tc1", { startId: "m00001", endId: "m00001", summary: "first block: success-path ranges snapshot test with a longer summary to clear the minimum length gate" });
-  assert.ok(first.includes("▣ ACP"), `first compress failed: ${first}`);
+  assert.ok(first.includes("▣ Fold"), `first compress failed: ${first}`);
   assert.ok(!first.includes("Errors:"), `first compress rejected: ${first}`);
   assert.ok(
     first.includes("Current compressible ranges (use these refs exactly as listed)"),
@@ -399,7 +402,7 @@ test("compress success result lists remaining compressible ranges, then goes qui
 
   await runContextRound(handlers, ctx);
   const second = await doCompress("tc2", { startId: "m00002", endId: "m00003", summary: "second block: everything remaining folded in this range so the snapshot must go quiet" });
-  assert.ok(second.includes("▣ ACP"), `second compress failed: ${second}`);
+  assert.ok(second.includes("▣ Fold"), `second compress failed: ${second}`);
   assert.ok(!second.includes("Errors:"), `second compress rejected: ${second}`);
   assert.ok(
     !second.includes("Current compressible ranges"),
@@ -462,7 +465,7 @@ test("compress success panel appends one fingerprint line per created block matc
     undefined, undefined, ctx,
   );
   const text = typeof out === "string" ? out : out.content?.[0]?.text ?? String(out);
-  assert.ok(text.includes("▣ ACP"), `compress failed: ${text}`);
+  assert.ok(text.includes("▣ Fold"), `compress failed: ${text}`);
   assert.ok(!text.includes("Errors:"), `compress rejected: ${text}`);
 
   const lines = text.split("\n");
@@ -503,7 +506,7 @@ test("in-place refold of a non-tail block: span clause and fingerprint reference
     undefined, undefined, ctx,
   );
   const t1 = typeof out1 === "string" ? out1 : out1.content?.[0]?.text ?? String(out1);
-  assert.ok(t1.includes("▣ ACP") && !t1.includes("Errors:"), `setup compress failed: ${t1}`);
+  assert.ok(t1.includes("▣ Fold") && !t1.includes("Errors:"), `setup compress failed: ${t1}`);
 
   await unfoldTool.execute("tc2", { ref: "b1", inline: true }, undefined, undefined, ctx);
 
@@ -514,7 +517,7 @@ test("in-place refold of a non-tail block: span clause and fingerprint reference
     undefined, undefined, ctx,
   );
   const t2 = typeof out2 === "string" ? out2 : out2.content?.[0]?.text ?? String(out2);
-  assert.ok(t2.includes("▣ ACP"), `refold compress failed: ${t2}`);
+  assert.ok(t2.includes("▣ Fold"), `refold compress failed: ${t2}`);
   assert.ok(!t2.includes("Errors:"), `refold rejected: ${t2}`);
 
   // The legacy tail slice (slice(-blocksCreated) over [b1, b2] with a refold

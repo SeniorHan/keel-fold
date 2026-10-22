@@ -13,7 +13,7 @@ import { tmpPath } from "./tmp-path.js";
 // >2x disagreement warns once per episode.
 
 const MID = "lorem ".repeat(3000);
-const COMPRESS_PANEL = "▣ ACP | 42.3K → 18.9K tokens (~23.4K reclaimed, 3 blocks)";
+const COMPRESS_PANEL = "▣ Fold | 42.3K → 18.9K tokens (~23.4K reclaimed, 3 blocks)";
 
 let branchEntries: any[] = [];
 

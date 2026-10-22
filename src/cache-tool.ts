@@ -60,7 +60,8 @@ function foldEvents(state: CompressionState): FoldEvent[] {
 export async function cacheReportText(runtime: AcpRuntime, ctx: ExtensionContext, detail: "summary" | "full" = "summary"): Promise<string> {
   const { state, entries } = await runtime.stateFor(ctx);
   const report = buildCacheReport(cacheSamples(entries), foldEvents(state));
-  return formatCacheReport(report, ctx.sessionManager.getSessionId(), { detail });
+  // Kernel header names the engine; strip it at the wrap layer (kernel is zero-fork).
+  return formatCacheReport(report, ctx.sessionManager.getSessionId(), { detail }).replace("ACP CACHE REPORT", "CACHE REPORT");
 }
 
 export function makeCacheTool(runtime: AcpRuntime, overrides?: ToolPromptOverrides): ToolDefinition<typeof CacheParams> {
@@ -68,11 +69,10 @@ export function makeCacheTool(runtime: AcpRuntime, overrides?: ToolPromptOverrid
     name: "cache",
     label: "Cache Report",
     description:
-      "Prompt-cache reconciliation: grand ledger (total input/cached/output, session hit rate) with every request's miss split into new content / compression re-pay / TTL expiry, plus per-fold economics (one-time cost, breakeven turns vs measured cadence). Defaults to a compact summary (totals + verdicts + anomalies only); pass detail=\"full\" for every fold and line item. Read-only.",
+      "Prompt-cache reconciliation ledger: grand totals and session hit rate, every request's miss split into new content / compression re-pay / TTL expiry, and per-fold economics (one-time cost, breakeven turns vs measured cadence). Read-only.",
     promptSnippet: "cache({})",
     promptGuidelines: [
       "Call when asked about cache hits, cache invalidation, or what compression costs.",
-      "Read-only: reports numbers, never mutates context.",
     ],
     parameters: CacheParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<AgentToolResult<unknown>> {

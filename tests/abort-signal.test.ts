@@ -130,6 +130,6 @@ test("compress completes normally when given a live (unaborted) signal", async (
     ctx,
   );
   const text = typeof out === "string" ? out : out.content?.[0]?.text ?? String(out);
-  assert.match(text, /▣ ACP \|/);
+  assert.match(text, /▣ Fold \|/);
   await rm(`${stateFile}.acp.json`, { force: true });
 });

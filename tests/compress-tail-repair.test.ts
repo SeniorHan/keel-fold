@@ -154,7 +154,7 @@ test("compress tool succeeds on a missing-`}` string payload (end-to-end)", asyn
   // misleading parse error.
   const out = await compressTool.execute("tc1", { content: broken }, undefined, undefined, ctx);
   const text = typeof out === "string" ? out : out.content?.[0]?.text ?? String(out);
-  assert.match(text, /▣ ACP \|/, `expected a panel (payload accepted), got: ${text}`);
+  assert.match(text, /▣ Fold \|/, `expected a panel (payload accepted), got: ${text}`);
   assert.doesNotMatch(text, /must be an ARRAY|no-valid-ranges/, `misleading parse error regressed: ${text}`);
   await rm(`${stateFile}.acp.json`, { force: true });
 });

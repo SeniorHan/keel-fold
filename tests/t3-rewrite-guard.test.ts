@@ -139,15 +139,15 @@ test("lower-tier distillation still allowed: T2 block condenses to T3", async ()
   const sum = (t: string) => t + " " + ZH.repeat(80);
 
   const t1 = await run([{ startId: "m00001", endId: "m00002", summary: sum("s1") }]);
-  assert.match(t1, /▣ ACP \|/);
+  assert.match(t1, /▣ Fold \|/);
   assert.doesNotMatch(t1, /re-condenses/);
 
   const t2 = await run([{ startId: "b1", endId: "b1", summary: sum("t2") }]);
-  assert.match(t2, /▣ ACP \|/);
+  assert.match(t2, /▣ Fold \|/);
   assert.doesNotMatch(t2, /re-condenses/);
 
   const t3 = await run([{ startId: "b2", endId: "b2", summary: sum("t3") }]);
-  assert.match(t3, /▣ ACP \|/);
+  assert.match(t3, /▣ Fold \|/);
   assert.doesNotMatch(t3, /re-condenses/);
   const st = await stateOf(stateFile);
   assert.equal(st.blocks.length, 3);

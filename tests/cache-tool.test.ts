@@ -70,7 +70,7 @@ test("cache reports grand ledger with closed identity (no folds)", async () => {
   const res = await tool.execute("tc1", {}, undefined, undefined, fakeCtx(entries, tmpPath("pai-acp-cache-nofolds.session.json")));
   const text = (res.content[0] as any).text as string;
 
-  assert.match(text, /^ACP CACHE REPORT \(test-session\) — 2 requests/m, "header with request count");
+  assert.match(text, /^CACHE REPORT \(test-session\) — 2 requests/m, "header with request count");
   assert.match(text, /GRAND LEDGER/, "grand ledger section");
   assert.match(text, /total input    8800 tok/, "sum of billed prompt totals (writes count as fresh)");
   assert.match(text, /total cached   4300 tok  \(hit 48\.9% → INVESTIGATE\)/, "session hit rate + verdict");
@@ -151,11 +151,11 @@ test("/acp-cache command renders the same report via ui.notify fallback", async 
   assert.ok(handler, "acp-cache command registered");
   await handler.handler("", ctx);
   assert.equal(notifies.length, 1, "report delivered through notify fallback");
-  assert.match(notifies[0], /^ACP CACHE REPORT \(test-session\) — 1 requests/, "same report text");
+  assert.match(notifies[0], /^CACHE REPORT \(test-session\) — 1 requests/, "same report text");
   assert.match(notifies[0], /identity check\s+OK/, "identity closes in command output");
 
   await handler.handler("full", ctx);
   assert.equal(notifies.length, 2, "second invocation delivered");
   assert.ok(!/\[summary/.test(notifies[1]), "args 'full' opts out of the summary header");
-  assert.match(notifies[1], /^ACP CACHE REPORT \(test-session\) — 1 requests$/m, "full report header without summary marker");
+  assert.match(notifies[1], /^CACHE REPORT \(test-session\) — 1 requests$/m, "full report header without summary marker");
 });
