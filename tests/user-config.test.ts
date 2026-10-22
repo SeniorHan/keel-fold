@@ -204,7 +204,6 @@ test("applyUserConfig supports all user config keys", () => {
   const user = {
     debug: true,
     modelContextLimit: 50_000,
-    toolBashDefaultTimeout: 120,
     toolOutputMaxBytes: 100_000,
     outputHeadroomMaxPct: 0.1,
     rules: true,
@@ -212,10 +211,21 @@ test("applyUserConfig supports all user config keys", () => {
   const result = applyUserConfig(adapter, user);
   assert.equal(result.debug, true);
   assert.equal(result.modelContextLimit, 50_000);
-  assert.equal(result.toolBashDefaultTimeout, 120);
   assert.equal(result.toolOutputMaxBytes, 100_000);
   assert.equal(result.outputHeadroomMaxPct, 0.1);
   assert.equal(result.rules, true);
+});
+
+test("loadUserConfig drops the removed toolBashDefaultTimeout key silently", async () => {
+  const tmpDir = path.join(os.tmpdir(), `acp-test-drop-bash-timeout-${Date.now()}`);
+  await fs.mkdir(tmpDir, { recursive: true });
+  try {
+    await writeConfig(tmpDir, { toolBashDefaultTimeout: 120 } as never);
+    const config = await loadUserConfig(tmpDir);
+    assert.equal((config as Record<string, unknown>).toolBashDefaultTimeout, undefined);
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("loadUserConfig picks up protection keys from acp.json", async () => {

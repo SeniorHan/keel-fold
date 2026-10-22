@@ -145,13 +145,6 @@ export interface AdapterConfig {
      *  warnings) are written regardless; `debug` only adds verbose diagnostics.
      *  Default: false (or env ACP_DEBUG=1/true). */
     debug?: boolean;
-    /** Default timeout in seconds injected into the bash tool when the model
-     *  omits `timeout`. Pi has NO built-in default, so without this a command
-     *  that the model forgets to time out can hang for thousands of seconds.
-     *  Default: 60 (catches hangs quickly). On timeout the model is guided to
-     *  re-run with a larger `timeout`. Set to 0 to disable (restore Pi's
-     *  unbounded behavior). */
-    toolBashDefaultTimeout?: number;
     /** Hard byte cap applied to tool result text via the `tool_result` hook.
      *  Default: 50000 (~50KB) — aligned with Pi's own bash/read/grep cap so
      *  every tool path lands under one ceiling; the net still catches runaway
@@ -233,7 +226,6 @@ export interface AdapterConfig {
      *  reported once as ignored instead of silently dropped. */
     externalSystemPrompt?: boolean;
 }
-export declare const DEFAULT_TOOL_BASH_TIMEOUT = 60;
 export declare const DEFAULT_TOOL_OUTPUT_MAX_BYTES = 50000;
 /** Defaults for the generic tool-call repetition guard (issue #308). */
 export declare const REPETITION_GUARD_DEFAULTS: {

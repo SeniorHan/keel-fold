@@ -22,7 +22,6 @@ export interface UserAcpConfig {
   protectedLatestTools?: string[];
   neverPreserveRecentTools?: string[];
   preserveRecentTools?: string[];
-  toolBashDefaultTimeout?: number;
   toolOutputMaxBytes?: number;
   compress?: CompressConfig;
   outputHeadroomMaxPct?: number | string;
@@ -131,7 +130,7 @@ function diagnoseJsonFailure(raw: string, err: unknown): string {
 const KNOWN = new Set([
   "enabled", "debug", "modelContextLimit",
   "protectedTools", "protectedLatestTools", "neverPreserveRecentTools", "preserveRecentTools",
-  "toolBashDefaultTimeout", "toolOutputMaxBytes",
+  "toolOutputMaxBytes",
   "compress", "throttleRetry", "idleCompact",
   "outputHeadroomMaxPct",
   "repetitionGuard", "degenerationGuard",

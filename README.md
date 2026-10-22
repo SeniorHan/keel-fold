@@ -99,8 +99,7 @@ The panel lists these, most used first.
 | Context threshold | Share of the model's window above which the compress nudge no longer waits for Nudge interval and appears whenever Minimum benefit could be reclaimed. Lower keeps the context small; higher lets it run fuller. Not a hard cap. | 75% |
 | Nudge interval | Below Context threshold, the nudge waits until about this many tokens of old, compressible content have piled up. Bigger: fewer nudges, more folded at once. Smaller: frequent small compressions, a leaner context. | 50K |
 | Minimum benefit | No nudge, and no idle compact, when less than this could be reclaimed: rewriting a few thousand tokens is not worth breaking the cache. | larger of 5K and 1% of the window |
-| Tool output cap | A single tool result larger than this is cut, with a note telling the model where the full output is. Pi's own bash and read already stop at 50KB, so this mainly catches MCP and other extensions' tools, which can return hundreds of KB at once. `off` keeps everything. | 50K bytes |
-| bash default timeout | Seconds a bash command may run when the model gave no timeout. Pi has no default, so a stuck command would make the session wait forever; on timeout the model is told to re-run with a larger one. `off` means no limit. | 60 |
+| Tool output cap | A single tool result larger than this is cut: the full output is written to a temp file (bash reuses its own log), and the model sees a short notice with the file path first, then the head of the output. Pi's own bash and read already stop at 50KB, so this mainly catches MCP and other extensions' tools, which can return hundreds of KB at once. `off` keeps everything. | 50K bytes |
 | Debug log | Writes detailed events to `~/.pi/acp.log` for troubleshooting. Errors and the main events are always logged. | `off` |
 
 Context threshold, Nudge interval and Minimum benefit depend on the model's window and price, so the panel sets them for the **current model only**; switch models to set another one. `inherit` drops the model's own value; a provider-wide or global value from `acp.json`, or else the default, applies.
@@ -124,7 +123,7 @@ The panel saves to `~/.pi/acp.json` and keeps every other key there. Edit the fi
 - **Per provider:** the three compression timing settings can also be set for a whole provider or globally, not only for one model ([how](CONFIGURATION.md#compressproviders--per-provider--per-model-overrides)).
 - **Options not in the panel**, e.g. `compress.emergencyThresholdPercent`. The full list is in [CONFIGURATION.md](CONFIGURATION.md), with these exceptions: `autoUpdate` and `ACP_AUTO_UPDATE` are gone (update with `pi install`); the removed delegation keys (`delegate.*`, `displayUsage`, `delegatePrompt`) are ignored; `promptSections.*` is ignored with a one-time warning, because this fork injects its own prompt.
 
-Panel settings map to these keys: Summary model `compressionModelId`, Idle compact `idleCompact.enabled`, Idle minutes `idleCompact.idleMinutes`, Tool output cap `toolOutputMaxBytes`, bash default timeout `toolBashDefaultTimeout`, Debug log `debug`.
+Panel settings map to these keys: Summary model `compressionModelId`, Idle compact `idleCompact.enabled`, Idle minutes `idleCompact.idleMinutes`, Tool output cap `toolOutputMaxBytes`, Debug log `debug`.
 
 `/acp compact <provider/model>` sets the summary model from the command line (`/acp compact` shows it, `reset` returns to the main model).
 

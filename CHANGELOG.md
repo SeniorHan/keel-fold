@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.0 (2026-10-22)
+
+- Removed the bash default-timeout guard (`toolBashDefaultTimeout`). ACP no longer injects a `timeout` into `bash` calls the model left unbounded: long commands belong to the bash tool's own promotion/timeout design (e.g. the pi-bg-bash extension), not to a hidden side injection. The key is dropped from the config, the panel and the docs; a stale key in an existing `acp.json` is ignored silently.
+- Reworked oversized tool-output handling (`toolOutputMaxBytes`): no LLM in the loop. Above the cap the full output is written to a temp file — `/tmp/pi-tool-output-<id>.log`, mode `0600`, exclusive create, mirroring Pi's own output-file scheme — and the tool result becomes notice-first: `[ACP guardrail: output too large (N) — output capped at M. Full output saved to: <path> — read it to see everything.]` followed by the head of the output. Bash results keep reusing their own `details.fullOutputPath` log instead of a second file; if the spill write fails the guard still caps, without a path.
+
 ## v0.2.2 (2026-10-20)
 
 - Lean facade repairs malformed model arguments before validation (`prepareArguments`, no extra tokens): `acp_context` accepts JSON-string `args`, top-level op fields and an omitted `op` (inferred only from unambiguous fields); `compress` accepts a JSON-string `content`, JSON-string entries inside `content`, and a range array placed in `summary` without `content`. Explicit and invalid ops are left for validation.

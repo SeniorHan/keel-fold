@@ -1,7 +1,7 @@
+import { readFile, readdir, rm, stat } from "node:fs/promises";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  resolveBashTimeout,
   capToolOutput,
   detectBashTimeout,
   appendTimeoutNotice,
@@ -10,30 +10,11 @@ import {
   repetitionFingerprint,
   RepetitionTracker,
 } from "../src/tool-guardrails.js";
-import type { ExtensionAPI, ToolCallEvent, ToolResultEvent } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolCallEvent, ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import type { AcpRuntime } from "../src/runtime.js";
 
 type Content = ToolResultEvent["content"];
 const text = (t: string): Content => [{ type: "text", text: t }];
-
-test("resolveBashTimeout returns undefined when the model already set a timeout", () => {
-  assert.equal(resolveBashTimeout({ timeout: 30 }, 60), undefined);
-});
-
-test("resolveBashTimeout injects the default when the model omitted timeout", () => {
-  assert.equal(resolveBashTimeout({}, 60), 60);
-  assert.equal(resolveBashTimeout({ timeout: undefined }, 60), 60);
-});
-
-test("resolveBashTimeout returns undefined when the default is disabled (0 / negative / NaN)", () => {
-  assert.equal(resolveBashTimeout({}, 0), undefined);
-  assert.equal(resolveBashTimeout({}, -5), undefined);
-  assert.equal(resolveBashTimeout({}, Number.NaN), undefined);
-});
-
-test("resolveBashTimeout falls back to the 60s built-in default when default is undefined", () => {
-  assert.equal(resolveBashTimeout({}, undefined), 60);
-});
 
 test("capToolOutput leaves small output untouched (returns undefined)", () => {
   assert.equal(capToolOutput(text("hello"), 100), undefined);
@@ -50,15 +31,15 @@ test("capToolOutput truncates oversized text to under the byte cap and adds a no
   assert.ok(out, "should return truncated content");
   const t = (out![0] as { text: string }).text;
   assert.ok(Buffer.byteLength(t, "utf8") <= 500 + 200, "truncated payload must be near the cap (notice adds a little)");
-  assert.match(t, /ACP guardrail/);
-  assert.match(t, /dropped/);
+  assert.match(t, /^\[ACP guardrail/, "the notice must come first");
+  assert.match(t, /output capped at/);
 });
 
 test("capToolOutput keeps a complete last line (no mid-line cut)", () => {
   const big = "0123456789\n".repeat(2000);
   const out = capToolOutput(text(big), 100);
   const t = (out![0] as { text: string }).text;
-  const body = t.split("\n\n[ACP guardrail")[0];
+  const body = t.slice(t.indexOf("]\n\n") + 3);
   for (const line of body.split("\n")) {
     assert.ok(line.length === 0 || line.length === 10, "no partial line: " + JSON.stringify(line));
   }
@@ -84,7 +65,7 @@ test("capToolOutput is UTF-8 safe (never splits a multibyte sequence)", () => {
   const big = "中文测试\n".repeat(3000);
   const out = capToolOutput(text(big), 200);
   const t = (out![0] as { text: string }).text;
-  const body = t.split("\n\n[ACP guardrail")[0];
+  const body = t.slice(t.indexOf("]\n\n") + 3);
   const buf = Buffer.from(body, "utf8");
   let i = 0;
   while (i < buf.length) {
@@ -128,18 +109,18 @@ test("appendTimeoutNotice adds a new text part when content has no text part", (
   assert.equal(out[1].type, "text");
 });
 
-// --- wiring: the default-application contract (issue #210) ---
+// --- wiring: the oversized-output pipeline (file spill, then truncation) ---
 
 function wireFor(adapter: Record<string, unknown>) {
-  const handlers: Record<string, (e: ToolResultEvent) => unknown> = {};
+  const handlers: Record<string, (e: unknown, ctx: ExtensionContext) => unknown> = {};
   const pi = {
-    on: (name: string, fn: (e: never) => unknown) => {
-      handlers[name] = fn as (e: ToolResultEvent) => unknown;
+    on: (name: string, fn: (e: unknown, ctx: ExtensionContext) => unknown) => {
+      handlers[name] = fn;
     },
   } as unknown as ExtensionAPI;
-  const runtime = { adapter } as AcpRuntime;
-  wireToolGuardrails(pi, runtime);
-  return (event: ToolResultEvent) => handlers["tool_result"]!(event);
+  wireToolGuardrails(pi, { adapter } as unknown as AcpRuntime);
+  const ctx = { signal: undefined } as unknown as ExtensionContext;
+  return async (event: ToolResultEvent) => handlers["tool_result"]!(event, ctx);
 }
 
 const readResult = (t: string) =>
@@ -152,27 +133,76 @@ function textOf(part: unknown): string {
   throw new Error("expected a text content part");
 }
 
-test("wireToolGuardrails applies the documented 50KB default when toolOutputMaxBytes is unset", () => {
+function spillPathOf(notice: string): string | null {
+  const marker = "Full output saved to: ";
+  const i = notice.indexOf(marker);
+  if (i < 0) return null;
+  const rest = notice.slice(i + marker.length);
+  const end = rest.indexOf(" ");
+  return rest.slice(0, end);
+}
+
+async function cleanupSpill(notice: string): Promise<void> {
+  const p = spillPathOf(notice);
+  if (p && p.startsWith("/tmp/pi-tool-output-")) await rm(p, { force: true });
+}
+
+test("wireToolGuardrails applies the documented 50KB default when toolOutputMaxBytes is unset", async () => {
   const onResult = wireFor({});
-  const ret = onResult(readResult("x".repeat(300 * 1024)));
+  const ret = await onResult(readResult("x".repeat(300 * 1024)));
   assert.ok(ret && typeof ret === "object" && "content" in ret && Array.isArray(ret.content),
     "oversized output must be capped even with no explicit config");
   const t = textOf(ret.content[0]);
-  assert.match(t, /\[ACP guardrail/);
+  assert.ok(t.startsWith("[ACP guardrail"), "the notice must come first");
   assert.ok(Buffer.byteLength(t, "utf8") < 60 * 1024, "payload must be truncated near the 50KB default");
+  await cleanupSpill(t);
 });
 
-test("wireToolGuardrails keeps an explicit toolOutputMaxBytes: 0 as disable", () => {
+test("wireToolGuardrails keeps an explicit toolOutputMaxBytes: 0 as disable", async () => {
   const onResult = wireFor({ toolOutputMaxBytes: 0 });
-  assert.equal(onResult(readResult("x".repeat(300 * 1024))), undefined);
+  assert.equal(await onResult(readResult("x".repeat(300 * 1024))), undefined);
 });
 
-test("wireToolGuardrails honors an explicit smaller cap", () => {
+test("wireToolGuardrails honors an explicit smaller cap", async () => {
   const onResult = wireFor({ toolOutputMaxBytes: 1000 });
-  const ret = onResult(readResult("x".repeat(10_000)));
+  const ret = await onResult(readResult("x".repeat(10_000)));
   assert.ok(ret && typeof ret === "object" && "content" in ret && Array.isArray(ret.content));
   const t = textOf(ret.content[0]);
   assert.ok(Buffer.byteLength(t, "utf8") < 2000, "payload must be truncated to the explicit cap");
+  await cleanupSpill(t);
+});
+
+test("oversized non-bash output is spilled to a 0600 temp file, notice first", async () => {
+  const onResult = wireFor({});
+  const big = "X".repeat(300 * 1024);
+  const ret = await onResult(readResult(big));
+  assert.ok(ret && typeof ret === "object" && "content" in ret && Array.isArray(ret.content));
+  const t = textOf(ret.content[0]);
+  assert.ok(t.startsWith("[ACP guardrail: output too large"), "the notice must come before the output head");
+  const file = spillPathOf(t);
+  assert.ok(file, "notice must point at the spill file: " + t.slice(0, 200));
+  assert.ok(file.startsWith("/tmp/pi-tool-output-") && file.endsWith(".log"), "unexpected spill path: " + file);
+  assert.equal(await readFile(file, "utf8"), big, "spill file must hold the full original output");
+  const mode = (await stat(file)).mode & 0o777;
+  assert.equal(mode, 0o600, "spill file must be 0600");
+  await rm(file, { force: true });
+});
+
+test("bash results with details.fullOutputPath reuse the existing file", async () => {
+  const onResult = wireFor({});
+  const before = new Set(await readdir("/tmp"));
+  const ret = await onResult({
+    toolName: "bash",
+    isError: false,
+    content: text("y".repeat(300 * 1024)),
+    details: { fullOutputPath: "/tmp/acp-full.log" },
+  } as unknown as ToolResultEvent);
+  assert.ok(ret && typeof ret === "object" && "content" in ret && Array.isArray(ret.content));
+  const t = textOf(ret.content[0]);
+  assert.ok(t.includes("Full output saved to: /tmp/acp-full.log"));
+  const after = new Set(await readdir("/tmp"));
+  const created = [...after].filter((n) => !before.has(n) && n.startsWith("pi-tool-output"));
+  assert.equal(created.length, 0, "no second spill file for bash results");
 });
 
 // --- generic tool-call repetition guard (issue #308) ---
@@ -256,12 +286,12 @@ function wireRepetition(adapter: Record<string, unknown>) {
       handlers[name] = fn as (...a: unknown[]) => unknown;
     },
   } as unknown as ExtensionAPI;
-  const runtime = { adapter } as AcpRuntime;
+  const runtime = { adapter, getCompressionModelRef: () => undefined } as unknown as AcpRuntime;
   const ctx = makeRepCtx();
   wireToolGuardrails(pi, runtime);
   return {
     call: (event: ToolCallEvent) => handlers["tool_call"]!(event, ctx),
-    result: (event: ToolResultEvent) => handlers["tool_result"]!(event),
+    result: async (event: ToolResultEvent) => handlers["tool_result"]!(event, ctx),
     input: (source: string) => handlers["input"]!({ source }, ctx),
     shutdown: () => handlers["session_shutdown"]!({}, ctx),
     ctx,
@@ -277,12 +307,12 @@ const statusResult = (id: string): ToolResultEvent =>
 const hasContent = (ret: unknown): ret is { content: Content } =>
   !!ret && typeof ret === "object" && "content" in ret;
 
-test("repetition guard queues a warning at warn=3 (default) without blocking", () => {
+test("repetition guard queues a warning at warn=3 (default) without blocking", async () => {
   const w = wireRepetition({});
   assert.equal(w.call(statusCall("c1")), undefined);
   assert.equal(w.call(statusCall("c2")), undefined);
   assert.equal(w.call(statusCall("c3")), undefined, "warn threshold must not block");
-  const res = w.result(statusResult("c3"));
+  const res = await w.result(statusResult("c3"));
   assert.ok(hasContent(res), "warned result must be modified");
   const t = textOf(res.content[0]);
   assert.match(t, /CONSECUTIVE identical/);
@@ -302,7 +332,7 @@ test("repetition guard blocks and aborts at abort=5 (default)", () => {
   assert.equal(sixth?.block, true, "still blocked after abort");
 });
 
-test("repetition guard resets the run when arguments change", () => {
+test("repetition guard resets the run when arguments change", async () => {
   const w = wireRepetition({});
   const other: ToolCallEvent = {
     type: "tool_call",
@@ -315,23 +345,23 @@ test("repetition guard resets the run when arguments change", () => {
   w.call(other);
   w.call(statusCall("r3"));
   w.call(statusCall("r4"));
-  assert.equal(w.result(statusResult("r4")), undefined, "only 2 consecutive identical -> no warning yet");
+  assert.equal(await w.result(statusResult("r4")), undefined, "only 2 consecutive identical -> no warning yet");
   w.call(statusCall("r5"));
-  const res5 = w.result(statusResult("r5"));
+  const res5 = await w.result(statusResult("r5"));
   assert.ok(hasContent(res5), "3rd consecutive identical -> warning");
 });
 
-test("repetition guard run resets on real user input but not extension-sent input", () => {
+test("repetition guard run resets on real user input but not extension-sent input", async () => {
   const w = wireRepetition({});
   w.call(statusCall("u1"));
   w.call(statusCall("u2"));
   w.input("interactive");
   w.call(statusCall("u3"));
   w.call(statusCall("u4"));
-  assert.equal(w.result(statusResult("u4")), undefined, "after user-input reset, only 2 consecutive -> no warning");
+  assert.equal(await w.result(statusResult("u4")), undefined, "after user-input reset, only 2 consecutive -> no warning");
   w.input("extension");
   w.call(statusCall("u5"));
-  const res5 = w.result(statusResult("u5"));
+  const res5 = await w.result(statusResult("u5"));
   assert.ok(hasContent(res5), "extension-sent input must not reset the run");
 });
 
@@ -343,11 +373,11 @@ test("repetition guard is fully inert when repetitionGuard: false", () => {
   assert.equal(w.ctx.abortCalls, 0, "never aborts when disabled");
 });
 
-test("repetition guard honors custom warn/abort thresholds", () => {
+test("repetition guard honors custom warn/abort thresholds", async () => {
   const w = wireRepetition({ repetitionGuard: { warn: 2, abort: 3 } });
   assert.equal(w.call(statusCall("t1")), undefined);
   assert.equal(w.call(statusCall("t2")), undefined);
-  const res2 = w.result(statusResult("t2"));
+  const res2 = await w.result(statusResult("t2"));
   assert.ok(hasContent(res2), "warn fires at custom warn=2");
   const third = w.call(statusCall("t3")) as { block?: boolean };
   assert.equal(third?.block, true, "abort fires at custom abort=3");

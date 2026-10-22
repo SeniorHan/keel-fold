@@ -2,7 +2,7 @@ import {
   SIDECAR_SCHEMA_VERSION,
   __export,
   sidecarProducer
-} from "./chunk-C3GD6WZH.js";
+} from "./chunk-X77RHSF6.js";
 
 // src/config-dir.ts
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
@@ -177,7 +177,6 @@ var KNOWN = /* @__PURE__ */ new Set([
   "protectedLatestTools",
   "neverPreserveRecentTools",
   "preserveRecentTools",
-  "toolBashDefaultTimeout",
   "toolOutputMaxBytes",
   "compress",
   "throttleRetry",
@@ -12122,7 +12121,6 @@ function makePreview(text, query, len) {
 }
 
 // src/config.ts
-var DEFAULT_TOOL_BASH_TIMEOUT = 60;
 var DEFAULT_TOOL_OUTPUT_MAX_BYTES = 5e4;
 var REPETITION_GUARD_DEFAULTS = { warn: 3, abort: 5 };
 function positiveInt(v2, fallback) {
@@ -19773,7 +19771,7 @@ function resolveActivePack(adapter, cwd, provider, modelId, resolver) {
 }
 var HOST_VERSION = (() => {
   try {
-    return "0.2.2";
+    return "0.3.0";
   } catch {
     return "dev";
   }
@@ -20690,7 +20688,7 @@ async function statusReport(runtime, ctx) {
   const sentTokens = estimateTokens(coreMessages, coveredIds, imageTokens) + systemPromptTokens;
   const viewSentTokens = adjustedTokenCount(runtime.core, coreMessages, state, config, sentTokens, imageTokens, systemPromptTokens);
   const turn = runtime.core.processTurn({ messages: coreMessages, state, config, tokenCount: anchorStale ? viewSentTokens : Math.max(viewSentTokens, realUsage?.tokens ?? 0) });
-  const versionStr = "0.2.2" ? `billion-context-pi@${"0.2.2"} \xB7 pack: ${resolveSurfaceMeta(runtime.adapter, ctx?.cwd ?? process.cwd(), ctx?.model?.provider, ctx?.model?.id).pack}` : void 0;
+  const versionStr = "0.3.0" ? `billion-context-pi@${"0.3.0"} \xB7 pack: ${resolveSurfaceMeta(runtime.adapter, ctx?.cwd ?? process.cwd(), ctx?.model?.provider, ctx?.model?.id).pack}` : void 0;
   const text = buildStatusPanel({
     version: versionStr,
     tokenCount: sessionTokens,
@@ -21236,16 +21234,38 @@ function applyStripImages(body, api, settings2) {
 }
 
 // src/tool-guardrails.ts
-import { createHash as createHash4 } from "crypto";
+import { createHash as createHash4, randomBytes } from "crypto";
+import { writeFile as writeFile2 } from "fs/promises";
+import { tmpdir as tmpdir2 } from "os";
+import { join as join11 } from "path";
 import {
-  isBashToolResult,
-  isToolCallEventType
+  isBashToolResult
 } from "@earendil-works/pi-coding-agent";
-function resolveBashTimeout(input, defaultTimeout) {
-  if (input.timeout !== void 0) return void 0;
-  const d2 = defaultTimeout ?? DEFAULT_TOOL_BASH_TIMEOUT;
-  if (!Number.isFinite(d2) || d2 <= 0) return void 0;
-  return d2;
+function toolOutputFilePath() {
+  return join11(tmpdir2(), `pi-tool-output-${randomBytes(8).toString("hex")}.log`);
+}
+async function spillOversized(event, maxBytes, existingFullPath) {
+  const texts = [];
+  for (const c of event.content) {
+    if (c.type === "text") texts.push(c.text);
+  }
+  if (texts.length === 0) return void 0;
+  const combined = texts.join("\n");
+  const total = Buffer.byteLength(combined, "utf8");
+  if (total <= maxBytes) return void 0;
+  let path10 = existingFullPath;
+  if (!path10) {
+    path10 = toolOutputFilePath();
+    try {
+      await writeFile2(path10, combined, { mode: 384, flag: "wx" });
+    } catch (e) {
+      logWarn("guardrail", { event: "output-spill-failed", error: e instanceof Error ? e.message : String(e) });
+      path10 = void 0;
+    }
+  }
+  const capped = capToolOutput(event.content, maxBytes, path10);
+  if (capped) logWarn("guardrail", { event: "output-cap", max: maxBytes, hadPath: !!path10 });
+  return capped;
 }
 function capToolOutput(content, maxBytes, fullPath) {
   const max = maxBytes ?? DEFAULT_TOOL_OUTPUT_MAX_BYTES;
@@ -21261,8 +21281,7 @@ function capToolOutput(content, maxBytes, fullPath) {
   const total = Buffer.byteLength(combined, "utf8");
   if (total <= max) return void 0;
   const head = keepHead(combined, max);
-  const dropped = total - Buffer.byteLength(head, "utf8");
-  kept.push({ type: "text", text: head + buildCapNotice(dropped, max, fullPath) });
+  kept.push({ type: "text", text: buildCapNotice(total, max, fullPath) + head });
   return kept;
 }
 var TIMEOUT_RE = /Command timed out after (\d+) seconds/;
@@ -21303,11 +21322,11 @@ function keepHead(str, maxBytes) {
   if (nl >= Math.floor(maxBytes / 2)) head = head.slice(0, nl);
   return head;
 }
-function buildCapNotice(dropped, maxBytes, fullPath) {
-  const where = fullPath ? `Full output saved to: ${fullPath} \u2014 read it to see everything.` : "To see more, narrow the query or redirect output to a file and read the relevant slice.";
-  return `
+function buildCapNotice(originalBytes, maxBytes, fullPath) {
+  const where = fullPath ? `Full output saved to: ${fullPath} \u2014 read it to see everything.` : "To see the full output, rerun the tool with a narrower query.";
+  return `[ACP guardrail: output too large (${formatBytes(originalBytes)}) \u2014 output capped at ${formatBytes(maxBytes)}. ${where}]
 
-[ACP guardrail: output capped at ${formatBytes(maxBytes)} (~${formatBytes(dropped)} dropped). ${where}]`;
+`;
 }
 function buildTimeoutNotice(secs) {
   const suggested = Math.min(Math.max(Math.ceil(secs * 2), 120), 3600);
@@ -21376,13 +21395,6 @@ function wireToolGuardrails(pi, runtime) {
   const trackers = /* @__PURE__ */ new Map();
   const pendingWarns = /* @__PURE__ */ new Map();
   pi.on("tool_call", (event, ctx) => {
-    if (isToolCallEventType("bash", event)) {
-      const t = resolveBashTimeout(event.input, runtime.adapter.toolBashDefaultTimeout);
-      if (t !== void 0) {
-        event.input.timeout = t;
-        debug.event("guardrail-bash-timeout", { applied: t });
-      }
-    }
     const cfg = resolveRepetitionGuard(runtime.adapter);
     if (!cfg.enabled) return;
     const sid = ctx.sessionManager.getSessionId();
@@ -21408,17 +21420,15 @@ function wireToolGuardrails(pi, runtime) {
       pendingWarns.set(event.toolCallId, decision.count);
     }
   });
-  pi.on("tool_result", (event) => {
+  pi.on("tool_result", async (event, ctx) => {
     const isBash = isBashToolResult(event);
     const fullPath = isBash ? event.details?.fullOutputPath : void 0;
     const timeoutSecs = isBash && event.isError ? detectBashTimeout(event.content) : void 0;
     let modified;
     const max = runtime.adapter.toolOutputMaxBytes ?? DEFAULT_TOOL_OUTPUT_MAX_BYTES;
-    const next = capToolOutput(event.content, max, fullPath);
+    const next = await spillOversized(event, max, fullPath);
     if (next) {
       modified = next;
-      debug.event("guardrail-output-cap", { max, hadPath: !!fullPath });
-      logWarn("guardrail", { event: "output-cap", max, hadPath: !!fullPath });
     }
     if (timeoutSecs !== void 0) {
       modified = appendTimeoutNotice(modified ?? event.content, timeoutSecs);
@@ -21720,19 +21730,6 @@ var PANEL_ITEMS = [
     }
   },
   {
-    id: "toolBashDefaultTimeout",
-    label: "bash default timeout",
-    description: "Keeps a stuck command from making the session wait forever: when the model gives no timeout, bash may run this many seconds (default 60), then the model is told to re-run with a larger one. Pi itself has no default timeout. off = no limit.",
-    values: (current) => withCurrent(["30", "60", "120", "300", OFF], current),
-    read(a) {
-      const v2 = a.toolBashDefaultTimeout ?? 60;
-      return v2 === 0 ? OFF : String(v2);
-    },
-    write(raw, value) {
-      raw.toolBashDefaultTimeout = value === OFF ? 0 : Number(value);
-    }
-  },
-  {
     id: "debug",
     label: "Debug log",
     description: "Write detailed events to ~/.pi/acp.log for troubleshooting. Errors and main events are always logged.",
@@ -21986,7 +21983,7 @@ function wireSessionLifecycle(pi, runtime, standDownIfProxied) {
     dropLiveOnlyTailCache(ctx.sessionManager.getSessionId());
     const sid = ctx.sessionManager.getSessionId();
     const modelInfo = ctx.model;
-    logInfo("session", { event: "start", sid, cwd: ctx.cwd, debug: runtime.adapter.debug ?? null, version: true ? "0.2.2" : null, model: modelInfo?.id ?? null, modelApi: modelInfo?.api ?? null, contextWindow: modelInfo?.contextWindow ?? null });
+    logInfo("session", { event: "start", sid, cwd: ctx.cwd, debug: runtime.adapter.debug ?? null, version: true ? "0.3.0" : null, model: modelInfo?.id ?? null, modelApi: modelInfo?.api ?? null, contextWindow: modelInfo?.contextWindow ?? null });
     try {
       await runtime.reloadConfig(ctx.cwd);
     } catch (e) {

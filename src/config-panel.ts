@@ -166,19 +166,6 @@ export const PANEL_ITEMS: PanelItem[] = [
     },
   },
   {
-    id: "toolBashDefaultTimeout",
-    label: "bash default timeout",
-    description: "Keeps a stuck command from making the session wait forever: when the model gives no timeout, bash may run this many seconds (default 60), then the model is told to re-run with a larger one. Pi itself has no default timeout. off = no limit.",
-    values: (current) => withCurrent(["30", "60", "120", "300", OFF], current),
-    read(a) {
-      const v = a.toolBashDefaultTimeout ?? 60;
-      return v === 0 ? OFF : String(v);
-    },
-    write(raw, value) {
-      raw.toolBashDefaultTimeout = value === OFF ? 0 : Number(value);
-    },
-  },
-  {
     id: "debug",
     label: "Debug log",
     description: "Write detailed events to ~/.pi/acp.log for troubleshooting. Errors and main events are always logged.",
