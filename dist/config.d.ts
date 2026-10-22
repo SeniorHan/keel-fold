@@ -192,7 +192,7 @@ export interface AdapterConfig {
      *  replacing the kernel's tuned compression rules may reduce summary quality
      *  (lost paths/signatures/decisions → worse retrieval). */
     acknowledgePromptsRisk?: boolean;
-    /** Override structural sections of the ACP system prompt (ACP TAGS, TOOLS,
+    /** Override structural sections of the Fold system prompt (FOLD TAGS, TOOLS,
      *  WHEN TO COMPRESS, ...). Tri-state per section: string = replace, null =
      *  remove, omitted = default. Not risk-gated — these are documentation
      *  sections, not compression rules. Set via acp.json. */

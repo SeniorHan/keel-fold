@@ -7,7 +7,9 @@ import { extractText } from "./messages.js";
 // no NON_RETRYABLE quota/billing pattern. Pinned by tests/throttle-retry.test.ts.
 export const THROTTLE_RETRY_ERROR_MESSAGE = "429 rate limit: Too many tokens, please wait before trying again.";
 
-export const THROTTLE_KICK_SENTINEL = "[ACP:provider-throttle]";
+export const THROTTLE_KICK_SENTINEL = "[fold:provider-throttle]";
+/** Legacy sentinel (pre-rename) still accepted — old sessions persist kick messages with it. */
+export const THROTTLE_KICK_SENTINEL_LEGACY = "[ACP:provider-throttle]";
 export const THROTTLE_KICK_TEXT = `${THROTTLE_KICK_SENTINEL} The previous assistant response was interrupted by a provider rate limit (transient, not a real failure). Resume the task exactly where it left off — do not re-run completed steps and do not discuss the interruption unless asked.`;
 
 const BEDROCK_THROTTLE_PHRASE = /too many tokens, please wait before trying again/i;
@@ -33,7 +35,8 @@ export function isThrottleError(msg: ThrottleErrorProbe): boolean {
 
 export function isKickMessage(msg: { role: string; content: unknown }): boolean {
   if (msg.role !== "user") return false;
-  return extractText(msg.content).trimStart().startsWith(THROTTLE_KICK_SENTINEL);
+  const text = extractText(msg.content).trimStart();
+  return text.startsWith(THROTTLE_KICK_SENTINEL) || text.startsWith(THROTTLE_KICK_SENTINEL_LEGACY);
 }
 
 export interface ThrottleRetryConfig {

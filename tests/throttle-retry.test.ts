@@ -4,6 +4,7 @@ import {
   THROTTLE_RETRY_ERROR_MESSAGE,
   THROTTLE_KICK_TEXT,
   THROTTLE_KICK_SENTINEL,
+  THROTTLE_KICK_SENTINEL_LEGACY,
   INITIAL_THROTTLE_STATE,
   ThrottleEpisode,
   isThrottleError,
@@ -73,10 +74,11 @@ test("isThrottleError: bare error_finish without the Bedrock phrase is rejected"
   assert.equal(isThrottleError(assistant(undefined, [])), false);
 });
 
-test("isKickMessage: recognizes the ACP kick and rejects everything else", () => {
+test("isKickMessage: recognizes the kick (new + legacy sentinel) and rejects everything else", () => {
   assert.equal(isKickMessage({ role: "user", content: [{ type: "text", text: THROTTLE_KICK_TEXT }] }), true);
   assert.equal(isKickMessage({ role: "user", content: THROTTLE_KICK_TEXT }), true);
   assert.equal(isKickMessage({ role: "user", content: `  ${THROTTLE_KICK_SENTINEL} resumed` }), true);
+  assert.equal(isKickMessage({ role: "user", content: `  ${THROTTLE_KICK_SENTINEL_LEGACY} resumed` }), true, "legacy [ACP:provider-throttle] sentinel from pre-rename sessions still accepted");
   assert.equal(isKickMessage({ role: "user", content: [{ type: "text", text: "please continue" }] }), false);
   assert.equal(isKickMessage({ role: "assistant", content: THROTTLE_KICK_TEXT }), false);
 });

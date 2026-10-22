@@ -17485,7 +17485,7 @@ import { readFileSync as readFileSync2 } from "fs";
 
 // src/system-prompt.ts
 var SECTIONS = [
-  ["acpTags", `ACP TAGS
+  ["acpTags", `FOLD TAGS
 
 Each user and tool message has a <fold tokens="2.1K" type="tool" kind="bash">m00175</fold> tag showing its ref (mNNNNN), approximate token size, and content type \u2014 the kind attribute names the source tool on tool results and reads "user" on user messages. Assistant messages are untagged \u2014 infer their refs from adjacent tagged messages. These tags are system metadata injected by the context manager. NEVER echo, repeat, or reference these XML tags in your responses. Use only the ref ID (e.g. m00005) inside compress calls \u2014 never the XML wrapper.`],
   ["summariesInContext", `COMPRESSION SUMMARIES IN CONTEXT
@@ -17535,7 +17535,7 @@ unfold restores previously compressed content and writes it to a file by default
 When context usage passes a threshold, the system appends a breakdown showing where tokens are spent. Compress the largest ranges first when the current step no longer needs them.`],
   ["throttleRetry", `PROVIDER THROTTLE RETRY
 
-A provider rate-limit error (e.g. "Too many tokens, please wait before trying again.") may appear as a failed assistant response followed by a [ACP:provider-throttle] note. The interruption was transient and the system is retrying automatically. After such an interruption, resume the interrupted step exactly where it left off: do not re-run completed steps, do not re-read content already in context, and do not discuss the interruption unless asked.
+A provider rate-limit error (e.g. "Too many tokens, please wait before trying again.") may appear as a failed assistant response followed by a [fold:provider-throttle] note. The interruption was transient and the system is retrying automatically. After such an interruption, resume the interrupted step exactly where it left off: do not re-run completed steps, do not re-read content already in context, and do not discuss the interruption unless asked.
 Retries are capped; when the cap is reached the error is surfaced to the user unchanged. If the user sends new input during a retry wait, the retry is cancelled.`]
 ];
 var SECTION_KEYS = new Set(SECTIONS.map(([key]) => key));
@@ -17558,7 +17558,7 @@ function buildAcpSystemPrompt(prompts, sections) {
   };
   const filled = SECTIONS.map(([key, text]) => [key, text || (ruleSlots[key] ?? text)]);
   const sanitized = sanitizePromptSections(sections);
-  return "\nACP context management\n\n" + applySectionOverrides(filled, sanitized).join("\n\n") + "\n";
+  return "\nFold context management\n\n" + applySectionOverrides(filled, sanitized).join("\n\n") + "\n";
 }
 
 // src/surface.ts
@@ -17875,13 +17875,13 @@ function formatK2(n) {
   return n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n);
 }
 var RangeSpec = typebox_exports.Object({
-  startId: typebox_exports.String({ description: 'Message ref, e.g. "m00005" (from the acp tag), or a block id "b3".' }),
+  startId: typebox_exports.String({ description: 'Inclusive first ref: message ref, e.g. "m00005" (from the fold tag), or a block id "b3".' }),
   endId: typebox_exports.String({ description: "Inclusive end ref. Must be at or after startId." }),
   summary: typebox_exports.String({ description: "Complete technical summary replacing all content in range. Keep only essential details (conclusions, file paths, decisions, exact values, etc.)." }),
-  topic: typebox_exports.Optional(typebox_exports.String({ description: "Short label (3-5 words) for THIS range, e.g. 'Auth System Exploration'. Omit to use top-level topic. When compressing multiple unrelated ranges, give each its own topic for better quality." }))
+  topic: typebox_exports.Optional(typebox_exports.String({ description: "Short label (3-5 words) for THIS range, e.g. 'Auth System Exploration'." }))
 });
 var CompressParams = typebox_exports.Object({
-  topic: typebox_exports.Optional(typebox_exports.String({ description: "Fallback topic for entries without their own. Omit when each content entry specifies its own topic." })),
+  topic: typebox_exports.Optional(typebox_exports.String({ description: "Fallback topic label (3-5 words), used for ranges without a topic of their own." })),
   content: typebox_exports.Union([
     typebox_exports.Array(RangeSpec),
     // Non-strict-tool providers (vLLM openai-completions, supportsStrictTools:
@@ -17891,14 +17891,14 @@ var CompressParams = typebox_exports.Object({
     // only compress attempt was lost. Accept the JSON-encoded form and parse
     // it in normalizeRanges below.
     typebox_exports.String({ description: "JSON-encoded array of ranges \u2014 accepted because non-strict-tool providers sometimes stringify array arguments; parsed automatically." })
-  ], { description: "One or more ranges to compress, each with start/end boundaries and a summary. When compressing multiple unrelated ranges in one call, give each its own topic." }),
-  summaryMaxChars: typebox_exports.Optional(typebox_exports.Number({ description: "Override max summary length (default max: 20000 chars). Use when content is important and needs more detail \u2014 don't lose critical info just to fit the limit." }))
+  ], { description: "One or more ranges to compress, each with start/end boundaries and a summary replacing that range." }),
+  summaryMaxChars: typebox_exports.Optional(typebox_exports.Number({ description: "Override max summary length in chars (default 20000)." }))
 });
 function compressDescription(ref) {
   if (!ref) {
-    return "Replace older conversation ranges with detailed summaries you write. Single range: compress({ content: [{ startId, endId, summary }] }). Batch: compress({ content: [{ topic, startId, endId, summary }, ...] }) \u2014 each entry gets its own summary.";
+    return "Replace older conversation ranges with detailed summaries you write. Batch several ranges in one call; each range carries its own startId/endId refs, self-contained summary, and optional topic (per-range topic overrides the top-level one).";
   }
-  return `Replace older conversation ranges. Dedicated summary model ${ref} normally replaces each summary. Choose the ranges and provide a concise but meaningful 1\u20132 sentence fallback summary for each range; never use a bare placeholder. Preserve the goal, key decisions, exact paths/versions/errors, current state, and TODOs in that fallback. Example: compress({ content: [{ startId, endId, summary: "Concise fallback..." }] }).`;
+  return `Replace older conversation ranges. Dedicated summary model ${ref} normally replaces each summary. Give each range a concise but meaningful 1\u20132 sentence fallback summary; never use a bare placeholder. Preserve the goal, key decisions, exact paths/versions/errors, current state, and TODOs in that fallback.`;
 }
 function makeCompressTool(runtime, overrides, pi) {
   const tool = applyToolPromptOverrides({
@@ -18066,7 +18066,7 @@ function jsonParseError(content) {
   }
 }
 function compressPanelBlocks(text) {
-  if (!text.trimStart().startsWith("\u25A3 ACP |")) return -1;
+  if (!text.trimStart().startsWith("\u25A3 Fold |") && !text.trimStart().startsWith("\u25A3 ACP |")) return -1;
   const m2 = text.match(/, (\d+) blocks?\)/);
   if (m2) return Number(m2[1]);
   const idx = text.indexOf(", blocks: ");
@@ -18156,8 +18156,8 @@ function compressibleSnapshotText(nudge) {
 }
 function deadRepeatRejectionText(spans, count, snapshot) {
   return [
-    "\u25A3 ACP | 0 \u2192 0 tokens (~0 reclaimed, 0 blocks)",
-    `[ACP] REJECTED \u2014 this exact compress call has now failed ${count}\xD7 (ranges ${spans.join(", ")}). Those refs are stale: they point at content already compressed into an active block, or at refs that no longer exist. Repeating this call cannot succeed \u2014 do not retry it.`,
+    "\u25A3 Fold | 0 \u2192 0 tokens (~0 reclaimed, 0 blocks)",
+    `[Fold] REJECTED \u2014 this exact compress call has now failed ${count}\xD7 (ranges ${spans.join(", ")}). Those refs are stale: they point at content already compressed into an active block, or at refs that no longer exist. Repeating this call cannot succeed \u2014 do not retry it.`,
     "",
     "Current compressible ranges (use these refs exactly as listed):",
     snapshot,
@@ -18167,8 +18167,8 @@ function deadRepeatRejectionText(spans, count, snapshot) {
 }
 function cappedRejectionText(snapshot) {
   return [
-    "\u25A3 ACP | 0 \u2192 0 tokens (~0 reclaimed, 0 blocks)",
-    `[ACP] PAUSED \u2014 ${MAX_COMPRESS_ATTEMPTS} compress attempts already failed this turn; further compress calls are rejected until the next user message.`,
+    "\u25A3 Fold | 0 \u2192 0 tokens (~0 reclaimed, 0 blocks)",
+    `[Fold] PAUSED \u2014 ${MAX_COMPRESS_ATTEMPTS} compress attempts already failed this turn; further compress calls are rejected until the next user message.`,
     "",
     "Current compressible ranges (use these refs exactly as listed):",
     snapshot,
@@ -18358,7 +18358,7 @@ async function handleCompress(args, runtime, ctx, toolCallId, signal, tools = []
     logWarn("compress", { sid: ctx.sessionManager.getSessionId(), event: "warnings", count: warnings.length, warnings: warnings.slice(0, 5) });
   }
   const spanClause = blocksCreated > 0 ? `blocks: ${newBlocks.map((b2) => blockSpanLabel(b2, applied.state)).join(", ")}` : "0 blocks";
-  const lines = [`\u25A3 ACP | ${formatK2(beforeTokens)} \u2192 ${formatK2(afterTokens)} tokens (~${formatK2(reclaimed)} reclaimed, ${spanClause})`];
+  const lines = [`\u25A3 Fold | ${formatK2(beforeTokens)} \u2192 ${formatK2(afterTokens)} tokens (~${formatK2(reclaimed)} reclaimed, ${spanClause})`];
   if (blocksCreated > 0) {
     for (const b2 of newBlocks) lines.push(summaryFingerprintLine(b2.blockId, b2.summary));
   }
@@ -18724,7 +18724,8 @@ function rebuildStateFromLog(input) {
 
 // src/throttle-retry.ts
 var THROTTLE_RETRY_ERROR_MESSAGE = "429 rate limit: Too many tokens, please wait before trying again.";
-var THROTTLE_KICK_SENTINEL = "[ACP:provider-throttle]";
+var THROTTLE_KICK_SENTINEL = "[fold:provider-throttle]";
+var THROTTLE_KICK_SENTINEL_LEGACY = "[ACP:provider-throttle]";
 var THROTTLE_KICK_TEXT = `${THROTTLE_KICK_SENTINEL} The previous assistant response was interrupted by a provider rate limit (transient, not a real failure). Resume the task exactly where it left off \u2014 do not re-run completed steps and do not discuss the interruption unless asked.`;
 var BEDROCK_THROTTLE_PHRASE = /too many tokens, please wait before trying again/i;
 var THROTTLE_NAME = /throttl/i;
@@ -18741,7 +18742,8 @@ ${extractText(msg.content)}`;
 }
 function isKickMessage(msg) {
   if (msg.role !== "user") return false;
-  return extractText(msg.content).trimStart().startsWith(THROTTLE_KICK_SENTINEL);
+  const text = extractText(msg.content).trimStart();
+  return text.startsWith(THROTTLE_KICK_SENTINEL) || text.startsWith(THROTTLE_KICK_SENTINEL_LEGACY);
 }
 var DEFAULT_THROTTLE_RETRY = {
   enabled: true,
@@ -19446,11 +19448,11 @@ var AUTO_DIR = join9(homedir6() || tmpdir(), ".cache", "pi", "acp-decompress");
 var PREVIEW_CHARS = 600;
 var MESSAGE_INLINE_THRESHOLD = 2e3;
 var UnfoldParams = typebox_exports.Object({
-  ref: typebox_exports.String({ description: 'Ref to restore, e.g. "b5" \u2014 a block id, or a message ref (UUID) from search results that resolves to the owning block automatically.' }),
+  ref: typebox_exports.String({ description: 'Ref to restore: a block id, e.g. "b5", or a message ref (UUID).' }),
   blockId: typebox_exports.Optional(typebox_exports.String({ description: "Deprecated alias for ref \u2014 still accepted; ignored when ref is set." })),
-  full: typebox_exports.Optional(typebox_exports.Boolean({ description: "If true, recurse through all nested blocks to original messages. Default: false (restores one tier up \u2014 nested block summaries shown, direct messages in full)." })),
-  toFile: typebox_exports.Optional(typebox_exports.String({ description: "Write restored content to this file path (must be under /tmp or ~/.cache/pi) instead of the default auto-generated path. Block stays compressed." })),
-  inline: typebox_exports.Optional(typebox_exports.Boolean({ description: "If true, return content inline as this tool's result (appends to context). Default: false \u2014 content is written to an auto-generated file to avoid context bloat. Only set true when the content is small or you accept the context cost." }))
+  full: typebox_exports.Optional(typebox_exports.Boolean({ description: "If true, recurse through all nested blocks to original messages. Default: false (one tier up \u2014 nested block summaries shown, direct messages in full)." })),
+  toFile: typebox_exports.Optional(typebox_exports.String({ description: "Write restored content to this file path (must be under /tmp or ~/.cache/pi) instead of the default auto-generated path." })),
+  inline: typebox_exports.Optional(typebox_exports.Boolean({ description: "Return content inline as this tool's result instead of writing a file. Default: false." }))
 });
 function normalizedRef(args) {
   return (args.ref ?? args.blockId ?? "").trim();
@@ -19459,7 +19461,7 @@ function makeUnfoldTool(runtime, overrides) {
   return applyToolPromptOverrides({
     name: "unfold",
     label: "Unfold",
-    description: "Restore a previously compressed block's content, or a single message by its ref. The block/message stays compressed \u2014 context and cache prefix are not disrupted. BLOCK unfold (ref b5) defaults to writing a file (blocks can be large); use the read tool to access it, or inline:true to return inline. MESSAGE unfold (ref = a message UUID from search) returns that ONE message's original text \u2014 defaults to inline since a single message is usually small; oversized messages go to a file. full:true recurses through nested block tiers (block mode only). You can pass a block id (b5) OR a message ref (UUID) from search results.",
+    description: "Restore a previously compressed block's content, or a single message by its ref \u2014 a message UUID from search resolves to its owning block automatically. The block/message stays compressed, so context and cache prefix are not disrupted. Block unfolds (ref = b5) default to writing a file (blocks can be large); use the read tool to access it. Message unfolds (ref = a message UUID from search) return that ONE message's original text, defaulting to inline since a single message is usually small; oversized messages go to a file instead. inline:true forces inline output \u2014 only for content small enough to accept into context. full:true recurses through nested block tiers (block mode only).",
     promptSnippet: 'unfold({ ref: "b5" }) or unfold({ ref: "d51b6f94" }) (message ref from search) \u2014 writes to file by default; add inline: true to return inline',
     promptGuidelines: [
       "Unfold when you need exact details lost in compression (file contents, error messages, signatures).",
@@ -19742,7 +19744,7 @@ function makeSearchTool(runtime, overrides) {
   return applyToolPromptOverrides({
     name: "search",
     label: "Search",
-    description: "Search compressed blocks AND historical messages by keyword. Use to cheaply locate detail before unfolding. Returns ranked results with ref, size, preview, and the unfold command to retrieve full content.",
+    description: "Search compressed blocks AND historical messages by keyword \u2014 currently visible (uncompressed) messages are NOT searched. Use to cheaply locate detail before unfolding. Returns ranked results with ref, size, preview, and the unfold command to retrieve full content.",
     promptSnippet: 'search({ query: "auth token" })',
     promptGuidelines: [
       "Search locates detail folded into summaries or past messages \u2014 cheaper than unfolding blind.",
@@ -19987,9 +19989,9 @@ function compressionAnchorStaleness(entries, blocks, countTokens) {
 
 // src/status-tool.ts
 var StatusParams = typebox_exports.Object({
-  scope: typebox_exports.Optional(typebox_exports.Union([typebox_exports.Literal("compressed"), typebox_exports.Literal("uncompressed")], { description: '"compressed" = drill into blocks; "uncompressed" = show visible messages/ranges. Default: overview.' })),
-  view: typebox_exports.Optional(typebox_exports.Union([typebox_exports.Literal("ranges"), typebox_exports.Literal("messages")], { description: 'For uncompressed scope: "ranges" (default) or "messages" (per-message listing).' })),
-  tool: typebox_exports.Optional(typebox_exports.String({ description: 'Filter by tool name (e.g. "bash", "read"). Only for uncompressed+messages.' })),
+  scope: typebox_exports.Optional(typebox_exports.Union([typebox_exports.Literal("compressed"), typebox_exports.Literal("uncompressed")], { description: '"compressed" = drill into blocks; "uncompressed" = show visible messages/ranges. Default (omitted): overview.' })),
+  view: typebox_exports.Optional(typebox_exports.Union([typebox_exports.Literal("ranges"), typebox_exports.Literal("messages")], { description: '"ranges" (default) or "messages" (per-message listing).' })),
+  tool: typebox_exports.Optional(typebox_exports.String({ description: 'Filter messages by producer tool name (e.g. "bash", "read").' })),
   sort: typebox_exports.Optional(typebox_exports.Union([typebox_exports.Literal("size"), typebox_exports.Literal("time"), typebox_exports.Literal("tool"), typebox_exports.Literal("age")], { description: "Sort order. Default: size." })),
   limit: typebox_exports.Optional(typebox_exports.Number({ description: "Max items to show (default: 30)." }))
 });
@@ -19997,7 +19999,7 @@ function makeStatusTool(runtime, overrides) {
   return applyToolPromptOverrides({
     name: "status",
     label: "Status",
-    description: "Context status: overview, compressed blocks, or uncompressed ranges/messages. No args = overview + totals + compressible ranges. scope:'uncompressed' + view:'messages' for per-message listing. scope:'compressed' for block drilldown.",
+    description: "Context status report. No args = overview plus estimate-vs-provider-reported usage, the active nudge, and compressible/protected ranges. tool filtering applies only to scope:'uncompressed' + view:'messages'. sort support depends on scope/view: ranges accept size|time, messages size|time|tool, blocks size|time|age (most-survived tiers first); unsupported values silently fall back to size.",
     promptSnippet: 'status({}) or status({ scope: "uncompressed", view: "messages" })',
     promptGuidelines: [
       "Call with no args for a quick overview of context usage.",
@@ -20115,17 +20117,16 @@ function foldEvents(state) {
 async function cacheReportText(runtime, ctx, detail = "summary") {
   const { state, entries } = await runtime.stateFor(ctx);
   const report = buildCacheReport(cacheSamples(entries), foldEvents(state));
-  return formatCacheReport(report, ctx.sessionManager.getSessionId(), { detail });
+  return formatCacheReport(report, ctx.sessionManager.getSessionId(), { detail }).replace("ACP CACHE REPORT", "CACHE REPORT");
 }
 function makeCacheTool(runtime, overrides) {
   return applyToolPromptOverrides({
     name: "cache",
     label: "Cache Report",
-    description: `Prompt-cache reconciliation: grand ledger (total input/cached/output, session hit rate) with every request's miss split into new content / compression re-pay / TTL expiry, plus per-fold economics (one-time cost, breakeven turns vs measured cadence). Defaults to a compact summary (totals + verdicts + anomalies only); pass detail="full" for every fold and line item. Read-only.`,
+    description: "Prompt-cache reconciliation ledger: grand totals and session hit rate, every request's miss split into new content / compression re-pay / TTL expiry, and per-fold economics (one-time cost, breakeven turns vs measured cadence). Read-only.",
     promptSnippet: "cache({})",
     promptGuidelines: [
-      "Call when asked about cache hits, cache invalidation, or what compression costs.",
-      "Read-only: reports numbers, never mutates context."
+      "Call when asked about cache hits, cache invalidation, or what compression costs."
     ],
     parameters: CacheParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

@@ -150,7 +150,7 @@ test("no delegate surface: no ACP_DELEGATE prompt section and no acp_delegate to
   createAcpExtension()(api as any);
   const result = handlers.get("before_agent_start")![0]!({ systemPrompt: "" }, {});
   assert.ok(!result.systemPrompt.includes("ACP_DELEGATE"), "no delegate prompt section");
-  assert.ok(result.systemPrompt.includes("ACP TAGS"), "core ACP prompt present");
+  assert.ok(result.systemPrompt.includes("FOLD TAGS"), "core ACP prompt present");
   assert.ok(!api.tools.some((t) => t.name.startsWith("acp_delegate")), "no acp_delegate tools registered");
 });
 
@@ -203,7 +203,7 @@ async function withAgentDir(agentDir: string, fn: () => Promise<void>): Promise<
   process.env.PI_CODING_AGENT_DIR = agentDir;
   // Isolate HOME too: prompt/config assembly reads the developer's real
   // ~/.pi/acp.json — e.g. `compress.promptPack: "lean"` swaps the acpTags
-  // section for its headerless short form and breaks the literal "ACP TAGS"
+  // section for its headerless short form and breaks the literal "FOLD TAGS"
   // assertions in these tests. Tests must not depend on the runner's home
   // config (#484 triage: failed deterministically on any lean-pack dev box,
   // green on CI's empty HOME — masking as a fake #415 regression).

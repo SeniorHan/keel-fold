@@ -20,9 +20,9 @@ test("promptSections: string replaces, null removes, unknown keys ignored", () =
   const base = buildAcpSystemPrompt(defaultPrompts);
   const replaced = buildAcpSystemPrompt(defaultPrompts, { acpTags: "CUSTOM TAGS HEADER" });
   assert.ok(replaced.includes("CUSTOM TAGS HEADER"));
-  assert.ok(!replaced.includes("ACP TAGS"));
+  assert.ok(!replaced.includes("FOLD TAGS"));
   const removed = buildAcpSystemPrompt(defaultPrompts, { acpTags: null });
-  assert.ok(!removed.includes("ACP TAGS"));
+  assert.ok(!removed.includes("FOLD TAGS"));
   assert.ok(removed.includes("WHEN TO COMPRESS"));
   const ignored = buildAcpSystemPrompt(defaultPrompts, { bogusKey: "x", acpTags: 42 as unknown as null });
   assert.equal(ignored, base);

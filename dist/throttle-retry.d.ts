@@ -1,6 +1,8 @@
 export declare const THROTTLE_RETRY_ERROR_MESSAGE = "429 rate limit: Too many tokens, please wait before trying again.";
-export declare const THROTTLE_KICK_SENTINEL = "[ACP:provider-throttle]";
-export declare const THROTTLE_KICK_TEXT = "[ACP:provider-throttle] The previous assistant response was interrupted by a provider rate limit (transient, not a real failure). Resume the task exactly where it left off \u2014 do not re-run completed steps and do not discuss the interruption unless asked.";
+export declare const THROTTLE_KICK_SENTINEL = "[fold:provider-throttle]";
+/** Legacy sentinel (pre-rename) still accepted — old sessions persist kick messages with it. */
+export declare const THROTTLE_KICK_SENTINEL_LEGACY = "[ACP:provider-throttle]";
+export declare const THROTTLE_KICK_TEXT = "[fold:provider-throttle] The previous assistant response was interrupted by a provider rate limit (transient, not a real failure). Resume the task exactly where it left off \u2014 do not re-run completed steps and do not discuss the interruption unless asked.";
 export interface ThrottleErrorProbe {
     role: string;
     stopReason?: string;

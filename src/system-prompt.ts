@@ -18,7 +18,7 @@ export interface PiPromptSections {
 }
 
 const SECTIONS: ReadonlyArray<readonly [string, string]> = [
-  ["acpTags", `ACP TAGS
+  ["acpTags", `FOLD TAGS
 
 Each user and tool message has a \x3cfold tokens="2.1K" type="tool" kind="bash"\x3em00175\x3c/fold\x3e tag showing its ref (mNNNNN), approximate token size, and content type — the kind attribute names the source tool on tool results and reads "user" on user messages. Assistant messages are untagged — infer their refs from adjacent tagged messages. These tags are system metadata injected by the context manager. NEVER echo, repeat, or reference these XML tags in your responses. Use only the ref ID (e.g. m00005) inside compress calls — never the XML wrapper.`],
   ["summariesInContext", `COMPRESSION SUMMARIES IN CONTEXT
@@ -68,7 +68,7 @@ unfold restores previously compressed content and writes it to a file by default
 When context usage passes a threshold, the system appends a breakdown showing where tokens are spent. Compress the largest ranges first when the current step no longer needs them.`],
   ["throttleRetry", `PROVIDER THROTTLE RETRY
 
-A provider rate-limit error (e.g. "Too many tokens, please wait before trying again.") may appear as a failed assistant response followed by a [ACP:provider-throttle] note. The interruption was transient and the system is retrying automatically. After such an interruption, resume the interrupted step exactly where it left off: do not re-run completed steps, do not re-read content already in context, and do not discuss the interruption unless asked.
+A provider rate-limit error (e.g. "Too many tokens, please wait before trying again.") may appear as a failed assistant response followed by a [fold:provider-throttle] note. The interruption was transient and the system is retrying automatically. After such an interruption, resume the interrupted step exactly where it left off: do not re-run completed steps, do not re-read content already in context, and do not discuss the interruption unless asked.
 Retries are capped; when the cap is reached the error is surfaced to the user unchanged. If the user sends new input during a retry wait, the retry is cancelled.`],
 ];
 
@@ -95,5 +95,5 @@ export function buildAcpSystemPrompt(prompts: Prompts, sections?: Partial<PiProm
   };
   const filled = SECTIONS.map(([key, text]) => [key, text || (ruleSlots[key] ?? text)] as const);
   const sanitized = sanitizePromptSections(sections);
-  return "\nACP context management\n\n" + applySectionOverrides(filled, sanitized as Record<string, SectionOverride>).join("\n\n") + "\n";
+  return "\nFold context management\n\n" + applySectionOverrides(filled, sanitized as Record<string, SectionOverride>).join("\n\n") + "\n";
 }

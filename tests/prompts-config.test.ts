@@ -12,7 +12,7 @@ const CONFIG_DIR_NAME = ".pi";
 
 test("buildAcpSystemPrompt with defaults contains the philosophy and tier rules", () => {
   const prompt = buildAcpSystemPrompt(defaultPrompts);
-  assert.ok(prompt.includes("ACP context management"), "has header");
+  assert.ok(prompt.includes("Fold context management"), "has header");
   assert.ok(prompt.includes(defaultPrompts.compressPhilosophy.slice(0, 40)), "embeds compressPhilosophy");
   assert.ok(prompt.includes(defaultPrompts.howToCompressRules.slice(0, 40)), "embeds howToCompressRules");
   assert.ok(prompt.includes(defaultPrompts.tier2DistillRules.slice(0, 40)), "embeds tier2DistillRules");

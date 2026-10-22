@@ -78,9 +78,9 @@ test("piAdapterSurface(leanPack): aligned rules kept, every other section nulled
 test("lean pack system prompt collapses to header + lean bullets", () => {
   const merged = mergeSurface(leanPack, {});
   const text = buildAcpSystemPrompt(defaultPrompts, merged.promptSections);
-  assert.ok(text.startsWith("\nACP context management\n\n"));
+  assert.ok(text.startsWith("\nFold context management\n\n"));
   assert.ok(text.includes("Never echo the XML tags"));
-  assert.ok(!text.includes("ACP TAGS"));
+  assert.ok(!text.includes("FOLD TAGS"));
   if (typeof leanPiSections().summariesInContext === "string") {
     assert.ok(text.includes("COMPRESSION SUMMARIES IN CONTEXT"), "compact trust guardrail reaches the prompt (0.0.68)");
     assert.ok(text.includes("NOT current user messages"));
