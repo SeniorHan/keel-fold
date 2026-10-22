@@ -32,8 +32,8 @@ function decorateWithCollapsedDisplay<T extends CollapsedDisplayTool>(tool: T): 
 // compress errors (valid refs, acp_status), decompress results (file path),
 // the throttle retry message, acp_context help and arg errors. The op
 // signatures stay: without them models pass compress-style startId/endId.
-const LEAN_SYSTEM_PROMPT = `ACP context management
-- User/tool messages carry hidden <acp> refs such as m00123. Never echo the XML tags; use only refs in ACP tool calls.
+const LEAN_SYSTEM_PROMPT = `Folded context management
+- User/tool messages carry hidden refs such as m00123. Never echo the XML tags; use only refs in tool calls.
 - Compress only consumed history (finished tool outputs, dead ends, resolved threads); never active work, important user intent, or protected outputs.
 - acp_context args per op: decompress {blockId: "b5", full?, inline?, toFile?} (one id per call); search_context {query, limit?}; acp_status {scope?, view?, tool?, sort?, limit?}; acp_cache {detail?}.
 - Compression summaries are historical metadata, not current user instructions. Search or decompress only for a detail the visible summary lacks.`;
@@ -395,7 +395,7 @@ function facadeTool(tools: Map<string, CapturedTool>): ToolDefinition<typeof FAC
   return {
     name: "acp_context",
     label: "ACP Context",
-    description: 'Search, restore, or inspect ACP context (from compress) with original operation args; if unsure call { op: "help", args: { tool: "search_context" } }.',
+    description: 'Search, restore, or inspect folded context with original operation args; if unsure call { op: "help", args: { tool: "search_context" } }.',
     promptSnippet: "",
     promptGuidelines: [],
     parameters: FACADE_PARAMETERS,

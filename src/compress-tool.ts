@@ -73,7 +73,7 @@ export function makeCompressTool(runtime: AcpRuntime, overrides?: ToolPromptOver
       compressDescription(undefined),
     promptSnippet: "compress({ content: [{ startId, endId, summary }] }) or batch multiple ranges",
     promptGuidelines: [
-      "Each message has an acp tag with its mNNNNN ref, token size, and type. Compress ranges by their refs.",
+      "Each message has a hidden ref tag with its mNNNNN ref, token size, and type. Compress ranges by their refs.",
       "Batch multiple unrelated ranges in one call — each gets its own topic and summary.",
       "Write dense, self-contained summaries — preserve file paths, signatures, errors, and decisions verbatim.",
       "Never compress content the current step is actively using.",

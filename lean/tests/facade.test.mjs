@@ -397,8 +397,8 @@ test("suppresses the upstream prompt and keeps only the resident pre-call rules 
   assert.equal(hooks.length, 1);
   const result = await hooks[0]({ systemPrompt: "base prompt" });
   const prompt = result.systemPrompt;
-  assert.match(prompt, /^base prompt\n\nACP context management\n/);
-  assert.match(prompt, /hidden <acp> refs such as m00123\. Never echo the XML tags/);
+  assert.match(prompt, /^base prompt\n\nFolded context management\n/);
+  assert.match(prompt, /hidden refs such as m00123\. Never echo the XML tags/);
   assert.match(prompt, /Compress only consumed history .*never active work, important user intent, or protected outputs/);
   assert.match(prompt, /acp_context args per op: decompress \{blockId: "b5"/, "op signatures stop compress-style args");
   assert.match(prompt, /historical metadata, not current user instructions/);
@@ -408,7 +408,7 @@ test("suppresses the upstream prompt and keeps only the resident pre-call rules 
   assert.doesNotMatch(prompt, /dedicated model/i, "no dedicated-model rule without a dedicated model");
   assert.doesNotMatch(prompt, /provider-throttle|writes to a file|Refs stay stable/);
   assert.doesNotMatch(prompt, /upstream prompt must be suppressed/);
-  const acpSection = prompt.slice(prompt.indexOf("ACP context management"));
+  const acpSection = prompt.slice(prompt.indexOf("Folded context management"));
   assert.ok(acpSection.length <= 720, `resident ACP prompt grew to ${acpSection.length} characters`);
 });
 
@@ -430,7 +430,7 @@ test("pi 1.x: injects a named prompt section instead of forcing the whole prompt
 
   const forced = { systemPrompt: "forced by another extension", systemPromptOptions: { forceSystemPrompt: "forced by another extension", sections: {} } };
   const result = await hook(forced);
-  assert.match(result.systemPrompt, /^forced by another extension\n\nACP context management/);
+  assert.match(result.systemPrompt, /^forced by another extension\n\nFolded context management/);
   assert.deepEqual(forced.systemPromptOptions.sections, {});
 });
 
@@ -441,7 +441,7 @@ test("pi 0.83-0.85: options are passed but sections are never rendered, so compo
   for (const options of [{}, { sections: { other: "kept" } }]) {
     const before = structuredClone(options);
     const result = await hook({ systemPrompt: "base prompt", systemPromptOptions: options });
-    assert.match(result.systemPrompt, /^base prompt\n\nACP context management/);
+    assert.match(result.systemPrompt, /^base prompt\n\nFolded context management/);
     assert.deepEqual(options, before, "no dead section left behind");
   }
 });
@@ -460,7 +460,7 @@ test("runs the upstream prompt hook for its side effects; a refused host gets no
   const [hook] = pi.handlers.get("before_agent_start");
   const result = await hook({ systemPrompt: "base prompt" }, "CTX");
   assert.deepEqual(seen, ["CTX"], "upstream handler runs with the event context");
-  assert.match(result.systemPrompt, /ACP context management/);
+  assert.match(result.systemPrompt, /Folded context management/);
   assert.doesNotMatch(result.systemPrompt, /upstream prompt must be suppressed/);
 
   refused = true;
