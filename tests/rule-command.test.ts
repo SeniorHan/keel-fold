@@ -44,16 +44,19 @@ async function setup(entries: any[], stateFile: string, opts?: { rules?: boolean
   if (!opts?.keepSidecar) await rm(`${stateFile}.acp.json`, { force: true });
   const ctx = fakeCtx(entries, stateFile);
   await handlers.get("context")![0]!({ type: "context", messages: [] }, ctx);
-  const command = api.commands.get("acp-rule") as { handler: (args: string, ctx: any) => Promise<void> } | undefined;
+  const command = api.commands.get("fold-rule") as { handler: (args: string, ctx: any) => Promise<void> } | undefined;
   return { api, ctx, command };
 }
 
-test("/acp-rule is registered alongside /acp-cache and lists recorded rules via sendMessage (#527)", async () => {
+test("/fold-rule is registered alongside /fold-cache and lists recorded rules via sendMessage (#527)", async () => {
   const sent: SentMessage[] = [];
   const stateFile = tmpPath("pai-acp-rule-list.session.json");
   const { api, command } = await setup([], stateFile, { rules: true, sendMessage: (m) => sent.push(m) });
-  assert.ok(command, "acp-rule command registered");
-  assert.ok(api.commands.has("acp-cache"), "acp-cache still registered");
+  assert.ok(command, "fold-rule command registered");
+  assert.ok(api.commands.has("fold-cache"), "fold-cache still registered");
+  // alias discipline: legacy /acp* names still resolve to the same handlers
+  assert.ok(api.commands.has("acp-rule"), "legacy acp-rule alias still registered");
+  assert.ok(api.commands.has("acp-cache"), "legacy acp-cache alias still registered");
 
   await command!.handler("", fakeCtx([], stateFile));
   assert.equal(sent.length, 1, "one custom message sent");
@@ -62,7 +65,7 @@ test("/acp-rule is registered alongside /acp-cache and lists recorded rules via 
   assert.equal(sent[0]!.content, "No rules recorded.", "empty state is a friendly message, not an empty list");
 });
 
-test("/acp-rule <text> records via the kernel API, echoes the same confirmation as the model path, then lists it (#527)", async () => {
+test("/fold-rule <text> records via the kernel API, echoes the same confirmation as the model path, then lists it (#527)", async () => {
   const sent: SentMessage[] = [];
   const stateFile = tmpPath("pai-acp-rule-record.session.json");
   const { command } = await setup([], stateFile, { rules: true, sendMessage: (m) => sent.push(m) });
@@ -79,7 +82,7 @@ test("/acp-rule <text> records via the kernel API, echoes the same confirmation 
   assert.deepEqual(sidecar.rules, [{ id: "rule1", text: "always run typecheck before done" }], "rule persisted in the session sidecar");
 });
 
-test("/acp-rule records survive a restart (fresh extension reading the same sidecar) (#527)", async () => {
+test("/fold-rule records survive a restart (fresh extension reading the same sidecar) (#527)", async () => {
   const stateFile = tmpPath("pai-acp-rule-restart.session.json");
   const first = await setup([], stateFile, { rules: true });
   await first.command!.handler("prefer pnpm", fakeCtx([], stateFile));
@@ -90,7 +93,7 @@ test("/acp-rule records survive a restart (fresh extension reading the same side
   assert.equal(sent[0]!.content, "1. [rule1] prefer pnpm", "recorded rule listed from the reloaded sidecar state");
 });
 
-test("/acp-rule surfaces kernel validation errors verbatim without recording (#527)", async () => {
+test("/fold-rule surfaces kernel validation errors verbatim without recording (#527)", async () => {
   const sent: SentMessage[] = [];
   const notifies: Array<{ msg: string; type?: string }> = [];
   const stateFile = tmpPath("pai-acp-rule-invalid.session.json");
@@ -110,7 +113,7 @@ test("/acp-rule surfaces kernel validation errors verbatim without recording (#5
   assert.equal(notifies.length, 1, "nothing was recorded by the rejected call");
 });
 
-test("/acp-rule warns with the enablement hint instead of an empty list when the feature is off (#527)", async () => {
+test("/fold-rule warns with the enablement hint instead of an empty list when the feature is off (#527)", async () => {
   const sent: SentMessage[] = [];
   const notifies: Array<{ msg: string; type?: string }> = [];
   const stateFile = tmpPath("pai-acp-rule-off.session.json");
@@ -133,7 +136,7 @@ test("/acp-rule warns with the enablement hint instead of an empty list when the
   assert.equal(notifies.length, 4, "clear path shows the same hint");
 });
 
-test("/acp-rule falls back to raw-text ui.notify on hosts without sendMessage (#527)", async () => {
+test("/fold-rule falls back to raw-text ui.notify on hosts without sendMessage (#527)", async () => {
   const notifies: Array<{ msg: string; type?: string }> = [];
   const stateFile = tmpPath("pai-acp-rule-notify.session.json");
   const { command } = await setup([], stateFile, { rules: true });
@@ -142,7 +145,7 @@ test("/acp-rule falls back to raw-text ui.notify on hosts without sendMessage (#
   assert.deepEqual(notifies.map((n) => n.msg), ["Recorded rule1: prefer pnpm"]);
 });
 
-test("/acp-rule remove <id> removes via the kernel API and echoes the removed rule text (#537)", async () => {
+test("/fold-rule remove <id> removes via the kernel API and echoes the removed rule text (#537)", async () => {
   const sent: SentMessage[] = [];
   const stateFile = tmpPath("pai-acp-rule-remove.session.json");
   const { command } = await setup([], stateFile, { rules: true, sendMessage: (m) => sent.push(m) });
@@ -162,7 +165,7 @@ test("/acp-rule remove <id> removes via the kernel API and echoes the removed ru
   assert.equal(sent[2]!.content, "No rules recorded.", "list reflects the removal");
 });
 
-test("/acp-rule remove with an unknown id surfaces the kernel error verbatim without mutating (#537)", async () => {
+test("/fold-rule remove with an unknown id surfaces the kernel error verbatim without mutating (#537)", async () => {
   const sent: SentMessage[] = [];
   const notifies: Array<{ msg: string; type?: string }> = [];
   const stateFile = tmpPath("pai-acp-rule-remove-unknown.session.json");
@@ -183,7 +186,7 @@ test("/acp-rule remove with an unknown id surfaces the kernel error verbatim wit
   assert.equal(sent[1]!.content, "1. [rule1] keep types strict", "existing rule untouched by the failed removal");
 });
 
-test("/acp-rule clear removes all rules and reports the count; empty clear is honest (#537)", async () => {
+test("/fold-rule clear removes all rules and reports the count; empty clear is honest (#537)", async () => {
   const sent: SentMessage[] = [];
   const stateFile = tmpPath("pai-acp-rule-clear.session.json");
   const { command } = await setup([], stateFile, { rules: true, sendMessage: (m) => sent.push(m) });
@@ -200,7 +203,7 @@ test("/acp-rule clear removes all rules and reports the count; empty clear is ho
   assert.equal(sent[3]!.content, "No rules to clear.", "honest empty clear, no false success");
 });
 
-test("/acp-rule rejects mixed operations in one call without executing or recording (#537)", async () => {
+test("/fold-rule rejects mixed operations in one call without executing or recording (#537)", async () => {
   const sent: SentMessage[] = [];
   const notifies: Array<{ msg: string; type?: string }> = [];
   const stateFile = tmpPath("pai-acp-rule-conflict.session.json");
@@ -222,7 +225,7 @@ test("/acp-rule rejects mixed operations in one call without executing or record
   assert.equal(sent[1]!.content, "1. [rule1] prefer pnpm", "state unmutated after rejected mixed calls");
 });
 
-test("/acp-rule still records plain text that starts with remove/clear-like words (#537)", async () => {
+test("/fold-rule still records plain text that starts with remove/clear-like words (#537)", async () => {
   const sent: SentMessage[] = [];
   const stateFile = tmpPath("pai-acp-rule-plainwords.session.json");
   const { command } = await setup([], stateFile, { rules: true, sendMessage: (m) => sent.push(m) });

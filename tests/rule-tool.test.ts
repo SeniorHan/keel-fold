@@ -102,7 +102,7 @@ test("rules:true registers acp_rule with zero system-prompt surface", async () =
     const { api } = await boot({ dir, sessionId: "sess-reg", adapter: { rules: true } });
     const tool = api.tools.find((t: any) => t.name === "acp_rule");
     assert.ok(tool, "registered when rules:true");
-    assert.equal(tool.label, "ACP Rule");
+    assert.equal(tool.label, "Fold Rule");
     assert.equal(tool.promptSnippet, undefined, "no promptSnippet (zero system-prompt changes)");
     assert.equal(tool.promptGuidelines, undefined, "no promptGuidelines (zero system-prompt changes)");
     assert.match(tool.description, /Omit the rule argument to list/, "usage guidance lives in the description");

@@ -255,7 +255,7 @@ test("notice: user-role message names count and char, carries no raw run", () =>
   const msg = degenerationNotice([{ char: "【", count: 4655, index: 0 }]) as { role: string; content: Array<{ type: string; text: string }> };
   assert.equal(msg.role, "user");
   const text = msg.content[0]!.text;
-  assert.ok(text.startsWith("[ACP recovery notice]"));
+  assert.ok(text.startsWith("[fold recovery notice]"));
   assert.ok(text.includes("4655 consecutive repetitions of \"【\""));
   assert.ok(text.includes("Resume your task from your last valid step."));
   assert.ok(!text.includes("【".repeat(4)), "the notice itself must not carry a repeat run");
@@ -347,7 +347,7 @@ test("wire: degenerate thinking in the outgoing view is collapsed + recovery not
     assert.ok(!thinking.thinking.includes("【".repeat(4)), "no long run reaches the wire");
     const notice = out[out.length - 1];
     assert.equal(notice.role, "user");
-    assert.ok(textsOf(notice).some((t) => t.includes("[ACP recovery notice]")), "recovery notice appended last");
+    assert.ok(textsOf(notice).some((t) => t.includes("[fold recovery notice]")), "recovery notice appended last");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -370,7 +370,7 @@ test("wire: thinking-only aborted turn (dropped from sent view) still triggers t
     assert.ok(out.every((m) => !JSON.stringify(m).includes("【".repeat(4))), "no raw run anywhere in the sent view");
     // ...but the notice still fires: the model's previous turn WAS degenerated.
     const notice = out[out.length - 1];
-    assert.ok(textsOf(notice).some((t) => t.includes("[ACP recovery notice]")));
+    assert.ok(textsOf(notice).some((t) => t.includes("[fold recovery notice]")));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -389,7 +389,7 @@ test("wire: once a clean assistant turn exists, the notice stops appearing", asy
   try {
     const result = await handlers.get("context")![0]!({ type: "context", messages: entries.map(() => ({ role: "user", content: "x", timestamp: 0 })) }, ctx);
     const out = result.messages as any[];
-    assert.ok(out.every((m) => !textsOf(m).some((t) => t.includes("[ACP recovery notice]"))), "self-limiting: no notice after a fresh turn");
+    assert.ok(out.every((m) => !textsOf(m).some((t) => t.includes("[fold recovery notice]"))), "self-limiting: no notice after a fresh turn");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -415,7 +415,7 @@ test("wire: degenerationGuard:false kills both the collapse and the notice", asy
     const asst = out.find((m) => m.role === "assistant");
     const thinking = asst.content.find((b: any) => b.type === "thinking");
     assert.ok(thinking.thinking.includes("【".repeat(4)), "kill-switch: raw run passes through unmodified");
-    assert.ok(out.every((m) => !textsOf(m).some((t) => t.includes("[ACP recovery notice]"))), "kill-switch: no notice");
+    assert.ok(out.every((m) => !textsOf(m).some((t) => t.includes("[fold recovery notice]"))), "kill-switch: no notice");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -441,7 +441,7 @@ test("wire: custom minRun above the run length disables collapsing", async () =>
     const asst = out.find((m) => m.role === "assistant");
     const thinking = asst.content.find((b: any) => b.type === "thinking");
     assert.ok(thinking.thinking.includes("【".repeat(4)), "4655 < minRun 5000 → untouched");
-    assert.ok(out.every((m) => !textsOf(m).some((t) => t.includes("[ACP recovery notice]"))), "no notice under the threshold");
+    assert.ok(out.every((m) => !textsOf(m).some((t) => t.includes("[fold recovery notice]"))), "no notice under the threshold");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

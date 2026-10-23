@@ -51,7 +51,7 @@ export function resolveIdleCompact(cfg: boolean | IdleCompactConfig | undefined)
 }
 
 export function idleCheckText(awayMinutes: number): string {
-  return `[ACP idle compact] The user has been away for about ${awayMinutes} minutes. ` +
+  return `[fold idle compact] The user has been away for about ${awayMinutes} minutes. ` +
     "This is an automatic maintenance turn, not a user request: decide whether consumed history is worth compressing now, using the ranges listed below. " +
     "Do not continue other work and do not call tools other than compress and fold. If nothing is worth compressing, reply with one short line.";
 }

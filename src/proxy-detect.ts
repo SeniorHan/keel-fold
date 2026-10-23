@@ -29,7 +29,7 @@ export function isBiliProxyBaseUrl(baseUrl: string | undefined): boolean {
  * ACP in-process on top of it would double-compress every request.
  */
 export const PROXY_STAND_DOWN_MESSAGE = [
-  "[billion-context-pi] Model baseUrl routes through the billion-context wire proxy (/bili/ prefix) — ACP client-side compression has been disabled for this session to avoid double compression.",
+  "[billion-context-pi] Model baseUrl routes through the billion-context wire proxy (/bili/ prefix) — client-side compression has been disabled for this session to avoid double compression.",
   "The proxy runs the same compression pipeline server-side and owns the ref coordinate space; nothing else to configure.",
   "If your traffic reaches the proxy via HTTPS_PROXY instead (no /bili/ prefix in the URL), export BILLION_CONTEXT_PROXY=1 before starting pi.",
   "Docs: https://github.com/ranxianglei/billion-context",
@@ -50,7 +50,7 @@ export const PROXY_STAND_DOWN_MESSAGE = [
 export function nativeStandDownMessage(host: string): string {
   return [
     `[billion-context-pi] billion-context native host detected (BILLION_CONTEXT_NATIVE=${host}) — the in-process native plugin proxies model API traffic and owns compression.`,
-    "ACP client-side compression has been disabled for this session to avoid double compression; nothing else to configure.",
+    "Client-side compression has been disabled for this session to avoid double compression; nothing else to configure.",
     "Docs: https://github.com/ranxianglei/billion-context",
   ].join("\n");
 }

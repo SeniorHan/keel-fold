@@ -137,7 +137,7 @@ test("cache attributes post-fold re-pay to the fold and prices it", async () => 
   assert.match(fullText, /verdict: 0 paid back, 0 not paid back, 1 unobserved/, "full keeps legacy fold table wording");
 });
 
-test("/acp-cache command renders the same report via ui.notify fallback", async () => {
+test("/fold-cache command renders the same report via ui.notify fallback", async () => {
   const T0 = Date.now() - 60_000;
   const entries = [
     userMsg("e1", "hi there, starting a fresh thread to check the cache panel.", T0 - 1000),
@@ -147,8 +147,8 @@ test("/acp-cache command renders the same report via ui.notify fallback", async 
   const notifies: string[] = [];
   const { api, ctx } = await setup(entries, stateFile, notifies);
 
-  const handler = api.commands.get("acp-cache") as { handler: (args: string, ctx: any) => Promise<void> } | undefined;
-  assert.ok(handler, "acp-cache command registered");
+  const handler = api.commands.get("fold-cache") as { handler: (args: string, ctx: any) => Promise<void> } | undefined;
+  assert.ok(handler, "fold-cache command registered");
   await handler.handler("", ctx);
   assert.equal(notifies.length, 1, "report delivered through notify fallback");
   assert.match(notifies[0], /^CACHE REPORT \(test-session\) — 1 requests/, "same report text");

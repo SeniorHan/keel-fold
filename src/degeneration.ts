@@ -281,7 +281,7 @@ export function degenerationNotice(runs: DegenerateRun[]): AgentMessage {
     content: [
       {
         type: "text",
-        text: `[ACP recovery notice] Your previous turn ended in degenerate generation: its output contained ${top.count} consecutive repetitions of ${describeChar(top.char)}${extra}. That repeated segment carries no information and has been truncated in the context above. Do not reproduce it or continue the pattern. Resume your task from your last valid step.`,
+        text: `[fold recovery notice] Your previous turn ended in degenerate generation: its output contained ${top.count} consecutive repetitions of ${describeChar(top.char)}${extra}. That repeated segment carries no information and has been truncated in the context above. Do not reproduce it or continue the pattern. Resume your task from your last valid step.`,
       },
     ],
     timestamp: Date.now(),

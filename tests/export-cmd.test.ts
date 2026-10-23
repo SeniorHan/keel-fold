@@ -102,7 +102,7 @@ test("parseExportArgs parses selector, --full, and --output", () => {
   assert.match(parseExportArgs("abc --output").error!, /requires a file path/);
 });
 
-test("listSessions returns ACP-managed sessions with id, title, and block count", async () => {
+test("listSessions returns fold-managed sessions with id, title, and block count", async () => {
   const dir = tmpPath("pai-acp-export-list");
   const stateFile = `${dir}/test-session.jsonl`;
   await mkdir(dir, { recursive: true });
@@ -120,10 +120,10 @@ test("exportSession with no selector lists persisted sessions", async () => {
   await mkdir(dir, { recursive: true });
   await setupSession(stateFile);
   const text = await exportSession(undefined, {}, dir);
-  assert.match(text, /ACP-managed sessions:/);
+  assert.match(text, /Fold-managed sessions:/);
   assert.match(text, /test-session/);
   assert.match(text, /blocks=1/);
-  assert.match(text, /Usage: \/acp-export/);
+  assert.match(text, /Usage: \/fold-export/);
 });
 
 test("exportSession renders the folded view (summary in place of the compressed range)", async () => {
@@ -175,7 +175,7 @@ test("exportSession reports an empty store", async () => {
   const dir = tmpPath("pai-acp-export-empty");
   await mkdir(dir, { recursive: true });
   const text = await exportSession(undefined, {}, dir);
-  assert.match(text, /No ACP-managed sessions found/);
+  assert.match(text, /No fold-managed sessions found/);
 });
 
 test("exportSession throws on an ambiguous selector", async () => {
@@ -188,17 +188,17 @@ test("exportSession throws on an ambiguous selector", async () => {
   await assert.rejects(() => exportSession("sess", {}, dir), /matches 2 sessions/);
 });
 
-test("/acp-export command is registered and lists, folds, and expands", async () => {
+test("/fold-export command is registered and lists, folds, and expands", async () => {
   const dir = tmpPath("pai-acp-export-cmd");
   const stateFile = `${dir}/test-session.jsonl`;
   await mkdir(dir, { recursive: true });
   const { api, ctx, notifies } = await setupSession(stateFile);
-  const cmd = api.commands.get("acp-export");
-  assert.ok(cmd, "acp-export command is registered");
+  const cmd = api.commands.get("fold-export");
+  assert.ok(cmd, "fold-export command is registered");
 
   notifies.length = 0;
   await cmd.handler("", ctx);
-  assert.match(notifies[0]!, /ACP-managed sessions:/);
+  assert.match(notifies[0]!, /Fold-managed sessions:/);
 
   notifies.length = 0;
   await cmd.handler("test-session", ctx);

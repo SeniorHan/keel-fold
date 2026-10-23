@@ -16,7 +16,7 @@ const RuleParams = Type.Object({
 export function makeRuleTool(runtime: AcpRuntime): ToolDefinition<typeof RuleParams> {
   return {
     name: RULE_TOOL_NAME,
-    label: "ACP Rule",
+    label: "Fold Rule",
     description:
       "Record a short, principle-level reminder that must survive context compression. Use it for behavioral corrections the user has had to repeat more than once, project invariants the user explicitly asked you to remember, and pitfalls you ran into once and must not run into again. Keep each rule short and principle-level. Recorded rules are hard-protected from compression and stay visible in the conversation. Omit the rule argument to list recorded rules.",
     parameters: RuleParams,

@@ -64,7 +64,7 @@ export function createAcpExtension(adapter: AdapterConfig = {}): ExtensionFactor
       return;
     }
     if (adapter.enabled === false || userConfigDisabled(process.cwd())) {
-      console.log("[bcp] disabled: enabled=false — ACP tools and system prompt off; Pi's native context management is in control");
+      console.log("[bcp] disabled: enabled=false — fold tools and system prompt off; Pi's native context management is in control");
       return;
     }
     const runtime = createRuntime(adapter);
@@ -123,7 +123,7 @@ export function createAcpExtension(adapter: AdapterConfig = {}): ExtensionFactor
     pi.registerTool(makeSearchTool(runtime, toolSurface.search));
     pi.registerTool(makeStatusTool(runtime, toolSurface.status));
     pi.registerTool(makeCacheTool(runtime, toolSurface.cache));
-    for (const { name, options } of [...makeCommands(runtime, pi), makeConfigCommand(runtime, idle)]) {
+    for (const { name, options } of [...makeCommands(runtime, pi), ...makeConfigCommand(runtime, idle)]) {
       pi.registerCommand(name, options);
     }
     wireNudgeRecords(pi);
@@ -469,7 +469,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
         const overLimit = config.modelContextLimit > 0 && userGuard.remainingTokens > config.modelContextLimit;
         logWarn("overflow", { sid, event: "latest-user-kept", id: userGuard.restoredId, remaining: userGuard.remainingTokens, limit: config.modelContextLimit });
         if (overLimit && ctx.hasUI && !latestUserOverLimit.has(sid)) {
-          ctx.ui.notify("[ACP] ⚠️ 最近一条用户消息太大，不截断它就放不进上下文。请用原生压缩或新会话，或拆小这条消息。", "warning");
+          ctx.ui.notify("[fold] ⚠️ 最近一条用户消息太大，不截断它就放不进上下文。请用原生压缩或新会话，或拆小这条消息。", "warning");
         }
         if (overLimit) latestUserOverLimit.add(sid); else latestUserOverLimit.delete(sid);
       } else {
@@ -506,7 +506,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
             limit: turn.terminalEscape.modelContextLimit,
           });
           if (ctx.hasUI) {
-            ctx.ui.notify(`[ACP] ⚠️ ${turn.terminalEscape.message}`, "warning");
+            ctx.ui.notify(`[fold] ⚠️ ${turn.terminalEscape.message}`, "warning");
           }
         }
       } else {
@@ -607,7 +607,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
       logInfo("degeneration", { sid, event: "recovery-notice", maxRun: top.count });
       if (ctx.hasUI && lastDegNoticeKey !== `${sid}:${top.count}:${top.char.codePointAt(0)}`) {
         lastDegNoticeKey = `${sid}:${top.count}:${top.char.codePointAt(0)}`;
-        ctx.ui.notify(`[ACP] previous turn ended in degenerate generation (${top.count}× repeat) — the repeated segment was truncated above and a recovery notice injected.`);
+        ctx.ui.notify(`[fold] previous turn ended in degenerate generation (${top.count}× repeat) — the repeated segment was truncated above and a recovery notice injected.`);
       }
     }
     const debugOn = debug.enabled;
@@ -704,7 +704,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
           logWarn("nudge", { sid: ctx.sessionManager.getSessionId(), event: "emergency-inject", pct: Math.round(turn.nudge.contextUsage * 100), voice: rendered.voice, compressible: turn.nudge.compressibleRanges.length });
         }
         if (debugOn && ctx.hasUI) {
-          ctx.ui.notify(`[ACP nudge → context]${emergency ? " [EMERGENCY]" : ""}\n${rendered.text}${example}`);
+          ctx.ui.notify(`[fold nudge → context]${emergency ? " [EMERGENCY]" : ""}\n${rendered.text}${example}`);
         }
         if (!emergency) runtime.markNudgeShown(sid, turnKey, tokenCount);
         debug.event("nudge-injected", { sid: ctx.sessionManager.getSessionId(), voice: rendered.voice, channels: ["context", debugOn ? "terminal" : null].filter(Boolean), emergency, turnKey, reInject: shownAt !== undefined, text: rendered.text + example });
@@ -741,7 +741,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
       logWarn("nudge", { sid, event: "compress-retry-capped", failures: outcome.count });
       debug.event("compress-retry-capped", { sid, turnKey, failures: outcome.count });
       if (ctx.hasUI) {
-        ctx.ui.notify(`[ACP] compress failed ${outcome.count}× this turn — nudge paused until the next user message (emergency truncation still active).`);
+        ctx.ui.notify(`[fold] compress failed ${outcome.count}× this turn — nudge paused until the next user message (emergency truncation still active).`);
       }
     }
 
@@ -837,7 +837,7 @@ function wireSystemPrompt(pi: ExtensionAPI, runtime: AcpRuntime): void {
       ].sort();
       const key = ignored.join(",");
       if (ignored.length > 0 && key !== lastIgnoredPromptKeys) {
-        const message = `ACP: ${ignored.join(", ")} ignored — this build replaces the ACP system prompt. Use prompts (with acknowledgePromptsRisk) to change compression rules.`;
+        const message = `Fold: ${ignored.join(", ")} ignored — this build replaces the fold system prompt. Use prompts (with acknowledgePromptsRisk) to change compression rules.`;
         logWarn("config", { event: "prompt-config-ignored", keys: key });
         if (ctx?.hasUI) ctx.ui.notify(message, "warning");
       }
@@ -903,7 +903,7 @@ function wireOverflowSelfHeal(pi: ExtensionAPI, runtime: AcpRuntime): void {
       if (info.window) ov.setLearnedWindow(modelId, info.window);
       ov.armed = true;
       logWarn("overflow-selfheal", { sid, modelId, event: "detected", window: info.window ?? null, message: info.message.slice(0, 200) });
-      if (ctx.hasUI) ctx.ui.notify(`[ACP] context overflow detected${info.window ? ` (window ${info.window})` : ""} — forcing emergency compression next turn`);
+      if (ctx.hasUI) ctx.ui.notify(`[fold] context overflow detected${info.window ? ` (window ${info.window})` : ""} — forcing emergency compression next turn`);
       return;
     }
     // Possible overflow: pi's bodyless "4xx ... (no body)" (incident
@@ -922,7 +922,7 @@ function wireOverflowSelfHeal(pi: ExtensionAPI, runtime: AcpRuntime): void {
     if (!decision.arm) return;
     ov.armed = true;
     logWarn("overflow-selfheal", { sid, modelId, event: "no-body-arm", consecutive: decision.consecutive, ratio: decision.ratio, message: haystack.slice(0, 200) });
-    if (ctx.hasUI) ctx.ui.notify(`[ACP] possible context overflow (4xx no-body error, ${decision.consecutive} consecutive) — forcing emergency compression next turn`);
+    if (ctx.hasUI) ctx.ui.notify(`[fold] possible context overflow (4xx no-body error, ${decision.consecutive} consecutive) — forcing emergency compression next turn`);
   });
   pi.on("session_shutdown", (_event, ctx) => {
     runtime.overflowDrop(ctx.sessionManager.getSessionId());
@@ -970,11 +970,11 @@ function wireThrottleRetry(pi: ExtensionAPI, runtime: AcpRuntime): void {
     const decision = th.onThrottleError(cfg.maxRetries);
     if (decision === "exhausted") {
       logWarn("throttle-retry", { sid: ctx.sessionManager.getSessionId(), event: "budget-exhausted", max: cfg.maxRetries });
-      if (ctx.hasUI) ctx.ui.notify(`[ACP] provider throttled — retry budget exhausted (${cfg.maxRetries}); surfacing error`);
+      if (ctx.hasUI) ctx.ui.notify(`[fold] provider throttled — retry budget exhausted (${cfg.maxRetries}); surfacing error`);
       return;
     }
     logInfo("throttle-retry", { sid: ctx.sessionManager.getSessionId(), event: "rewrite", attempt: th.state.attempts, max: cfg.maxRetries, path: "native" });
-    if (ctx.hasUI) ctx.ui.notify(`[ACP] provider throttled — retry ${th.state.attempts}/${cfg.maxRetries} (fast probe)`);
+    if (ctx.hasUI) ctx.ui.notify(`[fold] provider throttled — retry ${th.state.attempts}/${cfg.maxRetries} (fast probe)`);
     return { message: { ...msg, errorMessage: THROTTLE_RETRY_ERROR_MESSAGE } };
   });
   pi.on("agent_settled", async (_event, ctx) => {
@@ -986,12 +986,12 @@ function wireThrottleRetry(pi: ExtensionAPI, runtime: AcpRuntime): void {
     th.onKickStarted();
     const sid = ctx.sessionManager.getSessionId();
     logInfo("throttle-retry", { sid, event: "kick-sleep", kickNumber, delayMs });
-    if (ctx.hasUI) ctx.ui.notify(`[ACP] provider throttled — waiting ${Math.round(delayMs / 1000)}s before retry ${th.state.attempts + 1}/${cfg.maxRetries}`);
+    if (ctx.hasUI) ctx.ui.notify(`[fold] provider throttled — waiting ${Math.round(delayMs / 1000)}s before retry ${th.state.attempts + 1}/${cfg.maxRetries}`);
     const result = await abortableSleep(delayMs, th.sleepController().signal);
     if (result === "aborted") {
       th.onKickCancelled();
       logInfo("throttle-retry", { sid, event: "kick-cancelled", kickNumber });
-      if (ctx.hasUI) ctx.ui.notify("[ACP] throttle retry cancelled (user input received)");
+      if (ctx.hasUI) ctx.ui.notify("[fold] throttle retry cancelled (user input received)");
       return;
     }
     if (!th.readyToKick(cfg.maxRetries)) return;
@@ -1090,5 +1090,5 @@ export function formatNudgeRecord(nudge: NudgeDecision, emergency: boolean): str
   const tier = `T${nudge.tier ?? 1}`;
   const top = [...nudge.compressibleRanges].sort((a, b) => b.tokens - a.tokens)[0];
   const range = top ? ` · top range ${top.startRef}–${top.endRef}` : "";
-  return `[ACP nudge]${emergency ? " EMERGENCY" : ""} ${pct}% · ${tier}${range}`;
+  return `[fold nudge]${emergency ? " EMERGENCY" : ""} ${pct}% · ${tier}${range}`;
 }

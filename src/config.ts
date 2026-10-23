@@ -183,7 +183,7 @@ export interface AdapterConfig {
    *  minRun=200. */
   degenerationGuard?: boolean | DegenerationGuardConfig;
   /** Persistent-rules feature gate (#526): opt-in `rules: true` in acp.json.
-   *  Gates the human `/acp-rule` command (list + record + remove + clear — kernel
+   *  Gates the human `/fold-rule` command (list + record + remove + clear — kernel
    *  `listRules`/`addRule`/`removeRule`/`clearRules` against the session `.acp.json` sidecar state) and
    *  the model-side `acp_rule` tool (#490). Custom limits via
    *  coreOverrides.rules ({ maxRules?, maxRuleChars? }). */
@@ -212,7 +212,7 @@ export interface AdapterConfig {
   /** Dedicated summary model (#241 port). `session` reuses the active model
    *  and the captured prompt prefix; `provider/id` or a bare id resolves via
    *  Pi's model registry. Omitted = the main model writes summaries. Managed
-   *  by `/acp compact`. */
+   *  by `/fold compact`. */
   compressionModelId?: string;
   coreOverrides?: Partial<Config>;
   /** Host-only (never read from acp.json): the embedding extension replaces

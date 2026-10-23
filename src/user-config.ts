@@ -213,7 +213,7 @@ function cleanProtectionList(key: string, value: unknown): string[] | undefined 
 }
 
 /** Persist compressionModelId in the GLOBAL acp.json while preserving every
- *  other key (#241 port, `/acp compact`). null removes it. Project-level
+ *  other key (#241 port, `/fold compact`). null removes it. Project-level
  *  acp.json still overrides the global value. A present-but-unparseable file
  *  is never overwritten. */
 export async function saveCompressionModelId(value: string | null): Promise<void> {

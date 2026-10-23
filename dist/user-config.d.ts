@@ -53,7 +53,7 @@ export declare function parseAcpJson(file: string, raw: string): AcpJsonParse;
  *  garbage to the kernel (#499). */
 export declare function applyUserConfig(adapter: AdapterConfig, user: UserAcpConfig): AdapterConfig;
 /** Persist compressionModelId in the GLOBAL acp.json while preserving every
- *  other key (#241 port, `/acp compact`). null removes it. Project-level
+ *  other key (#241 port, `/fold compact`). null removes it. Project-level
  *  acp.json still overrides the global value. A present-but-unparseable file
  *  is never overwritten. */
 export declare function saveCompressionModelId(value: string | null): Promise<void>;

@@ -3,7 +3,7 @@ import { type Component } from "@earendil-works/pi-tui";
 import type { AdapterConfig } from "./config.js";
 import { type IdleCompactHandle } from "./idle-compact.js";
 import type { AcpRuntime } from "./runtime.js";
-/** `/acp-config`: TUI settings panel over the GLOBAL ~/.pi/acp.json. Values
+/** `/fold-config`: TUI settings panel over the GLOBAL ~/.pi/acp.json. Values
  *  shown are the effective ones (project acp.json included); changes are
  *  written to the global file and applied at once via reloadConfig. */
 export interface PanelScope {
@@ -37,13 +37,14 @@ export declare function panelDisplay(item: PanelItem, adapter: AdapterConfig, sc
     values?: string[];
     locked: boolean;
 };
+/** /fold-config, with its pre-rename /acp-config name kept as an alias. */
 export declare function makeConfigCommand(runtime: AcpRuntime, idle: IdleCompactHandle | undefined): {
     name: string;
     options: {
         description: string;
         handler: (_args: string, ctx: ExtensionCommandContext) => Promise<void>;
     };
-};
+}[];
 /** Model picker for the summary-model submenu: typing filters (fuzzy, like
  *  Pi's own pickers), arrows move, Enter picks, Esc goes back. */
 export declare class SearchableList implements Component {

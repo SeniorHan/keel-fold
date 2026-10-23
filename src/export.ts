@@ -103,13 +103,13 @@ export async function listSessions(sessionDir: string): Promise<SessionSummary[]
 export async function exportSession(selector: string | undefined, opts: ExportOptions, sessionDir: string): Promise<string> {
   const all = await loadAllSessions(sessionDir);
   if (all.length === 0) {
-    return "No ACP-managed sessions found in this project's session directory. A session becomes exportable once billion-context-pi has processed a turn in it (its compression state is saved alongside the session file).";
+    return "No fold-managed sessions found in this project's session directory. A session becomes exportable once billion-context-pi has processed a turn in it (its compression state is saved alongside the session file).";
   }
   if (!selector) {
     const rows = all.map((s) =>
       `${s.id}${s.name ? `  label=${s.name}` : ""}  blocks=${s.state.blocks.length}${s.contextTokens ? `  ctx~${s.contextTokens}` : ""}  ${s.title ? truncate(s.title, 80) : ""}`
     );
-    return ["ACP-managed sessions:", "", ...rows.map((r) => `  ${r}`), "", "Usage: /acp-export <session-id|label> [--output handoff.md] [--full]"].join("\n");
+    return ["Fold-managed sessions:", "", ...rows.map((r) => `  ${r}`), "", "Usage: /fold-export <session-id|label> [--output handoff.md] [--full]"].join("\n");
   }
   const matches = matchSession(all, selector, (s) => s.name);
   if (matches.length === 0) {

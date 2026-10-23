@@ -8,7 +8,7 @@ import type { AcpRuntime } from "./runtime.js";
 import { SESSION_MODEL_REF } from "./compress-model.js";
 import { updateGlobalAcpConfig } from "./user-config.js";
 
-/** `/acp-config`: TUI settings panel over the GLOBAL ~/.pi/acp.json. Values
+/** `/fold-config`: TUI settings panel over the GLOBAL ~/.pi/acp.json. Values
  *  shown are the effective ones (project acp.json included); changes are
  *  written to the global file and applied at once via reloadConfig. */
 
@@ -193,14 +193,15 @@ function summaryModelChoices(ctx: ExtensionCommandContext): string[] {
   return [MAIN_MODEL, SESSION_MODEL_REF, ...models.map((m) => `${m.provider}/${m.id}`)];
 }
 
+/** /fold-config, with its pre-rename /acp-config name kept as an alias. */
 export function makeConfigCommand(runtime: AcpRuntime, idle: IdleCompactHandle | undefined) {
-  return {
-    name: "acp-config",
+  const command = {
+    name: "fold-config",
     options: {
-      description: "Open the ACP settings panel (Summary model, Idle compact, per-model compression, tool guards).",
+      description: "Open the fold settings panel (Summary model, Idle compact, per-model compression, tool guards).",
       handler: async (_args: string, ctx: ExtensionCommandContext) => {
         if (ctx.mode !== "tui") {
-          ctx.ui.notify("/acp-config needs TUI mode; edit ~/.pi/acp.json directly instead", "error");
+          ctx.ui.notify("/fold-config needs TUI mode; edit ~/.pi/acp.json directly instead", "error");
           return;
         }
         const model = ctx.model as { provider?: string; id?: string } | undefined;
@@ -231,13 +232,13 @@ export function makeConfigCommand(runtime: AcpRuntime, idle: IdleCompactHandle |
 
           const container = new Container();
           const where = scope.provider && scope.modelId ? `current model ${scope.provider}/${scope.modelId}` : "no current model, per-model settings hidden";
-          container.addChild(new Text(theme.fg("accent", theme.bold("ACP settings")) + theme.fg("dim", `  saved to ~/.pi/acp.json · ${where}`), 0, 0));
+          container.addChild(new Text(theme.fg("accent", theme.bold("Fold settings")) + theme.fg("dim", `  saved to ~/.pi/acp.json · ${where}`), 0, 0));
           const list = new SettingsList(
             settingItems,
             Math.min(settingItems.length + 2, 15),
             getSettingsListTheme(),
             (id, value) => {
-              void save(id, value).catch((e) => ctx.ui.notify(`[ACP] Save failed: ${e instanceof Error ? e.message : String(e)}`, "error"));
+              void save(id, value).catch((e) => ctx.ui.notify(`[fold] Save failed: ${e instanceof Error ? e.message : String(e)}`, "error"));
             },
             () => done(undefined),
           );
@@ -252,7 +253,7 @@ export function makeConfigCommand(runtime: AcpRuntime, idle: IdleCompactHandle |
             const now = readPanelValue(runtime.adapter, id, scope);
             if (now !== value) {
               list.updateValue(id, now);
-              ctx.ui.notify(`[ACP] Saved to the global config, but the project .pi/acp.json overrides this setting; in effect: ${now}`, "warning");
+              ctx.ui.notify(`[fold] Saved to the global config, but the project .pi/acp.json overrides this setting; in effect: ${now}`, "warning");
             }
             // Lock or unlock items that depend on this switch (SettingsList holds these objects by reference).
             for (const item of items.filter((i) => i.dependsOn === id)) {
@@ -277,6 +278,11 @@ export function makeConfigCommand(runtime: AcpRuntime, idle: IdleCompactHandle |
       },
     },
   };
+  const alias = {
+    name: "acp-config",
+    options: { ...command.options, description: `Alias for /fold-config (pre-rename name).` },
+  };
+  return [command, alias];
 }
 
 /** Model picker for the summary-model submenu: typing filters (fuzzy, like

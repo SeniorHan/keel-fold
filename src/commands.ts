@@ -39,9 +39,9 @@ type RuleCommandOp =
 
 const RULE_ID_RE = /^rule\d+$/;
 
-const RULE_OP_CONFLICT = 'One operation per call — use "/acp-rule remove <id>" or "/acp-rule clear" separately.';
+const RULE_OP_CONFLICT = 'One operation per call — use "/fold-rule remove <id>" or "/fold-rule clear" separately.';
 
-/** /acp-rule arg parsing (#537): exact "clear" clears all; exactly two tokens
+/** /fold-rule arg parsing (#537): exact "clear" clears all; exactly two tokens
  *  "remove ruleN" removes by id; anything else records verbatim — so plain
  *  rule texts that merely start with remove/clear-like words stay recordable.
  *  Mixed operations in one call are rejected without mutating state. */
@@ -65,6 +65,18 @@ function parseRuleCommand(raw: string): RuleCommandOp {
   return { kind: "record", text: arg };
 }
 
+/** Pre-rename command names kept as aliases: the user types /acp and it routes
+ *  to the same handler as /fold (same alias discipline as the model surface). */
+const COMMAND_ALIASES: Record<string, string> = {
+  acp: "fold",
+  "acp-status": "fold-status",
+  "acp-cache": "fold-cache",
+  "acp-rule": "fold-rule",
+  "acp-export": "fold-export",
+  "acp-decompress": "fold-unfold",
+  "acp-search": "fold-search",
+};
+
 export function makeCommands(runtime: AcpRuntime, pi?: ExtensionAPI): Array<{ name: string; options: CommandOptions }> {
   // Persistent transcript output (rendered by TUI and web hosts like pi-web);
   // notify() is a transient toast and only the fallback for hosts without
@@ -77,11 +89,11 @@ export function makeCommands(runtime: AcpRuntime, pi?: ExtensionAPI): Array<{ na
     }
     ctx.ui.notify(text);
   };
-  return [
+  const commands: Array<{ name: string; options: CommandOptions }> = [
     {
-      name: "acp",
+      name: "fold",
       options: {
-        description: "Show ACP context usage, token breakdown, and compression status. /acp compact [session|provider/id|reset] manages the dedicated summary model.",
+        description: "Show fold context usage, token breakdown, and compression status. /fold compact [session|provider/id|reset] manages the dedicated summary model.",
         handler: async (args: string, ctx: ExtensionCommandContext) => {
           const argText = typeof args === "string" ? args : "";
           if (argText.trim().split(/\s+/, 1)[0] !== "compact") return statusHandler(argText, ctx);
@@ -90,14 +102,14 @@ export function makeCommands(runtime: AcpRuntime, pi?: ExtensionAPI): Array<{ na
       },
     },
     {
-      name: "acp-status",
+      name: "fold-status",
       options: {
-        description: "Detailed ACP status (block tiers, token breakdown).",
+        description: "Detailed fold status (block tiers, token breakdown).",
         handler: statusHandler,
       },
     },
     {
-      name: "acp-cache",
+      name: "fold-cache",
       options: {
         description:
           "Prompt-cache reconciliation: grand ledger (input/cached/hit rate) with every request's miss split into new content / compression re-pay / TTL expiry, plus per-fold economics. Append 'full' for the every-line listing.",
@@ -119,11 +131,11 @@ export function makeCommands(runtime: AcpRuntime, pi?: ExtensionAPI): Array<{ na
       },
     },
     {
-      name: "acp-rule",
+      name: "fold-rule",
       options: {
         description:
-          "Manage persistent session rules (same rules the acp_rule feature keeps): list, record, remove by id, or clear all. " +
-          'Usage: /acp-rule [text to record] | /acp-rule remove <id> | /acp-rule clear',
+          "Manage persistent session rules (same rules the acp_rule tool keeps): list, record, remove by id, or clear all. " +
+          'Usage: /fold-rule [text to record] | /fold-rule remove <id> | /fold-rule clear',
         handler: async (args, ctx) => {
           if (runtime.adapter.rules !== true) {
             ctx.ui.notify(
@@ -177,11 +189,11 @@ export function makeCommands(runtime: AcpRuntime, pi?: ExtensionAPI): Array<{ na
       },
     },
     {
-      name: "acp-export",
+      name: "fold-export",
       options: {
         description:
           "Export a session as a handoff markdown doc (folded view by default). " +
-          "Usage: /acp-export [session-id|label] [--full] [--output handoff.md]",
+          "Usage: /fold-export [session-id|label] [--full] [--output handoff.md]",
         handler: async (args, ctx) => {
           const parsed = parseExportArgs(args);
           if (parsed.error) {
@@ -213,13 +225,13 @@ export function makeCommands(runtime: AcpRuntime, pi?: ExtensionAPI): Array<{ na
       },
     },
     {
-      name: "acp-decompress",
+      name: "fold-unfold",
       options: {
-        description: "Restore a compressed block's content (shown here, block stays folded). Usage: /acp-decompress b3",
+        description: "Restore a compressed block's content (shown here, block stays folded). Usage: /fold-unfold b3",
         handler: async (args, ctx) => {
           const blockId = parseBlockIdArg(args);
           if (!blockId) {
-            ctx.ui.notify('Usage: /acp-decompress <blockId> (e.g. "b3")');
+            ctx.ui.notify('Usage: /fold-unfold <blockId> (e.g. "b3")');
             return;
           }
           const { state, coreMessages } = await runtime.stateFor(ctx);
@@ -238,13 +250,13 @@ export function makeCommands(runtime: AcpRuntime, pi?: ExtensionAPI): Array<{ na
       },
     },
     {
-      name: "acp-search",
+      name: "fold-search",
       options: {
-        description: "Search compressed block summaries. Usage: /acp-search auth token",
+        description: "Search compressed block summaries. Usage: /fold-search auth token",
         handler: async (args, ctx) => {
           const query = args.trim();
           if (!query) {
-            ctx.ui.notify("Usage: /acp-search <query>");
+            ctx.ui.notify("Usage: /fold-search <query>");
             return;
           }
           const { state } = await runtime.stateFor(ctx);
@@ -259,9 +271,18 @@ export function makeCommands(runtime: AcpRuntime, pi?: ExtensionAPI): Array<{ na
       },
     },
   ];
+  // Legacy names still work: the same options (same handler) registered under
+  // the old command name, with a description pointing at the new one.
+  const aliases = Object.entries(COMMAND_ALIASES).flatMap(([legacy, modern]) => {
+    const command = commands.find((c) => c.name === modern);
+    return command
+      ? [{ name: legacy, options: { ...command.options, description: `Alias for /${modern} (pre-rename name).` } }]
+      : [];
+  });
+  return [...commands, ...aliases];
 }
 
-/** `/acp compact [session|provider/id|reset]` (#241 port): show or persist
+/** `/fold compact [session|provider/id|reset]` (#241 port): show or persist
  *  the dedicated summary model in the global acp.json. */
 async function handleCompact(args: string, runtime: AcpRuntime, ctx: ExtensionCommandContext): Promise<string> {
   const target = args.trim().split(/\s+/).slice(1).join(" ");
@@ -274,14 +295,14 @@ async function handleCompact(args: string, runtime: AcpRuntime, ctx: ExtensionCo
   const projectNote = (effective: string | undefined) => `Global setting saved, but project acp.json keeps ${effective ?? "main-model summaries"} active.`;
   if (!target) {
     const current = runtime.getCompressionModelRef();
-    if (current === SESSION_MODEL_REF) return "Summary model: session (active model + shared prompt prefix). Falls back to the caller summary on error.\nReset: /acp compact reset";
+    if (current === SESSION_MODEL_REF) return "Summary model: session (active model + shared prompt prefix). Falls back to the caller summary on error.\nReset: /fold compact reset";
     if (current) {
       const resolved = resolveModel(registry, current);
       return resolved.model
-        ? `Summary model: ${resolved.model.provider}/${resolved.model.id}. Falls back to the caller summary on error.\nReset: /acp compact reset`
-        : `Summary model: ${current} — NOT resolvable now; compress keeps caller summaries.\nReset: /acp compact reset`;
+        ? `Summary model: ${resolved.model.provider}/${resolved.model.id}. Falls back to the caller summary on error.\nReset: /fold compact reset`
+        : `Summary model: ${current} — NOT resolvable now; compress keeps caller summaries.\nReset: /fold compact reset`;
     }
-    return "Summary model: not set — the main model writes summaries.\nSet: /acp compact session | /acp compact <provider/id>";
+    return "Summary model: not set — the main model writes summaries.\nSet: /fold compact session | /fold compact <provider/id>";
   }
   if (target === "reset") {
     const effective = await persist(null);

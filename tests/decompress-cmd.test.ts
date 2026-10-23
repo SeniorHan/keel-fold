@@ -48,9 +48,9 @@ function fakeCtx(entries: any[], stateFile: string, notifies: string[]) {
 }
 
 // Full pipeline: context handler assigns refs → compress tool creates an active
-// block → /acp-decompress returns the block's content without deactivating it
+// block → /fold-unfold returns the block's content without deactivating it
 // (append semantics: the block stays folded, content shown via notify).
-test("/acp-decompress returns a block's content and stays repeatable (append mode)", async () => {
+test("/fold-unfold returns a block's content and stays repeatable (append mode)", async () => {
   const { api, handlers } = captureApi();
   createAcpExtension({ modelContextLimit: 200_000 })(api as any);
 
@@ -85,9 +85,9 @@ test("/acp-decompress returns a block's content and stays repeatable (append mod
   const compressText = (compressRes.content[0] as any).text as string;
   assert.match(compressText, /blocks: b\d+=/, "compress created a block");
 
-  // 3) Run /acp-decompress b1 — returns content, does NOT deactivate.
+  // 3) Run /fold-unfold b1 — returns content, does NOT deactivate.
   notifies.length = 0;
-  const decompressCmd = api.commands.get("acp-decompress");
+  const decompressCmd = api.commands.get("fold-unfold");
   await decompressCmd.handler("b1", ctx);
   assert.equal(notifies.length, 1);
   assert.match(notifies[0]!, /Block b1 \(\d+ item/, "notify reports restored count");
@@ -98,14 +98,14 @@ test("/acp-decompress returns a block's content and stays repeatable (append mod
   assert.match(notifies[0]!, /Block b1 \(\d+ item/, "repeat call returns content again");
 });
 
-test("/acp-decompress rejects invalid input with a usage message", async () => {
+test("/fold-unfold rejects invalid input with a usage message", async () => {
   const { api } = captureApi();
   createAcpExtension({ modelContextLimit: 200_000 })(api as any);
 
   const notifies: string[] = [];
   const ctx = fakeCtx([], tmpPath("pai-acp-decompress-invalid.session.json"), notifies);
   await cleanState(tmpPath("pai-acp-decompress-invalid.session.json"));
-  const decompressCmd = api.commands.get("acp-decompress");
+  const decompressCmd = api.commands.get("fold-unfold");
 
   // parseBlockIdArg accepts bare numbers ("3" -> "b3") and "b<N>"; only truly
   // malformed input returns null.
@@ -117,7 +117,7 @@ test("/acp-decompress rejects invalid input with a usage message", async () => {
   }
 });
 
-test("/acp-decompress reports not-found for a valid id with no matching block", async () => {
+test("/fold-unfold reports not-found for a valid id with no matching block", async () => {
   const { api, handlers } = captureApi();
   createAcpExtension({ modelContextLimit: 200_000 })(api as any);
 
@@ -126,7 +126,7 @@ test("/acp-decompress reports not-found for a valid id with no matching block", 
   await cleanState(tmpPath("pai-acp-decompress-nf.session.json"));
   await handlers.get("context")![0]!({ type: "context", messages: [] }, ctx);
 
-  const decompressCmd = api.commands.get("acp-decompress");
+  const decompressCmd = api.commands.get("fold-unfold");
   await decompressCmd.handler("b99", ctx);
   assert.match(notifies[0]!, /not found/i, "reports not-found for absent block");
 });

@@ -47,7 +47,7 @@ export function appendTimeoutNotice(
 
 function buildTimeoutNotice(secs: number): string {
   const suggested = Math.min(Math.max(Math.ceil(secs * 2), 120), 3600);
-  return `\n\n[ACP guardrail: command killed after ${secs}s. To give it more time, re-run the bash tool with a larger \`timeout\` argument (e.g. \`"timeout": ${suggested}\`).]`;
+  return `\n\n[fold guardrail: command killed after ${secs}s. To give it more time, re-run the bash tool with a larger \`timeout\` argument (e.g. \`"timeout": ${suggested}\`).]`;
 }
 
 // --- Generic tool-call repetition guard (issue #308) ---
@@ -116,11 +116,11 @@ export class RepetitionTracker {
 }
 
 function buildRepetitionWarnNotice(toolName: string, count: number): string {
-  return `\n\n[ACP guardrail: you have issued ${count} CONSECUTIVE identical \`${toolName}\` calls (name + arguments byte-for-byte identical). Re-running the exact same call will not produce a new result. STOP issuing this identical call — change your approach, change the arguments, or stop and report to the user.]`;
+  return `\n\n[fold guardrail: you have issued ${count} CONSECUTIVE identical \`${toolName}\` calls (name + arguments byte-for-byte identical). Re-running the exact same call will not produce a new result. STOP issuing this identical call — change your approach, change the arguments, or stop and report to the user.]`;
 }
 
 function buildRepetitionAbortNotice(toolName: string, count: number): string {
-  return `[ACP guardrail: BLOCKED — you issued ${count} consecutive identical \`${toolName}\` calls (byte-for-byte identical arguments). This call was refused and NOT executed. You MUST change strategy: use different arguments, a different tool, or stop and report to the user. Do not re-issue the identical call. The turn has been aborted.`;
+  return `[fold guardrail: BLOCKED — you issued ${count} consecutive identical \`${toolName}\` calls (byte-for-byte identical arguments). This call was refused and NOT executed. You MUST change strategy: use different arguments, a different tool, or stop and report to the user. Do not re-issue the identical call. The turn has been aborted.`;
 }
 
 export function wireToolGuardrails(pi: ExtensionAPI, runtime: AcpRuntime): void {
@@ -141,7 +141,7 @@ export function wireToolGuardrails(pi: ExtensionAPI, runtime: AcpRuntime): void 
     if (decision.action === "abort") {
       const msg = buildRepetitionAbortNotice(decision.toolName, decision.count);
       logWarn("guardrail", { event: "repetition-abort", sid, tool: decision.toolName, count: decision.count });
-      if (ctx.hasUI) ctx.ui.notify(`[ACP] ${msg}`, "warning");
+      if (ctx.hasUI) ctx.ui.notify(`[fold] ${msg}`, "warning");
       try {
         ctx.abort();
       } catch {

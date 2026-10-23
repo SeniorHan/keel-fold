@@ -1,4 +1,4 @@
-// Dedicated summary model (#241 port onto v0.1.83): `/acp compact` config and
+// Dedicated summary model (#241 port onto v0.1.83): `/fold compact` config and
 // the compress-tool routing through Pi's model registry (ctx.modelRegistry).
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -393,46 +393,46 @@ test("no compressionModelId: main-model summary, no side call, original descript
   assert.ok((await readBlockSummaries(stateFile)).includes(FALLBACK));
 });
 
-test("/acp compact: status, set provider/id, session, reset, ambiguous, unknown", async () => {
+test("/fold compact: status, set provider/id, session, reset, ambiguous, unknown", async () => {
   const registry = fakeRegistry([model("cheap", "summarizer"), model("a", "dup"), model("b", "dup")], textReply(DEDICATED), []);
   let out = "";
   const { api, ctx, compress } = await setup("cmd", registry, { notify: (s) => (out = s), acpJson: { compress: { promptPack: "lean" } } });
-  const acp = api.commands.get("acp");
+  const fold = api.commands.get("fold");
 
-  await acp.handler("compact", ctx);
+  await fold.handler("compact", ctx);
   assert.match(out, /not set/);
 
-  await acp.handler("compact summarizer", ctx);
+  await fold.handler("compact summarizer", ctx);
   assert.match(out, /set to cheap\/summarizer/);
   let written = JSON.parse(await fs.readFile(acpJsonPath, "utf8"));
   assert.equal(written.compressionModelId, "cheap/summarizer");
   assert.deepEqual(written.compress, { promptPack: "lean" }, "unrelated keys preserved");
   assert.match(compress.description, /Dedicated summary model cheap\/summarizer/);
 
-  await acp.handler("compact dup", ctx);
+  await fold.handler("compact dup", ctx);
   assert.match(out, /Ambiguous model id "dup"[\s\S]*a\/dup[\s\S]*b\/dup/);
 
-  await acp.handler("compact nope", ctx);
+  await fold.handler("compact nope", ctx);
   assert.match(out, /not found[\s\S]*cheap\/summarizer/);
 
-  await acp.handler("compact session", ctx);
+  await fold.handler("compact session", ctx);
   assert.match(out, /set to session/);
-  await acp.handler("compact", ctx);
+  await fold.handler("compact", ctx);
   assert.match(out, /Summary model: session/);
 
-  await acp.handler("compact reset", ctx);
+  await fold.handler("compact reset", ctx);
   assert.match(out, /cleared/);
   written = JSON.parse(await fs.readFile(acpJsonPath, "utf8"));
   assert.equal(written.compressionModelId, undefined);
   assert.doesNotMatch(compress.description, /Dedicated summary model/);
 });
 
-test("/acp compact refuses to overwrite an unparseable global acp.json", async () => {
+test("/fold compact refuses to overwrite an unparseable global acp.json", async () => {
   const registry = fakeRegistry([model("cheap", "summarizer")], textReply(DEDICATED), []);
   const { api, ctx } = await setup("badjson", registry);
   await fs.mkdir(path.dirname(acpJsonPath), { recursive: true });
   await fs.writeFile(acpJsonPath, "{ not json");
-  await assert.rejects(() => api.commands.get("acp").handler("compact cheap/summarizer", ctx));
+  await assert.rejects(() => api.commands.get("fold").handler("compact cheap/summarizer", ctx));
   assert.equal(await fs.readFile(acpJsonPath, "utf8"), "{ not json");
 });
 

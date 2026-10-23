@@ -57,10 +57,10 @@ test("formatNudgeRecord: compact one-liner matching the issue #326 example", () 
     ],
     breakdown: {},
   } as unknown as NudgeDecision;
-  assert.equal(formatNudgeRecord(base, true), "[ACP nudge] EMERGENCY 95% · T1 · top range m00120–m00168");
-  assert.equal(formatNudgeRecord(base, false), "[ACP nudge] 95% · T1 · top range m00120–m00168");
-  assert.equal(formatNudgeRecord({ ...base, tier: 2 } as NudgeDecision, false), "[ACP nudge] 95% · T2 · top range m00120–m00168");
-  assert.equal(formatNudgeRecord({ ...base, compressibleRanges: [] } as NudgeDecision, true), "[ACP nudge] EMERGENCY 95% · T1");
+  assert.equal(formatNudgeRecord(base, true), "[fold nudge] EMERGENCY 95% · T1 · top range m00120–m00168");
+  assert.equal(formatNudgeRecord(base, false), "[fold nudge] 95% · T1 · top range m00120–m00168");
+  assert.equal(formatNudgeRecord({ ...base, tier: 2 } as NudgeDecision, false), "[fold nudge] 95% · T2 · top range m00120–m00168");
+  assert.equal(formatNudgeRecord({ ...base, compressibleRanges: [] } as NudgeDecision, true), "[fold nudge] EMERGENCY 95% · T1");
 });
 
 // ─── integration: persistence wiring ────────────────────────────────────────
@@ -91,7 +91,7 @@ test("nudge injection persists exactly one display-only entry per user turn (iss
   assert.ok(nudgeCount(r0) >= 1, "emergency nudge fires on real overflow");
   assert.equal(appendedEntries.length, 1, "one persisted record on first injection");
   assert.equal(appendedEntries[0].customType, ACP_NUDGE_CUSTOM_TYPE);
-  assert.match(String(appendedEntries[0].data?.text), /^\[ACP nudge\] EMERGENCY \d+% · T\d+( · top range m\d+–m\d+)?$/);
+  assert.match(String(appendedEntries[0].data?.text), /^\[fold nudge\] EMERGENCY \d+% · T\d+( · top range m\d+–m\d+)?$/);
 
   // Second LLM call of the SAME turn: the emergency nudge re-injects into
   // context, but the session file must not gain a second record.
@@ -117,7 +117,7 @@ test("acp-nudge entry renderer builds a dim boxed component", () => {
     bg: (_c: string, t: string) => t,
   } as Theme;
 
-  const comp = renderer({ customType: ACP_NUDGE_CUSTOM_TYPE, data: { text: "[ACP nudge] EMERGENCY 95% · T1" } }, { expanded: false }, theme);
+  const comp = renderer({ customType: ACP_NUDGE_CUSTOM_TYPE, data: { text: "[fold nudge] EMERGENCY 95% · T1" } }, { expanded: false }, theme);
   assert.ok(comp, "well-formed record renders a component");
   assert.equal(comp.children.length, 1, "box holds the text child");
 

@@ -48,13 +48,17 @@ function userMsg(id: string, text: string) {
   return { type: "message", id, parentId: null, timestamp: "", message: { role: "user", content: text, timestamp: Date.now() } };
 }
 
-  test("factory registers the compress tool and 9 flat commands", () => {
+  test("factory registers the compress tool and 16 flat commands (8 + 8 legacy aliases)", () => {
   const { api, handlers } = captureApi();
   createAcpExtension()(api as any);
 
   assert.ok(api.tools.some((t) => t.name === "compress"), "compress tool registered");
   assert.ok(api.tools.some((t) => t.name === "cache"), "cache tool registered");
-  assert.deepEqual([...api.commands.keys()].sort(), ["acp", "acp-cache", "acp-config", "acp-decompress", "acp-export", "acp-rule", "acp-search", "acp-status"]);
+  assert.deepEqual([...api.commands.keys()].sort(), [
+    // fold family + legacy /acp* aliases (same handlers, pre-rename names)
+    "acp", "acp-cache", "acp-config", "acp-decompress", "acp-export", "acp-rule", "acp-search", "acp-status",
+    "fold", "fold-cache", "fold-config", "fold-export", "fold-rule", "fold-search", "fold-status", "fold-unfold",
+  ]);
   assert.ok(handlers.has("context"), "context event wired");
   assert.ok(handlers.has("session_before_compact"), "compaction-disable wired");
   assert.ok(handlers.has("before_agent_start"), "system-prompt wired");
@@ -183,7 +187,7 @@ test("modelContextLimit changes in .pi/acp.json are picked up on the next contex
         cwd: tmp,
         ui: { notify: (s: string) => { captured = s; }, confirm: async () => true, select: async () => undefined, input: async () => "", setStatus: () => {} },
       };
-      await api.commands.get("acp").handler([], ctx);
+      await api.commands.get("fold").handler([], ctx);
       return captured;
     }
 

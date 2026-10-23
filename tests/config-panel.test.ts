@@ -103,13 +103,13 @@ test("summary-model picker: typing filters fuzzily, Enter picks, Esc goes back",
   assert.deepEqual(picked, ["cliproxyapi/claude-opus-5-5", undefined]);
 });
 
-test("/acp-config panel renders, toggles a setting, and saves it to the global acp.json", async () => {
+test("/fold-config panel renders, toggles a setting, and saves it to the global acp.json", async () => {
   const file = userConfigPath(homedir(), "acp.json");
   await rm(file, { force: true });
   initTheme("dark");
   const runtime = createRuntime({});
   let rearmed = 0;
-  const command = makeConfigCommand(runtime, { noteNudge() {}, takeForcedNudge: () => false, rearm: () => { rearmed++; } });
+  const [command] = makeConfigCommand(runtime, { noteNudge() {}, takeForcedNudge: () => false, rearm: () => { rearmed++; } });
   let component: any;
   const notices: string[] = [];
   const ctx: any = {
@@ -126,7 +126,7 @@ test("/acp-config panel renders, toggles a setting, and saves it to the global a
   };
   await command.options.handler("", ctx);
   const lines = component.render(100).join("\n");
-  assert.match(lines, /ACP settings/);
+  assert.match(lines, /Fold settings/);
   assert.match(lines, /Idle compact/);
   assert.match(lines, /cliproxyapi\/claude-opus-5-5/);
   const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");

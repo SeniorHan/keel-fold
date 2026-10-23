@@ -31,7 +31,7 @@ function fakeRuntime(): AcpRuntime {
   } as unknown as AcpRuntime;
 }
 
-test("/acp panel (kit-rendered) separates session accounting from sent view", async () => {
+test("/fold panel (kit-rendered) separates session accounting from sent view", async () => {
   const notified: string[] = [];
   const ctx = {
     ui: { notify: (t: string) => notified.push(t) },
@@ -40,8 +40,8 @@ test("/acp panel (kit-rendered) separates session accounting from sent view", as
     sessionManager: { getSessionId: () => "s", getSessionFile: () => "/tmp/s.json" },
   } as unknown as ExtensionCommandContext;
 
-  const acp = makeCommands(fakeRuntime()).find((c) => c.name === "acp")!;
-  await acp.options.handler!("", ctx);
+  const fold = makeCommands(fakeRuntime()).find((c) => c.name === "fold")!;
+  await fold.options.handler!("", ctx);
 
   const text = notified[0] ?? "";
   assert.match(text, /Context \(session accounting, host footer scale\): 43% \(430k \/ 1\.0M\) — includes compressed originals; shrinks slower than the sent view/, text);
@@ -55,7 +55,7 @@ test("/acp panel (kit-rendered) separates session accounting from sent view", as
   assert.match(toolLine, / 83%/, `bar percentages must use the sent view: ${toolLine}`);
 });
 
-test("/acp panel Session-only derives on the estimation scale (positive assertion)", async () => {
+test("/fold panel Session-only derives on the estimation scale (positive assertion)", async () => {
   // Non-empty projection: 440K chars ≈ 110K tokens (chars/4) unpruned vs the
   // stubbed 24K sent view → Session-only must read 86k — estimate minus
   // estimate, never 430k − 24k (provider scale minus estimate).
@@ -72,15 +72,15 @@ test("/acp panel Session-only derives on the estimation scale (positive assertio
     sessionManager: { getSessionId: () => "s2", getSessionFile: () => "/tmp/s2.json" },
   } as unknown as ExtensionCommandContext;
 
-  const acp = makeCommands(runtime).find((c) => c.name === "acp")!;
-  await acp.options.handler!("", ctx);
+  const fold = makeCommands(runtime).find((c) => c.name === "fold")!;
+  await fold.options.handler!("", ctx);
 
   const text = notified[0] ?? "";
   assert.match(text, /Session-only \(compressed originals, est\.\): 86k — pruned from every request/, text);
   assert.doesNotMatch(text, /406k/, "cross-scale subtraction must not appear");
 });
 
-test("/acp panel renders prompt cache hit rate from stateFor entries", async () => {
+test("/fold panel renders prompt cache hit rate from stateFor entries", async () => {
   const runtime = fakeRuntime();
   (runtime.stateFor as () => Promise<unknown>) = async () => ({
     state: { blocks: [], stats: { tokensCompressed: 0 }, messageRefs: { byRaw: {}, byRef: {} } },
@@ -103,15 +103,15 @@ test("/acp panel renders prompt cache hit rate from stateFor entries", async () 
     sessionManager: { getSessionId: () => "s3", getSessionFile: () => "/tmp/s3.json" },
   } as unknown as ExtensionCommandContext;
 
-  const acp = makeCommands(runtime).find((c) => c.name === "acp")!;
-  await acp.options.handler!("", ctx);
+  const fold = makeCommands(runtime).find((c) => c.name === "fold")!;
+  await fold.options.handler!("", ctx);
 
   const text = notified[0] ?? "";
   // session = (99k + 180k) / (100k + 200k) = 93.0%; last = 180k/200k = 90.0%
   assert.match(text, /Prompt cache \(provider-reported\): 90\.0% last · 93\.0% session avg — 279k of 300k billed prompt tokens served from cache \(2 req\)/, text);
 });
 
-test("/acp panel omits prompt cache section when entries carry no usage", async () => {
+test("/fold panel omits prompt cache section when entries carry no usage", async () => {
   const runtime = fakeRuntime();
   (runtime.stateFor as () => Promise<unknown>) = async () => ({
     state: { blocks: [], stats: { tokensCompressed: 0 }, messageRefs: { byRaw: {}, byRef: {} } },
@@ -126,15 +126,15 @@ test("/acp panel omits prompt cache section when entries carry no usage", async 
     sessionManager: { getSessionId: () => "s4", getSessionFile: () => "/tmp/s4.json" },
   } as unknown as ExtensionCommandContext;
 
-  const acp = makeCommands(runtime).find((c) => c.name === "acp")!;
-  await acp.options.handler!("", ctx);
+  const fold = makeCommands(runtime).find((c) => c.name === "fold")!;
+  await fold.options.handler!("", ctx);
 
   const text = notified[0] ?? "";
   assert.ok(text, "panel rendered");
   assert.doesNotMatch(text, /Prompt cache/, `cache section must be omitted without cache-reported requests:\n${text}`);
 });
 
-test("/acp and /acp-status emit a persistent custom message via pi.sendMessage (issue #255)", async () => {
+test("/fold and /fold-status emit a persistent custom message via pi.sendMessage (issue #255)", async () => {
   const sent: Array<{ customType: string; content: string; display: boolean }> = [];
   const pi = { sendMessage: (m: { customType: string; content: string; display: boolean }) => sent.push(m) } as unknown as ExtensionAPI;
   const notified: string[] = [];
@@ -145,7 +145,7 @@ test("/acp and /acp-status emit a persistent custom message via pi.sendMessage (
     sessionManager: { getSessionId: () => "s5", getSessionFile: () => "/tmp/s5.json" },
   } as unknown as ExtensionCommandContext;
 
-  for (const name of ["acp", "acp-status"]) {
+  for (const name of ["fold", "fold-status"]) {
     const cmd = makeCommands(fakeRuntime(), pi).find((c) => c.name === name)!;
     await cmd.options.handler!("", ctx);
   }
@@ -159,7 +159,7 @@ test("/acp and /acp-status emit a persistent custom message via pi.sendMessage (
   }
 });
 
-test("/acp falls back to notify when pi lacks sendMessage", async () => {
+test("/fold falls back to notify when pi lacks sendMessage", async () => {
   const pi = {} as unknown as ExtensionAPI;
   const notified: string[] = [];
   const ctx = {
@@ -169,9 +169,29 @@ test("/acp falls back to notify when pi lacks sendMessage", async () => {
     sessionManager: { getSessionId: () => "s6", getSessionFile: () => "/tmp/s6.json" },
   } as unknown as ExtensionCommandContext;
 
-  const acp = makeCommands(fakeRuntime(), pi).find((c) => c.name === "acp")!;
-  await acp.options.handler!("", ctx);
+  const fold = makeCommands(fakeRuntime(), pi).find((c) => c.name === "fold")!;
+  await fold.options.handler!("", ctx);
 
   assert.equal(notified.length, 1, "fallback notify fires");
   assert.match(notified[0]!, /Token Breakdown \(sent view\):/, "panel text via notify");
+});
+
+test("legacy /acp* names stay registered as aliases routing to the same handlers", async () => {
+  const byName = new Map(makeCommands(fakeRuntime()).map((c) => [c.name, c] as const));
+  const pairs: Array<[string, string]> = [
+    ["acp", "fold"],
+    ["acp-status", "fold-status"],
+    ["acp-cache", "fold-cache"],
+    ["acp-rule", "fold-rule"],
+    ["acp-export", "fold-export"],
+    ["acp-decompress", "fold-unfold"],
+    ["acp-search", "fold-search"],
+  ];
+  for (const [legacy, modern] of pairs) {
+    const aliasCmd = byName.get(legacy);
+    const modernCmd = byName.get(modern);
+    assert.ok(aliasCmd, `/${legacy} alias registered`);
+    assert.ok(modernCmd, `/${modern} registered`);
+    assert.equal(aliasCmd!.options.handler, modernCmd!.options.handler, `/${legacy} routes to the /${modern} handler`);
+  }
 });

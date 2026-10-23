@@ -43,7 +43,7 @@ function contentText(content: unknown): string {
 }
 
 // Seed a finished ACP session (jsonl + .acp.json sidecar) into the session dir
-// so /acp-export has deterministic input. Fixture shape mirrors
+// so /fold-export has deterministic input. Fixture shape mirrors
 // tests/export-cmd.test.ts (header + linear parentId chain).
 function seedExportableSession(sessionDir: string): void {
   const id = "fixture-sess";
@@ -71,7 +71,7 @@ function seedExportableSession(sessionDir: string): void {
 // Simulate a pi-web host: embeds the pi SDK in another node process, drives the
 // agent via AgentSession.prompt(), and surfaces extension output through two
 // channels — persistent custom messages (session events + log entries, issue
-// #255) and transient ui.notify() toasts. Mirrors that contract so /acp is
+// #255) and transient ui.notify() toasts. Mirrors that contract so /fold is
 // verified end-to-end without the real pi-web app installed.
 async function createPiWebSession(opts: { seedExport?: boolean } = {}): Promise<PiWebSession> {
   const base = mkdtempSync(join(tmpdir(), "piweb-test-"));
@@ -158,49 +158,55 @@ function assertKitPanel(env: PiWebSession, command: string): void {
   );
 }
 
-test("pi-web: /acp renders the kit status panel as a persistent custom message", async () => {
+test("pi-web: /fold renders the kit status panel as a persistent custom message", async () => {
   const env = await createPiWebSession();
   try {
-    await env.session.prompt("/acp");
-    assertKitPanel(env, "/acp");
+    await env.session.prompt("/fold");
+    assertKitPanel(env, "/fold");
   } finally {
     await env.cleanup();
   }
 });
 
-test("pi-web: /acp-status re-renders the kit panel through the same channel", async () => {
+test("pi-web: legacy /acp alias still renders the same kit panel", async () => {
+  const env = await createPiWebSession();
+  await env.session.prompt("/acp");
+  assertKitPanel(env, "/fold (via /acp alias)");
+});
+
+test("pi-web: /fold-status re-renders the kit panel through the same channel", async () => {
   const env = await createPiWebSession();
   try {
-    await env.session.prompt("/acp-status");
-    assertKitPanel(env, "/acp-status");
+    await env.session.prompt("/fold-status");
+    assertKitPanel(env, "/fold-status");
   } finally {
     await env.cleanup();
   }
 });
 
-test("pi-web: /acp-export lists ACP sessions as an acp-export custom message", async () => {
+test("pi-web: /fold-export lists fold sessions as an acp-export custom message", async () => {
   const env = await createPiWebSession({ seedExport: true });
   try {
-    await env.session.prompt("/acp-export");
+    await env.session.prompt("/fold-export");
     assert.equal(env.notifications.length, 0, "export listing must use the persistent channel");
     const exports = env.customMessages.filter((m) => m.customType === "acp-export");
     assert.equal(exports.length, 1);
     assert.equal(exports[0]!.display, true);
     const text = contentText(exports[0]!.content);
-    assert.match(text, /^ACP-managed sessions:/);
+    assert.match(text, /^Fold-managed sessions:/);
     assert.match(text, /fixture-sess/);
     assert.match(text, /blocks=0/);
-    assert.match(text, /Usage: \/acp-export/);
+    assert.match(text, /Usage: \/fold-export/);
   } finally {
     await env.cleanup();
   }
 });
 
-test("pi-web: /acp-search delivers results via transient notify", async () => {
+test("pi-web: /fold-search delivers results via transient notify", async () => {
   const env = await createPiWebSession();
   try {
-    await env.session.prompt("/acp-search context");
-    assert.equal(env.notifications.length, 1, "acp-search should notify a result");
+    await env.session.prompt("/fold-search context");
+    assert.equal(env.notifications.length, 1, "fold-search should notify a result");
     assert.match(env.notifications[0]!.msg, /No matching blocks\.|^\[b\d+\]/);
   } finally {
     await env.cleanup();

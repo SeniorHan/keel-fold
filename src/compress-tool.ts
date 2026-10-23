@@ -96,7 +96,7 @@ export function makeCompressTool(runtime: AcpRuntime, overrides?: ToolPromptOver
       return { details: details.acpFolded ? details : undefined, content: [{ type: "text", text: result }] };
     },
   }, overrides);
-  // Dynamic description: `/acp compact` can switch the summary model mid-
+  // Dynamic description: `/fold compact` can switch the summary model mid-
   // session, so the text is computed whenever the host reads it.
   const configuredDescription = overrides?.description;
   Object.defineProperty(tool, "description", {
@@ -577,7 +577,7 @@ async function handleCompress(args: CompressArgs, runtime: AcpRuntime, ctx: Exte
     throw new Error(
       `Summary model ${dedicated.modelLabel ?? "?"} failed for every range (${dedicated.failed.map((f) => `${f.span}: ${f.error}`).join("; ")}). ` +
         "Nothing was compressed — folding with your short fallback would replace the detailed summary. " +
-        "Retry later; if it keeps failing, the user can run /acp compact reset so the main model writes summaries.",
+        "Retry later; if it keeps failing, the user can run /fold compact reset so the main model writes summaries.",
     );
   }
   const finalRanges = dedicated.ranges.filter((_, i) => !failedIdx.has(i)).map((r) => {

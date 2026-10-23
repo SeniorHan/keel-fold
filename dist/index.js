@@ -17660,7 +17660,7 @@ function isBiliProxyBaseUrl(baseUrl) {
   }
 }
 var PROXY_STAND_DOWN_MESSAGE = [
-  "[billion-context-pi] Model baseUrl routes through the billion-context wire proxy (/bili/ prefix) \u2014 ACP client-side compression has been disabled for this session to avoid double compression.",
+  "[billion-context-pi] Model baseUrl routes through the billion-context wire proxy (/bili/ prefix) \u2014 client-side compression has been disabled for this session to avoid double compression.",
   "The proxy runs the same compression pipeline server-side and owns the ref coordinate space; nothing else to configure.",
   "If your traffic reaches the proxy via HTTPS_PROXY instead (no /bili/ prefix in the URL), export BILLION_CONTEXT_PROXY=1 before starting pi.",
   "Docs: https://github.com/ranxianglei/billion-context"
@@ -17668,7 +17668,7 @@ var PROXY_STAND_DOWN_MESSAGE = [
 function nativeStandDownMessage(host) {
   return [
     `[billion-context-pi] billion-context native host detected (BILLION_CONTEXT_NATIVE=${host}) \u2014 the in-process native plugin proxies model API traffic and owns compression.`,
-    "ACP client-side compression has been disabled for this session to avoid double compression; nothing else to configure.",
+    "Client-side compression has been disabled for this session to avoid double compression; nothing else to configure.",
     "Docs: https://github.com/ranxianglei/billion-context"
   ].join("\n");
 }
@@ -18257,7 +18257,7 @@ async function handleCompress(args, runtime, ctx, toolCallId, signal, tools = []
   const failedIdx = new Set(dedicated.failed.map((f) => f.index));
   if (failedIdx.size > 0 && failedIdx.size === dedicated.ranges.length) {
     throw new Error(
-      `Summary model ${dedicated.modelLabel ?? "?"} failed for every range (${dedicated.failed.map((f) => `${f.span}: ${f.error}`).join("; ")}). Nothing was compressed \u2014 folding with your short fallback would replace the detailed summary. Retry later; if it keeps failing, the user can run /acp compact reset so the main model writes summaries.`
+      `Summary model ${dedicated.modelLabel ?? "?"} failed for every range (${dedicated.failed.map((f) => `${f.span}: ${f.error}`).join("; ")}). Nothing was compressed \u2014 folding with your short fallback would replace the detailed summary. Retry later; if it keeps failing, the user can run /fold compact reset so the main model writes summaries.`
     );
   }
   const finalRanges = dedicated.ranges.filter((_2, i) => !failedIdx.has(i)).map((r) => {
@@ -20149,7 +20149,7 @@ var RuleParams = typebox_exports.Object({
 function makeRuleTool(runtime) {
   return {
     name: RULE_TOOL_NAME,
-    label: "ACP Rule",
+    label: "Fold Rule",
     description: "Record a short, principle-level reminder that must survive context compression. Use it for behavioral corrections the user has had to repeat more than once, project invariants the user explicitly asked you to remember, and pitfalls you ran into once and must not run into again. Keep each rule short and principle-level. Recorded rules are hard-protected from compression and stay visible in the conversation. Omit the rule argument to list recorded rules.",
     parameters: RuleParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -20245,13 +20245,13 @@ async function loadAllSessions(sessionDir) {
 async function exportSession(selector, opts, sessionDir) {
   const all = await loadAllSessions(sessionDir);
   if (all.length === 0) {
-    return "No ACP-managed sessions found in this project's session directory. A session becomes exportable once billion-context-pi has processed a turn in it (its compression state is saved alongside the session file).";
+    return "No fold-managed sessions found in this project's session directory. A session becomes exportable once billion-context-pi has processed a turn in it (its compression state is saved alongside the session file).";
   }
   if (!selector) {
     const rows = all.map(
       (s2) => `${s2.id}${s2.name ? `  label=${s2.name}` : ""}  blocks=${s2.state.blocks.length}${s2.contextTokens ? `  ctx~${s2.contextTokens}` : ""}  ${s2.title ? truncate2(s2.title, 80) : ""}`
     );
-    return ["ACP-managed sessions:", "", ...rows.map((r) => `  ${r}`), "", "Usage: /acp-export <session-id|label> [--output handoff.md] [--full]"].join("\n");
+    return ["Fold-managed sessions:", "", ...rows.map((r) => `  ${r}`), "", "Usage: /fold-export <session-id|label> [--output handoff.md] [--full]"].join("\n");
   }
   const matches = matchSession(all, selector, (s2) => s2.name);
   if (matches.length === 0) {
@@ -20480,7 +20480,7 @@ function cacheUsageSamples(entries) {
   return out;
 }
 var RULE_ID_RE2 = /^rule\d+$/;
-var RULE_OP_CONFLICT = 'One operation per call \u2014 use "/acp-rule remove <id>" or "/acp-rule clear" separately.';
+var RULE_OP_CONFLICT = 'One operation per call \u2014 use "/fold-rule remove <id>" or "/fold-rule clear" separately.';
 function parseRuleCommand(raw) {
   const arg = raw.trim();
   if (arg === "") return { kind: "list" };
@@ -20500,6 +20500,15 @@ function parseRuleCommand(raw) {
   }
   return { kind: "record", text: arg };
 }
+var COMMAND_ALIASES = {
+  acp: "fold",
+  "acp-status": "fold-status",
+  "acp-cache": "fold-cache",
+  "acp-rule": "fold-rule",
+  "acp-export": "fold-export",
+  "acp-decompress": "fold-unfold",
+  "acp-search": "fold-search"
+};
 function makeCommands(runtime, pi) {
   const statusHandler = async (_args, ctx) => {
     const text = await statusReport(runtime, ctx);
@@ -20509,11 +20518,11 @@ function makeCommands(runtime, pi) {
     }
     ctx.ui.notify(text);
   };
-  return [
+  const commands = [
     {
-      name: "acp",
+      name: "fold",
       options: {
-        description: "Show ACP context usage, token breakdown, and compression status. /acp compact [session|provider/id|reset] manages the dedicated summary model.",
+        description: "Show fold context usage, token breakdown, and compression status. /fold compact [session|provider/id|reset] manages the dedicated summary model.",
         handler: async (args, ctx) => {
           const argText = typeof args === "string" ? args : "";
           if (argText.trim().split(/\s+/, 1)[0] !== "compact") return statusHandler(argText, ctx);
@@ -20522,14 +20531,14 @@ function makeCommands(runtime, pi) {
       }
     },
     {
-      name: "acp-status",
+      name: "fold-status",
       options: {
-        description: "Detailed ACP status (block tiers, token breakdown).",
+        description: "Detailed fold status (block tiers, token breakdown).",
         handler: statusHandler
       }
     },
     {
-      name: "acp-cache",
+      name: "fold-cache",
       options: {
         description: "Prompt-cache reconciliation: grand ledger (input/cached/hit rate) with every request's miss split into new content / compression re-pay / TTL expiry, plus per-fold economics. Append 'full' for the every-line listing.",
         handler: async (args, ctx) => {
@@ -20550,9 +20559,9 @@ function makeCommands(runtime, pi) {
       }
     },
     {
-      name: "acp-rule",
+      name: "fold-rule",
       options: {
-        description: "Manage persistent session rules (same rules the acp_rule feature keeps): list, record, remove by id, or clear all. Usage: /acp-rule [text to record] | /acp-rule remove <id> | /acp-rule clear",
+        description: "Manage persistent session rules (same rules the acp_rule tool keeps): list, record, remove by id, or clear all. Usage: /fold-rule [text to record] | /fold-rule remove <id> | /fold-rule clear",
         handler: async (args, ctx) => {
           if (runtime.adapter.rules !== true) {
             ctx.ui.notify(
@@ -20606,9 +20615,9 @@ function makeCommands(runtime, pi) {
       }
     },
     {
-      name: "acp-export",
+      name: "fold-export",
       options: {
-        description: "Export a session as a handoff markdown doc (folded view by default). Usage: /acp-export [session-id|label] [--full] [--output handoff.md]",
+        description: "Export a session as a handoff markdown doc (folded view by default). Usage: /fold-export [session-id|label] [--full] [--output handoff.md]",
         handler: async (args, ctx) => {
           const parsed = parseExportArgs(args);
           if (parsed.error) {
@@ -20640,13 +20649,13 @@ function makeCommands(runtime, pi) {
       }
     },
     {
-      name: "acp-decompress",
+      name: "fold-unfold",
       options: {
-        description: "Restore a compressed block's content (shown here, block stays folded). Usage: /acp-decompress b3",
+        description: "Restore a compressed block's content (shown here, block stays folded). Usage: /fold-unfold b3",
         handler: async (args, ctx) => {
           const blockId = parseBlockIdArg(args);
           if (!blockId) {
-            ctx.ui.notify('Usage: /acp-decompress <blockId> (e.g. "b3")');
+            ctx.ui.notify('Usage: /fold-unfold <blockId> (e.g. "b3")');
             return;
           }
           const { state, coreMessages } = await runtime.stateFor(ctx);
@@ -20667,13 +20676,13 @@ ${text}`);
       }
     },
     {
-      name: "acp-search",
+      name: "fold-search",
       options: {
-        description: "Search compressed block summaries. Usage: /acp-search auth token",
+        description: "Search compressed block summaries. Usage: /fold-search auth token",
         handler: async (args, ctx) => {
           const query = args.trim();
           if (!query) {
-            ctx.ui.notify("Usage: /acp-search <query>");
+            ctx.ui.notify("Usage: /fold-search <query>");
             return;
           }
           const { state } = await runtime.stateFor(ctx);
@@ -20688,6 +20697,11 @@ ${text}`);
       }
     }
   ];
+  const aliases = Object.entries(COMMAND_ALIASES).flatMap(([legacy, modern]) => {
+    const command = commands.find((c) => c.name === modern);
+    return command ? [{ name: legacy, options: { ...command.options, description: `Alias for /${modern} (pre-rename name).` } }] : [];
+  });
+  return [...commands, ...aliases];
 }
 async function handleCompact(args, runtime, ctx) {
   const target = args.trim().split(/\s+/).slice(1).join(" ");
@@ -20700,14 +20714,14 @@ async function handleCompact(args, runtime, ctx) {
   const projectNote = (effective2) => `Global setting saved, but project acp.json keeps ${effective2 ?? "main-model summaries"} active.`;
   if (!target) {
     const current = runtime.getCompressionModelRef();
-    if (current === SESSION_MODEL_REF) return "Summary model: session (active model + shared prompt prefix). Falls back to the caller summary on error.\nReset: /acp compact reset";
+    if (current === SESSION_MODEL_REF) return "Summary model: session (active model + shared prompt prefix). Falls back to the caller summary on error.\nReset: /fold compact reset";
     if (current) {
       const resolved2 = resolveModel(registry3, current);
       return resolved2.model ? `Summary model: ${resolved2.model.provider}/${resolved2.model.id}. Falls back to the caller summary on error.
-Reset: /acp compact reset` : `Summary model: ${current} \u2014 NOT resolvable now; compress keeps caller summaries.
-Reset: /acp compact reset`;
+Reset: /fold compact reset` : `Summary model: ${current} \u2014 NOT resolvable now; compress keeps caller summaries.
+Reset: /fold compact reset`;
     }
-    return "Summary model: not set \u2014 the main model writes summaries.\nSet: /acp compact session | /acp compact <provider/id>";
+    return "Summary model: not set \u2014 the main model writes summaries.\nSet: /fold compact session | /fold compact <provider/id>";
   }
   if (target === "reset") {
     const effective2 = await persist(null);
@@ -21109,7 +21123,7 @@ function degenerationNotice(runs) {
     content: [
       {
         type: "text",
-        text: `[ACP recovery notice] Your previous turn ended in degenerate generation: its output contained ${top.count} consecutive repetitions of ${describeChar(top.char)}${extra}. That repeated segment carries no information and has been truncated in the context above. Do not reproduce it or continue the pattern. Resume your task from your last valid step.`
+        text: `[fold recovery notice] Your previous turn ended in degenerate generation: its output contained ${top.count} consecutive repetitions of ${describeChar(top.char)}${extra}. That repeated segment carries no information and has been truncated in the context above. Do not reproduce it or continue the pattern. Resume your task from your last valid step.`
       }
     ],
     timestamp: Date.now()
@@ -21331,7 +21345,7 @@ function buildTimeoutNotice(secs) {
   const suggested = Math.min(Math.max(Math.ceil(secs * 2), 120), 3600);
   return `
 
-[ACP guardrail: command killed after ${secs}s. To give it more time, re-run the bash tool with a larger \`timeout\` argument (e.g. \`"timeout": ${suggested}\`).]`;
+[fold guardrail: command killed after ${secs}s. To give it more time, re-run the bash tool with a larger \`timeout\` argument (e.g. \`"timeout": ${suggested}\`).]`;
 }
 function canonicalStringify(value) {
   if (value === null || value === void 0 || typeof value !== "object") {
@@ -21382,10 +21396,10 @@ var RepetitionTracker = class {
 function buildRepetitionWarnNotice(toolName, count) {
   return `
 
-[ACP guardrail: you have issued ${count} CONSECUTIVE identical \`${toolName}\` calls (name + arguments byte-for-byte identical). Re-running the exact same call will not produce a new result. STOP issuing this identical call \u2014 change your approach, change the arguments, or stop and report to the user.]`;
+[fold guardrail: you have issued ${count} CONSECUTIVE identical \`${toolName}\` calls (name + arguments byte-for-byte identical). Re-running the exact same call will not produce a new result. STOP issuing this identical call \u2014 change your approach, change the arguments, or stop and report to the user.]`;
 }
 function buildRepetitionAbortNotice(toolName, count) {
-  return `[ACP guardrail: BLOCKED \u2014 you issued ${count} consecutive identical \`${toolName}\` calls (byte-for-byte identical arguments). This call was refused and NOT executed. You MUST change strategy: use different arguments, a different tool, or stop and report to the user. Do not re-issue the identical call. The turn has been aborted.`;
+  return `[fold guardrail: BLOCKED \u2014 you issued ${count} consecutive identical \`${toolName}\` calls (byte-for-byte identical arguments). This call was refused and NOT executed. You MUST change strategy: use different arguments, a different tool, or stop and report to the user. Do not re-issue the identical call. The turn has been aborted.`;
 }
 function wireToolGuardrails(pi, runtime) {
   const trackers = /* @__PURE__ */ new Map();
@@ -21404,7 +21418,7 @@ function wireToolGuardrails(pi, runtime) {
     if (decision.action === "abort") {
       const msg = buildRepetitionAbortNotice(decision.toolName, decision.count);
       logWarn("guardrail", { event: "repetition-abort", sid, tool: decision.toolName, count: decision.count });
-      if (ctx.hasUI) ctx.ui.notify(`[ACP] ${msg}`, "warning");
+      if (ctx.hasUI) ctx.ui.notify(`[fold] ${msg}`, "warning");
       try {
         ctx.abort();
       } catch {
@@ -21461,7 +21475,7 @@ function resolveIdleCompact(cfg) {
   return { enabled: cfg.enabled === true, idleMinutes };
 }
 function idleCheckText(awayMinutes) {
-  return `[ACP idle compact] The user has been away for about ${awayMinutes} minutes. This is an automatic maintenance turn, not a user request: decide whether consumed history is worth compressing now, using the ranges listed below. Do not continue other work and do not call tools other than compress and fold. If nothing is worth compressing, reply with one short line.`;
+  return `[fold idle compact] The user has been away for about ${awayMinutes} minutes. This is an automatic maintenance turn, not a user request: decide whether consumed history is worth compressing now, using the ranges listed below. Do not continue other work and do not call tools other than compress and fold. If nothing is worth compressing, reply with one short line.`;
 }
 function freshState() {
   return { sid: void 0, ctx: void 0, running: false, lastTouch: 0, checked: false, run: "none", forceNudge: false, pending: 0, minBenefit: Infinity, viable: 0, timer: void 0 };
@@ -21740,13 +21754,13 @@ function summaryModelChoices(ctx) {
   return [MAIN_MODEL, SESSION_MODEL_REF, ...models.map((m2) => `${m2.provider}/${m2.id}`)];
 }
 function makeConfigCommand(runtime, idle) {
-  return {
-    name: "acp-config",
+  const command = {
+    name: "fold-config",
     options: {
-      description: "Open the ACP settings panel (Summary model, Idle compact, per-model compression, tool guards).",
+      description: "Open the fold settings panel (Summary model, Idle compact, per-model compression, tool guards).",
       handler: async (_args, ctx) => {
         if (ctx.mode !== "tui") {
-          ctx.ui.notify("/acp-config needs TUI mode; edit ~/.pi/acp.json directly instead", "error");
+          ctx.ui.notify("/fold-config needs TUI mode; edit ~/.pi/acp.json directly instead", "error");
           return;
         }
         const model = ctx.model;
@@ -21772,13 +21786,13 @@ function makeConfigCommand(runtime, idle) {
           });
           const container = new Container();
           const where = scope.provider && scope.modelId ? `current model ${scope.provider}/${scope.modelId}` : "no current model, per-model settings hidden";
-          container.addChild(new Text(theme.fg("accent", theme.bold("ACP settings")) + theme.fg("dim", `  saved to ~/.pi/acp.json \xB7 ${where}`), 0, 0));
+          container.addChild(new Text(theme.fg("accent", theme.bold("Fold settings")) + theme.fg("dim", `  saved to ~/.pi/acp.json \xB7 ${where}`), 0, 0));
           const list = new SettingsList(
             settingItems,
             Math.min(settingItems.length + 2, 15),
             getSettingsListTheme(),
             (id, value) => {
-              void save(id, value).catch((e) => ctx.ui.notify(`[ACP] Save failed: ${e instanceof Error ? e.message : String(e)}`, "error"));
+              void save(id, value).catch((e) => ctx.ui.notify(`[fold] Save failed: ${e instanceof Error ? e.message : String(e)}`, "error"));
             },
             () => done(void 0)
           );
@@ -21791,7 +21805,7 @@ function makeConfigCommand(runtime, idle) {
             const now = readPanelValue(runtime.adapter, id, scope);
             if (now !== value) {
               list.updateValue(id, now);
-              ctx.ui.notify(`[ACP] Saved to the global config, but the project .pi/acp.json overrides this setting; in effect: ${now}`, "warning");
+              ctx.ui.notify(`[fold] Saved to the global config, but the project .pi/acp.json overrides this setting; in effect: ${now}`, "warning");
             }
             for (const item of items.filter((i) => i.dependsOn === id)) {
               const setting = settingItems.find((s) => s.id === item.id);
@@ -21814,6 +21828,11 @@ function makeConfigCommand(runtime, idle) {
       }
     }
   };
+  const alias = {
+    name: "acp-config",
+    options: { ...command.options, description: `Alias for /fold-config (pre-rename name).` }
+  };
+  return [command, alias];
 }
 var SearchableList = class {
   constructor(choices, current, close, dim) {
@@ -21870,7 +21889,7 @@ function createAcpExtension(adapter = {}) {
       return;
     }
     if (adapter.enabled === false || userConfigDisabled(process.cwd())) {
-      console.log("[bcp] disabled: enabled=false \u2014 ACP tools and system prompt off; Pi's native context management is in control");
+      console.log("[bcp] disabled: enabled=false \u2014 fold tools and system prompt off; Pi's native context management is in control");
       return;
     }
     const runtime = createRuntime(adapter);
@@ -21904,7 +21923,7 @@ function createAcpExtension(adapter = {}) {
     pi.registerTool(makeSearchTool(runtime, toolSurface.search));
     pi.registerTool(makeStatusTool(runtime, toolSurface.status));
     pi.registerTool(makeCacheTool(runtime, toolSurface.cache));
-    for (const { name, options } of [...makeCommands(runtime, pi), makeConfigCommand(runtime, idle)]) {
+    for (const { name, options } of [...makeCommands(runtime, pi), ...makeConfigCommand(runtime, idle)]) {
       pi.registerCommand(name, options);
     }
     wireNudgeRecords(pi);
@@ -22118,7 +22137,7 @@ function wireContextTransform(pi, runtime, standDownIfProxied, idle) {
         const overLimit = config.modelContextLimit > 0 && userGuard.remainingTokens > config.modelContextLimit;
         logWarn("overflow", { sid, event: "latest-user-kept", id: userGuard.restoredId, remaining: userGuard.remainingTokens, limit: config.modelContextLimit });
         if (overLimit && ctx.hasUI && !latestUserOverLimit.has(sid)) {
-          ctx.ui.notify("[ACP] \u26A0\uFE0F \u6700\u8FD1\u4E00\u6761\u7528\u6237\u6D88\u606F\u592A\u5927\uFF0C\u4E0D\u622A\u65AD\u5B83\u5C31\u653E\u4E0D\u8FDB\u4E0A\u4E0B\u6587\u3002\u8BF7\u7528\u539F\u751F\u538B\u7F29\u6216\u65B0\u4F1A\u8BDD\uFF0C\u6216\u62C6\u5C0F\u8FD9\u6761\u6D88\u606F\u3002", "warning");
+          ctx.ui.notify("[fold] \u26A0\uFE0F \u6700\u8FD1\u4E00\u6761\u7528\u6237\u6D88\u606F\u592A\u5927\uFF0C\u4E0D\u622A\u65AD\u5B83\u5C31\u653E\u4E0D\u8FDB\u4E0A\u4E0B\u6587\u3002\u8BF7\u7528\u539F\u751F\u538B\u7F29\u6216\u65B0\u4F1A\u8BDD\uFF0C\u6216\u62C6\u5C0F\u8FD9\u6761\u6D88\u606F\u3002", "warning");
         }
         if (overLimit) latestUserOverLimit.add(sid);
         else latestUserOverLimit.delete(sid);
@@ -22145,7 +22164,7 @@ function wireContextTransform(pi, runtime, standDownIfProxied, idle) {
             limit: turn.terminalEscape.modelContextLimit
           });
           if (ctx.hasUI) {
-            ctx.ui.notify(`[ACP] \u26A0\uFE0F ${turn.terminalEscape.message}`, "warning");
+            ctx.ui.notify(`[fold] \u26A0\uFE0F ${turn.terminalEscape.message}`, "warning");
           }
         }
       } else {
@@ -22217,7 +22236,7 @@ function wireContextTransform(pi, runtime, standDownIfProxied, idle) {
         logInfo("degeneration", { sid, event: "recovery-notice", maxRun: top.count });
         if (ctx.hasUI && lastDegNoticeKey !== `${sid}:${top.count}:${top.char.codePointAt(0)}`) {
           lastDegNoticeKey = `${sid}:${top.count}:${top.char.codePointAt(0)}`;
-          ctx.ui.notify(`[ACP] previous turn ended in degenerate generation (${top.count}\xD7 repeat) \u2014 the repeated segment was truncated above and a recovery notice injected.`);
+          ctx.ui.notify(`[fold] previous turn ended in degenerate generation (${top.count}\xD7 repeat) \u2014 the repeated segment was truncated above and a recovery notice injected.`);
         }
       }
       const debugOn2 = debug.enabled;
@@ -22255,7 +22274,7 @@ Example: compress({ content: [{ startId: "${top.startRef}", endId: "${top.endRef
             logWarn("nudge", { sid: ctx.sessionManager.getSessionId(), event: "emergency-inject", pct: Math.round(turn.nudge.contextUsage * 100), voice: rendered.voice, compressible: turn.nudge.compressibleRanges.length });
           }
           if (debugOn2 && ctx.hasUI) {
-            ctx.ui.notify(`[ACP nudge \u2192 context]${emergency ? " [EMERGENCY]" : ""}
+            ctx.ui.notify(`[fold nudge \u2192 context]${emergency ? " [EMERGENCY]" : ""}
 ${rendered.text}${example}`);
           }
           if (!emergency) runtime.markNudgeShown(sid, turnKey, tokenCount);
@@ -22284,7 +22303,7 @@ ${rendered.text}${example}`);
         logWarn("nudge", { sid, event: "compress-retry-capped", failures: outcome.count });
         debug.event("compress-retry-capped", { sid, turnKey, failures: outcome.count });
         if (ctx.hasUI) {
-          ctx.ui.notify(`[ACP] compress failed ${outcome.count}\xD7 this turn \u2014 nudge paused until the next user message (emergency truncation still active).`);
+          ctx.ui.notify(`[fold] compress failed ${outcome.count}\xD7 this turn \u2014 nudge paused until the next user message (emergency truncation still active).`);
         }
       }
       const liveTail = liveOnlyTailCached(sid, entries, event.messages);
@@ -22349,7 +22368,7 @@ function wireSystemPrompt(pi, runtime) {
       ].sort();
       const key = ignored.join(",");
       if (ignored.length > 0 && key !== lastIgnoredPromptKeys) {
-        const message = `ACP: ${ignored.join(", ")} ignored \u2014 this build replaces the ACP system prompt. Use prompts (with acknowledgePromptsRisk) to change compression rules.`;
+        const message = `Fold: ${ignored.join(", ")} ignored \u2014 this build replaces the fold system prompt. Use prompts (with acknowledgePromptsRisk) to change compression rules.`;
         logWarn("config", { event: "prompt-config-ignored", keys: key });
         if (ctx?.hasUI) ctx.ui.notify(message, "warning");
       }
@@ -22395,7 +22414,7 @@ ${extractText(msg.content)}`;
       if (info.window) ov.setLearnedWindow(modelId, info.window);
       ov.armed = true;
       logWarn("overflow-selfheal", { sid, modelId, event: "detected", window: info.window ?? null, message: info.message.slice(0, 200) });
-      if (ctx.hasUI) ctx.ui.notify(`[ACP] context overflow detected${info.window ? ` (window ${info.window})` : ""} \u2014 forcing emergency compression next turn`);
+      if (ctx.hasUI) ctx.ui.notify(`[fold] context overflow detected${info.window ? ` (window ${info.window})` : ""} \u2014 forcing emergency compression next turn`);
       return;
     }
     if (!isNoBody4xxError(haystack)) return;
@@ -22403,7 +22422,7 @@ ${extractText(msg.content)}`;
     if (!decision.arm) return;
     ov.armed = true;
     logWarn("overflow-selfheal", { sid, modelId, event: "no-body-arm", consecutive: decision.consecutive, ratio: decision.ratio, message: haystack.slice(0, 200) });
-    if (ctx.hasUI) ctx.ui.notify(`[ACP] possible context overflow (4xx no-body error, ${decision.consecutive} consecutive) \u2014 forcing emergency compression next turn`);
+    if (ctx.hasUI) ctx.ui.notify(`[fold] possible context overflow (4xx no-body error, ${decision.consecutive} consecutive) \u2014 forcing emergency compression next turn`);
   });
   pi.on("session_shutdown", (_event, ctx) => {
     runtime.overflowDrop(ctx.sessionManager.getSessionId());
@@ -22434,11 +22453,11 @@ function wireThrottleRetry(pi, runtime) {
     const decision = th.onThrottleError(cfg.maxRetries);
     if (decision === "exhausted") {
       logWarn("throttle-retry", { sid: ctx.sessionManager.getSessionId(), event: "budget-exhausted", max: cfg.maxRetries });
-      if (ctx.hasUI) ctx.ui.notify(`[ACP] provider throttled \u2014 retry budget exhausted (${cfg.maxRetries}); surfacing error`);
+      if (ctx.hasUI) ctx.ui.notify(`[fold] provider throttled \u2014 retry budget exhausted (${cfg.maxRetries}); surfacing error`);
       return;
     }
     logInfo("throttle-retry", { sid: ctx.sessionManager.getSessionId(), event: "rewrite", attempt: th.state.attempts, max: cfg.maxRetries, path: "native" });
-    if (ctx.hasUI) ctx.ui.notify(`[ACP] provider throttled \u2014 retry ${th.state.attempts}/${cfg.maxRetries} (fast probe)`);
+    if (ctx.hasUI) ctx.ui.notify(`[fold] provider throttled \u2014 retry ${th.state.attempts}/${cfg.maxRetries} (fast probe)`);
     return { message: { ...msg, errorMessage: THROTTLE_RETRY_ERROR_MESSAGE } };
   });
   pi.on("agent_settled", async (_event, ctx) => {
@@ -22450,12 +22469,12 @@ function wireThrottleRetry(pi, runtime) {
     th.onKickStarted();
     const sid = ctx.sessionManager.getSessionId();
     logInfo("throttle-retry", { sid, event: "kick-sleep", kickNumber, delayMs });
-    if (ctx.hasUI) ctx.ui.notify(`[ACP] provider throttled \u2014 waiting ${Math.round(delayMs / 1e3)}s before retry ${th.state.attempts + 1}/${cfg.maxRetries}`);
+    if (ctx.hasUI) ctx.ui.notify(`[fold] provider throttled \u2014 waiting ${Math.round(delayMs / 1e3)}s before retry ${th.state.attempts + 1}/${cfg.maxRetries}`);
     const result = await abortableSleep(delayMs, th.sleepController().signal);
     if (result === "aborted") {
       th.onKickCancelled();
       logInfo("throttle-retry", { sid, event: "kick-cancelled", kickNumber });
-      if (ctx.hasUI) ctx.ui.notify("[ACP] throttle retry cancelled (user input received)");
+      if (ctx.hasUI) ctx.ui.notify("[fold] throttle retry cancelled (user input received)");
       return;
     }
     if (!th.readyToKick(cfg.maxRetries)) return;
@@ -22532,7 +22551,7 @@ function formatNudgeRecord(nudge, emergency) {
   const tier = `T${nudge.tier ?? 1}`;
   const top = [...nudge.compressibleRanges].sort((a, b2) => b2.tokens - a.tokens)[0];
   const range = top ? ` \xB7 top range ${top.startRef}\u2013${top.endRef}` : "";
-  return `[ACP nudge]${emergency ? " EMERGENCY" : ""} ${pct3}% \xB7 ${tier}${range}`;
+  return `[fold nudge]${emergency ? " EMERGENCY" : ""} ${pct3}% \xB7 ${tier}${range}`;
 }
 export {
   createAcpExtension,
