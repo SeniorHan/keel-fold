@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.1 (2026-10-23)
+
+- Contract surgery on compress: summarization is single-shot — the retry-on-defect machinery is gone; planning-text leaks, transcript echoes and length cuts are logged and the summary is stored as-is.
+- Caller-provided `summary` fields are tolerated but never sent to the summary model; missing summaries get a pending placeholder that the dedicated model replaces. Placeholder-only calls without a dedicated model are rejected (without one, the provided text is the stored summary).
+- Setup failures (no session model, unresolvable `compressionModelId`, host without `modelRegistry.complete()`) now throw and fold nothing instead of degrading to caller fallbacks; unextractable ranges are reported as failed and not folded.
+- `acp-kernel` moved from devDependencies to dependencies: it is imported at runtime, so git-tag installs need it declared.
+
 ## v0.3.0 (2026-10-22)
 
 - Removed the bash default-timeout guard (`toolBashDefaultTimeout`). ACP no longer injects a `timeout` into `bash` calls the model left unbounded: long commands belong to the bash tool's own promotion/timeout design (e.g. the pi-bg-bash extension), not to a hidden side injection. The key is dropped from the config, the panel and the docs; a stale key in an existing `acp.json` is ignored silently.
