@@ -225,7 +225,7 @@ test("keeps compress direct, retains concise critical descriptions, and rewrites
   // details hold the recorded fold used to rebuild state: never rewritten.
   assert.equal(result.details.acpFolded.ranges[0].summary, "Run acp_status, then use search_context or decompress to retrieve details.");
 });
-test("compress description keeps a meaningful fallback contract when a dedicated model is active", async () => {
+test("compress description pins the dedicated-model contract (no caller text, failures retry later)", async () => {
   const pi = createPi();
   const upstream = (target) => {
     target.registerTool({
@@ -245,8 +245,8 @@ test("compress description keeps a meaningful fallback contract when a dedicated
   createLeanAcpExtension(upstream)(pi);
   const description = getTool(pi, "compress").description;
   assert.match(description, /dedicated model/i);
-  assert.match(description, /meaningful fallback of 1-2 sentences/i);
-  assert.match(description, /exact paths\/versions\/errors/i);
+  assert.match(description, /do not provide summary text/i);
+  assert.match(description, /Failed ranges are not folded/);
   assert.doesNotMatch(description, /bare placeholder|summary: "compressed"/i);
   const result = await getTool(pi, "compress").execute("c1", {}, undefined, undefined, {});
   assert.equal(result.content[0].text, "ok", "no completion hint when nothing was folded");
@@ -255,7 +255,8 @@ test("compress description keeps a meaningful fallback contract when a dedicated
   // prompt carries the dedicated-model fallback rule.
   const [hook] = pi.handlers.get("before_agent_start");
   const prompt = (await hook({ systemPrompt: "base prompt" })).systemPrompt;
-  assert.match(prompt, /dedicated model writes compress summaries: give each range only a 1-2 sentence fallback/);
+  assert.match(prompt, /A dedicated model writes compress summaries: give each range only refs and an optional topic/);
+  assert.match(prompt, /do not write summary text/);
 });
 
 test("per-turn dedicated-model rule follows the live upstream description, not a registration snapshot", async () => {

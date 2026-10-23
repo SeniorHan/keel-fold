@@ -699,7 +699,7 @@ function wireContextTransform(pi: ExtensionAPI, runtime: AcpRuntime, standDownIf
         nudgeInjected = true;
         const rendered = renderNudgeText(turn.nudge, prompts, activeNudgeSections(runtime, ctx));
         const top = [...turn.nudge.compressibleRanges].sort((a, b) => b.tokens - a.tokens)[0];
-        const example = top ? `\n\nExample: compress({ content: [{ startId: "${top.startRef}", endId: "${top.endRef}", summary: "..." }] })` : "";
+        const example = top ? `\n\nExample: compress({ content: [{ startId: "${top.startRef}", endId: "${top.endRef}" }] })` : "";
         if (emergency) {
           logWarn("nudge", { sid: ctx.sessionManager.getSessionId(), event: "emergency-inject", pct: Math.round(turn.nudge.contextUsage * 100), voice: rendered.voice, compressible: turn.nudge.compressibleRanges.length });
         }
@@ -855,7 +855,7 @@ const DEDICATED_CALLER_RULES = `HOW TO COMPRESS (dedicated summary model active)
 A separate model reads the original messages of each range and writes the real summary; your job is choosing ranges.
 - Pick consumed content: finished tool outputs, dead ends, resolved threads, completed phases. Leave active work and anything the next step needs.
 - Prefer ranges of uncompressed messages. Fold existing blocks into a new range only to merge closely related ones; it rewrites their summaries again.
-- summary: a 1-2 sentence fallback naming what was done or examined in the range, why, and the outcome with its decisive values (e.g. "Read session X's log to check Y; found Z in 3 of 5 runs"). The summary model also reads it to understand the range's purpose; it is used as the summary only if that model fails. Do not write a detailed summary.
+- Do not provide summary fields: the dedicated model reads the original messages of each range and writes the real summary. Failed ranges are not folded; they retry on a later cycle.
 - Give each range a short topic. Do not unfold a block you just created.`;
 
 function nudgePrompts(runtime: AcpRuntime): Prompts {

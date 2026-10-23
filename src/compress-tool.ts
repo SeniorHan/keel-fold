@@ -28,7 +28,7 @@ function formatK(n: number): string {
 const RangeSpec = Type.Object({
   startId: Type.String({ description: 'Inclusive first ref: message ref, e.g. "m00005" (from the fold tag), or a block id "b3".' }),
   endId: Type.String({ description: 'Inclusive end ref. Must be at or after startId.' }),
-  summary: Type.String({ description: "Complete technical summary replacing all content in range. Keep only essential details (conclusions, file paths, decisions, exact values, etc.)." }),
+  summary: Type.Optional(Type.String({ description: "Only when no dedicated summary model is configured: the full technical summary replacing all content in range (conclusions, file paths, decisions, exact values). With a dedicated model, omit it — that model writes the summaries." })),
   topic: Type.Optional(Type.String({ description: "Short label (3-5 words) for THIS range, e.g. 'Auth System Exploration'." })),
 });
 
@@ -43,7 +43,7 @@ const CompressParams = Type.Object({
     // only compress attempt was lost. Accept the JSON-encoded form and parse
     // it in normalizeRanges below.
     Type.String({ description: "JSON-encoded array of ranges — accepted because non-strict-tool providers sometimes stringify array arguments; parsed automatically." }),
-  ], { description: "One or more ranges to compress, each with start/end boundaries and a summary replacing that range." }),
+  ], { description: "One or more ranges to compress, each with start/end boundaries (plus summary text only when no dedicated summary model is configured)." }),
   summaryMaxChars: Type.Optional(Type.Number({ description: "Override max summary length in chars (default 20000)." })),
 });
 
@@ -70,7 +70,7 @@ export function makeCompressTool(runtime: AcpRuntime, overrides?: ToolPromptOver
     label: "Compress",
     description:
       compressDescription(undefined),
-    promptSnippet: "compress({ content: [{ startId, endId, summary }] }) or batch multiple ranges",
+    promptSnippet: "compress({ content: [{ startId, endId }] }) or batch multiple ranges",
     promptGuidelines: [
       "Each message has a hidden ref tag with its mNNNNN ref, token size, and type. Compress ranges by their refs.",
       "Batch multiple unrelated ranges in one call — each gets its own topic and summary.",
@@ -126,18 +126,62 @@ function collectActiveTools(pi?: ExtensionAPI): Tool[] {
   }
 }
 
-type RangeEntry = Static<typeof RangeSpec>;
+// Tool-facing schema lets summary be omitted (dedicated-model mode fills a
+// placeholder before parsing), but everything downstream requires the string:
+// toleratePendingSummaries guarantees it, so pin the internal type.
+type RangeEntry = Omit<Static<typeof RangeSpec>, "summary"> & { summary: string };
 
 /** Persisted in the compress toolResult's `details` (never sent to the model).
- *  When a dedicated model writes summaries, the call's arguments hold only the
- *  caller's short fallback, and failed ranges are not folded at all — so the
- *  log alone cannot rebuild the blocks. `acpFolded` records exactly what was
- *  folded; state-rebuild prefers it over the arguments. */
+ *  When a dedicated model writes summaries, the call's arguments carry no
+ *  summary text (a parse placeholder is overwritten before apply), and failed
+ *  ranges are not folded at all — so the log alone cannot rebuild the blocks.
+ *  `acpFolded` records exactly what was folded; state-rebuild prefers it over
+ *  the arguments. */
 export interface CompressResultDetails {
   acpFolded?: {
     version: 1;
     ranges: Array<{ startId: string; endId: string; summary: string; topic?: string }>;
   };
+}
+
+/** The kernel parser rejects object entries without a non-empty summary
+ *  ("missing summary"). In dedicated/session modes the summary is written by
+ *  the side call, so a missing caller summary is tolerated at parse time with
+ *  this placeholder — it is always overwritten by the dedicated summary, or
+ *  the range fails and is not folded. Only self-hosted mode (no ref) treats
+ *  a missing summary as the caller error it is. */
+const PENDING_SUMMARY_PLACEHOLDER = "(pending — written by the dedicated summary model)";
+
+function toleratePendingSummaries(args: CompressArgs): void {
+  const inject = (item: { summary?: string }) => {
+    if (typeof item.summary !== "string" || item.summary.length === 0) item.summary = PENDING_SUMMARY_PLACEHOLDER;
+  };
+  if (typeof args.content === "string") {
+    // JSON-encoded form (non-strict providers): parse, inject, re-encode.
+    try {
+      const parsed: unknown = JSON.parse(args.content);
+      if (Array.isArray(parsed)) {
+        let injected = false;
+        for (const item of parsed) {
+          if (item && typeof item === "object" && !Array.isArray(item)) {
+            inject(item as { summary?: string });
+            injected = true;
+          }
+        }
+        if (injected) args.content = JSON.stringify(parsed);
+      } else if (parsed && typeof parsed === "object") {
+        inject(parsed as { summary?: string });
+        args.content = JSON.stringify(parsed);
+      }
+    } catch { /* leave it: the lenient parser reports the real problem */ }
+    return;
+  }
+  if (Array.isArray(args.content)) {
+    for (const item of args.content) inject(item);
+    return;
+  }
+  // Top-level single range object.
+  if (args.content && typeof args.content === "object") inject(args.content as { summary?: string });
 }
 
 // Normalize the compress args via the kernel's lenient parser (fenced /
@@ -149,6 +193,7 @@ export interface CompressResultDetails {
 // ranges provided.").
 export function normalizeRanges(args: CompressArgs): RangeEntry[] | string {
   const effective = repairContentTail(repairBareRangeObjects(args));
+  toleratePendingSummaries(effective);
   const { ranges, diagnostics } = parseCompressArgs(effective);
   if (ranges.length === 0) {
     if (Array.isArray(effective.content) && effective.content.length === 0) return [];
@@ -268,7 +313,7 @@ function isRangeLikeObject(o: unknown): o is Record<string, unknown> {
   const r = o as Record<string, unknown>;
   const hasStart = typeof r.startId === "string" || typeof r.startRef === "string" || typeof r.messageId === "string";
   const hasEnd = typeof r.endId === "string" || typeof r.endRef === "string" || typeof r.messageId === "string";
-  return hasStart && hasEnd && typeof r.summary === "string" && r.summary.length > 0;
+  return hasStart && hasEnd && (r.summary === undefined || (typeof r.summary === "string" && r.summary.length > 0));
 }
 
 function describeDiagnostics(diagnostics: CompressParseDiagnostics, content: CompressArgs["content"]): string {
@@ -280,13 +325,13 @@ function describeDiagnostics(diagnostics: CompressParseDiagnostics, content: Com
     return `${base}; the input was truncated and no complete ranges could be recovered. Shorten the summary or split into smaller ranges.`;
   }
   if (diagnostics.invalidItems > 0) {
-    return `${base}; ${diagnostics.invalidItems} entr${diagnostics.invalidItems === 1 ? "y was" : "ies were"} dropped as invalid. Each range must be an object with string fields startId, endId, summary.`;
+    return `${base}; ${diagnostics.invalidItems} entr${diagnostics.invalidItems === 1 ? "y was" : "ies were"} dropped as invalid. Each range must be an object with string fields startId and endId.`;
   }
   const parseErr = jsonParseError(content);
   if (parseErr !== undefined) {
     return `${base}; the JSON failed to parse: ${parseErr}. Fix the malformed JSON (e.g. a missing closing brace or quote) and retry.`;
   }
-  return `${base}. content must be an ARRAY of {startId, endId, summary} objects.`;
+  return `${base}. content must be an ARRAY of {startId, endId} objects.`;
 }
 
 // Short diagnostic for why a JSON-shaped string fails to parse, or undefined
@@ -508,6 +553,11 @@ async function handleCompress(args: CompressArgs, runtime: AcpRuntime, ctx: Exte
   if (typeof maybeRanges === "string") throw new Error(maybeRanges);
   const ranges = maybeRanges;
   if (ranges.length === 0) return "No ranges provided.";
+  // Self-hosted mode has no side call to write summaries: a placeholder here
+  // means the caller omitted the summary text, which would be stored verbatim.
+  if (!runtime.getCompressionModelRef() && ranges.some((r) => r.summary === PENDING_SUMMARY_PLACEHOLDER)) {
+    throw new Error("Each range needs a summary: no dedicated summary model is configured, so the summary text you provide is the one stored.");
+  }
   const { state: initialState, coreMessages, entries } = await runtime.stateFor(ctx);
   assertNotAborted(signal);
   const config = runtime.configFor(ctx);
@@ -563,9 +613,9 @@ async function handleCompress(args: CompressArgs, runtime: AcpRuntime, ctx: Exte
   const beforeTokens = estimateTokens(messages, collectCoveredMessageIds(state), imageTokens);
   const summaryMaxChars = args.summaryMaxChars;
   const topLevelTopic = args.topic;
-  // Dedicated summary model (#241 port): replace the caller's summaries before
+  // Dedicated summary model (#241 port): write the real summaries before
   // the kernel sees them. Skipped for all-dead calls (nothing will fold).
-  // Failures keep the caller's fallback summary; re-sanitize model output.
+  // Failed ranges are not folded; re-sanitize model output.
   const dedicated: DedicatedSummaryResult = allDead
     ? { ranges: sanitizedRanges, note: null, warn: false, failed: [] }
     : await writeDedicatedSummaries({ ranges: sanitizedRanges, runtime, ctx, messages, state, config, tools, summaryMaxChars, topLevelTopic, signal });
@@ -576,7 +626,7 @@ async function handleCompress(args: CompressArgs, runtime: AcpRuntime, ctx: Exte
     // persistently failing summary model cannot loop the main model.
     throw new Error(
       `Summary model ${dedicated.modelLabel ?? "?"} failed for every range (${dedicated.failed.map((f) => `${f.span}: ${f.error}`).join("; ")}). ` +
-        "Nothing was compressed — folding with your short fallback would replace the detailed summary. " +
+        "Nothing was compressed. " +
         "Retry later; if it keeps failing, the user can run /fold compact reset so the main model writes summaries.",
     );
   }
@@ -740,9 +790,9 @@ interface DedicatedSummaryResult {
   ranges: RangeEntry[];
   note: string | null;
   warn: boolean;
-  /** Ranges whose summary call failed. They are NOT folded: a short caller
-   *  fallback would otherwise replace the detailed summary (or, on a refold,
-   *  the earlier blocks' summaries) the dedicated model was meant to write. */
+  /** Ranges whose summary call failed or had no extractable content. They
+   *  are NOT folded: the fold must carry the dedicated model's detailed
+   *  summary, not a caller stub (or, on a refold, earlier blocks' summaries). */
   failed: Array<{ index: number; span: string; error: string }>;
   modelLabel?: string;
 }
@@ -750,8 +800,8 @@ interface DedicatedSummaryResult {
 /** Write each range's summary with the configured dedicated model
  *  (`compressionModelId`). `session` = the active model with the captured
  *  provider-bound prefix (prompt-cache reuse); otherwise a registry model gets
- *  the extracted range transcript. Any per-range failure keeps the caller's
- *  fallback summary, so compression never blocks on the side call. */
+ *  the extracted range transcript. A setup failure throws (nothing folds);
+ *  per-range failures mark those ranges failed and they are not folded. */
 async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<DedicatedSummaryResult> {
   const ref = input.runtime.getCompressionModelRef();
   const ranges = input.ranges.map((range) => ({ ...range }));
@@ -763,7 +813,10 @@ async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<De
   let model: Model<Api> | undefined;
   if (isSession) {
     model = input.ctx.model as Model<Api> | undefined;
-    if (!model) return { ranges, note: "session summary model unavailable; kept caller-provided fallback summaries", warn: true, failed: [] };
+    if (!model) {
+      logWarn("compress", { sid, event: "summary-model-unavailable", ref, action: "abort-fold" });
+      throw new Error("session summary model unavailable; ranges not folded");
+    }
   } else {
     let resolved: ReturnType<typeof resolveModel> | undefined;
     try {
@@ -773,15 +826,16 @@ async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<De
     }
     if (!resolved?.model) {
       if (resolved) logWarn("compress", { sid, event: "compression-model-unresolved", ref, ambiguous: resolved.ambiguous.length });
-      return { ranges, note: `summary model ${ref} is not resolvable; kept caller-provided fallback summaries`, warn: true, failed: [] };
+      throw new Error(`summary model ${ref} is not resolvable; ranges not folded`);
     }
     model = resolved.model;
   }
   // Setup failures (above, and a host without nested completion) are
-  // configuration problems, not per-call ones: keep folding with the caller's
-  // fallback and warn, rather than stop compressing altogether.
+  // configuration problems, not per-call ones: abort the whole call so
+  // nothing folds with a caller stub; the main model sees the error and
+  // the ranges retry on a later nudge cycle.
   if (typeof (input.ctx.modelRegistry as unknown as { complete?: unknown }).complete !== "function") {
-    return { ranges, note: "host model registry has no complete() (needs pi >= 1.x); kept caller-provided fallback summaries", warn: true, failed: [] };
+    throw new Error("host model registry has no complete() (needs pi >= 1.x); ranges not folded");
   }
 
   let prefix: Message[] | null = null;
@@ -812,8 +866,11 @@ async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<De
       } else {
         const block = planned.get(index);
         const extracted = block ? foldedContent(input.messages, input.state, block) : extractRangeContent(input.messages, input.state, range.startId, range.endId);
-        if (!extracted) continue;
-        const instruction = buildRangeInstruction(range, topic, range.summary);
+        if (!extracted) {
+          failed.push({ index, span: `${range.startId}..${range.endId}`, error: "no extractable content in range" });
+          continue;
+        }
+        const instruction = buildRangeInstruction(range, topic);
         context = {
           systemPrompt: buildSummarizeSystemPrompt(input.runtime.prompts, topic),
           messages: [{ role: "user", content: `${instruction}\n\n<content>\n${fitToModel(extracted, model, maxTokens)}\n</content>`, timestamp: Date.now() }],
@@ -821,7 +878,7 @@ async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<De
       }
       const span = `${range.startId}..${range.endId}`;
       range.summary = await summarizeChecked(input.ctx, model, context, maxTokens, input.signal, (text, kind) =>
-        logWarn("compress", { sid, event: kind === "planning" ? "summary-planning-leak" : "summary-transcript-echo", ref, span, text, action: "retry" }));
+        logWarn("compress", { sid, event: kind === "planning" ? "summary-planning-leak" : "summary-transcript-echo", ref, span, text, action: "stored" }));
       used += 1;
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
@@ -831,29 +888,26 @@ async function writeDedicatedSummaries(input: DedicatedSummaryInput): Promise<De
   }
 
   const label = `${model.provider}/${model.id}`;
-  const fallbackKept = ranges.length - used - failed.length;
   const mode = isSession ? (prefix ? ", shared prefix" : ", extracted content") : "";
   const parts: string[] = [];
   if (used > 0) parts.push(`summaries written by ${isSession ? "session model " : ""}${label} (${used}/${ranges.length}${mode})`);
   if (failed.length > 0) {
     parts.push(`NOT compressed — summary model ${label} failed for ${failed.map((f) => `${f.span} (${f.error})`).join(", ")}; retry ${failed.length === 1 ? "that range" : "those ranges"} later`);
   }
-  if (fallbackKept > 0) parts.push(`caller fallbacks kept for ${fallbackKept} range(s) with no extractable content`);
   return {
     ranges,
     note: parts.length > 0 ? parts.join("; ") : null,
-    warn: failed.length > 0 || fallbackKept > 0,
+    warn: failed.length > 0,
     failed,
     modelLabel: label,
   };
 }
 
-function buildRangeInstruction(range: RangeEntry, topic: string | undefined, callerNote?: string): string {
+function buildRangeInstruction(range: RangeEntry, topic: string | undefined): string {
   return (
     `Write the single detailed summary replacing ${range.startId} through ${range.endId}.` +
     (topic ? ` Topic: ${topic}.` : "") +
-    " Follow the compression rules in the system prompt. Output only the summary text." +
-    (callerNote?.trim() ? `\n\n<caller_note>\n${callerNote.trim()}\n</caller_note>` : "")
+    " Follow the compression rules in the system prompt. Output only the summary text."
   );
 }
 

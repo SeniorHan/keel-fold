@@ -41,7 +41,7 @@ const LEAN_SYSTEM_PROMPT = `Folded context management
 // Pi snapshots tool descriptions when it binds extensions, before session_start
 // loads acp.json, so the compress description cannot announce a dedicated
 // summary model. The prompt hook runs every turn with the loaded config.
-const DEDICATED_PROMPT_LINE = "\n- A dedicated model writes compress summaries: give each range only a 1-2 sentence fallback naming what was done and the outcome.";
+const DEDICATED_PROMPT_LINE = "\n- A dedicated model writes compress summaries: give each range only refs and an optional topic — do not write summary text.";
 const DEDICATED_MARKER = "Dedicated summary model";
 
 const COMPRESS_DONE_HINT = "New block summaries stay visible in this call's arguments; do not unfold them to re-read.";
@@ -94,8 +94,8 @@ const COMPRESS_FIELD_DESCRIPTIONS: Readonly<Record<string, string>> = {
   content: "Direct array; no JSON strings/nesting/mix.",
   startId: "Inclusive first mNNNNN or bN ref.",
   endId: "Inclusive last mNNNNN or bN ref.",
-  summary: "Self-contained replacement preserving exact technical details.",
-  topic: "Short label; a per-range label overrides the top-level fallback.",
+  summary: "Optional; only without a dedicated summary model — the replacement text with the range's exact technical details.",
+  topic: "Short label; per-range overrides top-level.",
   summaryMaxChars: "Optional summary length limit override.",
 };
 
@@ -399,7 +399,7 @@ function wrapCompress(tool: CapturedTool): CapturedTool & { exposure: "model-onl
     get description() {
       const upstreamDescription = String(tool.description ?? "");
       return upstreamDescription.includes(DEDICATED_MARKER)
-        ? "Replace consumed ranges using refs. A dedicated model writes the detailed summary; provide a meaningful fallback of 1-2 sentences preserving goals, exact paths/versions/errors, decisions, current state, and TODOs."
+        ? "Replace consumed ranges. A dedicated model writes each summary — do not provide summary text; give refs and an optional topic. Failed ranges are not folded; they retry later."
         : "Replace consumed conversation ranges with self-contained summaries using mNNNNN or bN refs.";
     },
     promptSnippet: "",

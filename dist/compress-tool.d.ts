@@ -7,7 +7,7 @@ import { type CompressionBlock, type CompressionState } from "acp-kernel";
 declare const RangeSpec: Type.TObject<{
     startId: Type.TString;
     endId: Type.TString;
-    summary: Type.TString;
+    summary: Type.TOptional<Type.TString>;
     topic: Type.TOptional<Type.TString>;
 }>;
 declare const CompressParams: Type.TObject<{
@@ -15,19 +15,22 @@ declare const CompressParams: Type.TObject<{
     content: Type.TUnion<[Type.TArray<Type.TObject<{
         startId: Type.TString;
         endId: Type.TString;
-        summary: Type.TString;
+        summary: Type.TOptional<Type.TString>;
         topic: Type.TOptional<Type.TString>;
     }>>, Type.TString]>;
     summaryMaxChars: Type.TOptional<Type.TNumber>;
 }>;
 type CompressArgs = Static<typeof CompressParams>;
 export declare function makeCompressTool(runtime: AcpRuntime, overrides?: ToolPromptOverrides, pi?: ExtensionAPI): ToolDefinition<typeof CompressParams>;
-type RangeEntry = Static<typeof RangeSpec>;
+type RangeEntry = Omit<Static<typeof RangeSpec>, "summary"> & {
+    summary: string;
+};
 /** Persisted in the compress toolResult's `details` (never sent to the model).
- *  When a dedicated model writes summaries, the call's arguments hold only the
- *  caller's short fallback, and failed ranges are not folded at all — so the
- *  log alone cannot rebuild the blocks. `acpFolded` records exactly what was
- *  folded; state-rebuild prefers it over the arguments. */
+ *  When a dedicated model writes summaries, the call's arguments carry no
+ *  summary text (a parse placeholder is overwritten before apply), and failed
+ *  ranges are not folded at all — so the log alone cannot rebuild the blocks.
+ *  `acpFolded` records exactly what was folded; state-rebuild prefers it over
+ *  the arguments. */
 export interface CompressResultDetails {
     acpFolded?: {
         version: 1;

@@ -57,7 +57,7 @@ async function nudgeText(name: string, compressionModelId: string): Promise<stri
 test("registry summary model: nudge sends range-selection rules, not the full summary rules", async () => {
   const text = await nudgeText("registry", "cheap/summarizer");
   assert.match(text, /dedicated summary model active/);
-  assert.match(text, /1-2 sentence fallback/);
+  assert.match(text, /Do not provide summary fields/);
   assert.doesNotMatch(text, /KEEP VERBATIM/);
 });
 

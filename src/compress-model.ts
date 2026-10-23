@@ -153,21 +153,12 @@ function detectDefect(summary: string): { kind: SummaryDefect; text: string } | 
   return leak === null ? null : { kind: "planning", text: leak };
 }
 
-const RETRY_NOTES: Record<SummaryDefect, string> = {
-  planning:
-    "IMPORTANT: your previous attempt began with notes to yourself about how to write the summary. " +
-    "That text would have been stored as part of the summary. Plan silently and output only the summary itself, " +
-    "starting directly with its first line.",
-  "transcript-echo":
-    "IMPORTANT: your previous attempt copied transcript entries (lines such as `[assistant:read call] …` or the </content> tag) " +
-    "into the summary. Never reproduce the input: describe what happened in your own words, keep only the exact values " +
-    "the rules require, and stop after the state section.",
-};
-
-/** summarizeWithModel, plus one retry when the output opens with planning
- *  text or copies transcript entries. A second defective output throws, so
- *  the range is not folded (the caller retries later) — never stored, never
- *  silently stripped. */
+/** summarizeWithModel, checked once for planning-text openings and copied
+ *  transcript entries. Defects are OBSERVATION-ONLY since 2026-10-23 (zero
+ *  defect events in production logs): the evidence is logged and the summary
+ *  is stored anyway. If observation shows a real quality problem, fix the
+ *  summarizer system prompt first; only add enforcement (reject + refold) if
+ *  prompt fixes demonstrably fail. */
 export async function summarizeChecked(
   ctx: ExtensionContext,
   model: Model<Api>,
@@ -176,18 +167,11 @@ export async function summarizeChecked(
   signal?: AbortSignal,
   onDefect?: (text: string, kind: SummaryDefect) => void,
 ): Promise<string> {
-  const first = await summarizeWithModel(ctx, model, context, maxTokens, signal);
-  const defect = detectDefect(first);
-  if (defect === null) return first;
+  const text = await summarizeWithModel(ctx, model, context, maxTokens, signal);
+  const defect = detectDefect(text);
+  if (defect === null) return text;
   onDefect?.(defect.text, defect.kind);
-  const retry: Context = { ...context, systemPrompt: `${context.systemPrompt ?? ""}\n\n${RETRY_NOTES[defect.kind]}` };
-  const second = await summarizeWithModel(ctx, model, retry, maxTokens, signal);
-  const again = detectDefect(second);
-  if (again !== null) {
-    const what = again.kind === "planning" ? "planning notes into the summary" : "transcript entries into the summary";
-    throw new Error(`compression model wrote ${what} twice ("${again.text}"); summary rejected`);
-  }
-  return second;
+  return text;
 }
 
 /** Who owns what in a range transcript. Tool output routinely quotes other

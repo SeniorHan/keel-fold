@@ -91,8 +91,8 @@ test("arrayWrapRepair has no false positives on well-formed / other inputs", () 
   assert.equal(arrayWrapRepair("not json { at all"), undefined);
   // Unbalanced object (no closing brace) → nothing extracted.
   assert.equal(arrayWrapRepair('{"startId":"m1","endId":"m2","summary":"x"'), undefined);
-  // Range missing summary → not range-shaped.
-  assert.equal(arrayWrapRepair('{"startId":"m1","endId":"m2"}'), undefined);
+  // Range missing summary → still range-shaped (placeholder injected later).
+  assert.notEqual(arrayWrapRepair('{"startId":"m1","endId":"m2"}'), undefined);
 });
 
 // ─── unit: normalizeRanges (repair wired in) ─────────────────────────────────

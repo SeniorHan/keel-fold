@@ -33,10 +33,12 @@ export declare function detectPlanningLeak(summary: string): string | null;
 /** The echoed text when `summary` contains copied transcript entries, else null. */
 export declare function detectTranscriptEcho(summary: string): string | null;
 export type SummaryDefect = "planning" | "transcript-echo";
-/** summarizeWithModel, plus one retry when the output opens with planning
- *  text or copies transcript entries. A second defective output throws, so
- *  the range is not folded (the caller retries later) — never stored, never
- *  silently stripped. */
+/** summarizeWithModel, checked once for planning-text openings and copied
+ *  transcript entries. Defects are OBSERVATION-ONLY since 2026-10-23 (zero
+ *  defect events in production logs): the evidence is logged and the summary
+ *  is stored anyway. If observation shows a real quality problem, fix the
+ *  summarizer system prompt first; only add enforcement (reject + refold) if
+ *  prompt fixes demonstrably fail. */
 export declare function summarizeChecked(ctx: ExtensionContext, model: Model<Api>, context: Context, maxTokens: number, signal?: AbortSignal, onDefect?: (text: string, kind: SummaryDefect) => void): Promise<string>;
 /** System prompt for a dedicated model: reuse the kernel's tier-1 rules so
  *  its output matches what the main model would produce. */

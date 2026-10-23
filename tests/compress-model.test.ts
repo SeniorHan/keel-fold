@@ -197,7 +197,7 @@ test("compress: an earlier block in the middle of the range is sent as a pinned 
   assert.equal(prompt.split("DEDICATED-SUMMARY").length - 1, 1, "the block summary is sent once");
 });
 
-test("compress: a range naming only a tool result sends its paired call too (what the kernel folds) plus the caller note", async () => {
+test("compress: a range naming only a tool result sends its paired call too (what the kernel folds) plus the tolerated caller summary", async () => {
   const calls: Call[] = [];
   const registry = fakeRegistry([model("cheap", "summarizer")], textReply(DEDICATED), calls);
   const call = { type: "message", id: "e2", parentId: null, timestamp: "", message: { role: "assistant", content: [{ type: "toolCall", name: "bash", id: "callX", arguments: { command: "python read_other_session.py --session PMIC" } }], timestamp: Date.now() } };
@@ -216,7 +216,7 @@ test("compress: a range naming only a tool result sends its paired call too (wha
   assert.ok(prompt.includes("read_other_session.py"), "the summary model sees the call the kernel folds");
   assert.ok(prompt.includes("USER: consider only 1.8 V output"), "and its result");
   assert.ok(!prompt.includes("filler text"), "nothing outside the fold");
-  assert.ok(prompt.includes(`<caller_note>\n${note}\n</caller_note>`), "caller fallback is passed as a note");
+  assert.ok(!prompt.includes("<caller_note>"), "caller summary text is never sent to the summary model");
   assert.match(calls[0]!.context.systemPrompt, /SOURCE ATTRIBUTION/);
   assert.match(calls[0]!.context.systemPrompt, /CALLER NOTE/);
 });
@@ -323,7 +323,7 @@ test("Lean: partial failure folds only the ranges whose summary succeeded", asyn
   assert.ok(!summaries.some((s) => s.includes(FALLBACK)), "the failed range's fallback is not folded");
 });
 
-test("Lean: error and length stops do not fold; a host without complete() still falls back", async () => {
+test("Lean: error and length stops do not fold; a host without complete() folds nothing", async () => {
   const errReg = fakeRegistry([model("cheap", "summarizer")], async () => ({ role: "assistant", content: [], stopReason: "error", errorMessage: "429" }), []);
   const a = await setup("stop-error", errReg, { acpJson: { compressionModelId: "cheap/summarizer" } });
   await assert.rejects(a.run(FALLBACK), /failed for every range \(m00001\.\.m00001: 429\)/);
@@ -337,16 +337,15 @@ test("Lean: error and length stops do not fold; a host without complete() still 
 
   const oldHost = { getAll: () => [model("cheap", "summarizer")], find: () => model("cheap", "summarizer") };
   const b = await setup("no-complete", oldHost, { acpJson: { compressionModelId: "cheap/summarizer" } });
-  await b.run(FALLBACK);
-  assert.ok((await readBlockSummaries(b.stateFile)).includes(FALLBACK));
+  await assert.rejects(b.run(FALLBACK), /ranges not folded/);
+  assert.deepEqual(await readBlockSummaries(b.stateFile), []);
 });
 
-test("compress: unresolvable model ref keeps the caller summary and warns", async () => {
+test("compress: unresolvable model ref folds nothing", async () => {
   const registry = fakeRegistry([model("cheap", "summarizer")], textReply(DEDICATED), []);
   const { run, stateFile } = await setup("unresolved", registry, { acpJson: { compressionModelId: "ghost/model" } });
-  const text = await run(FALLBACK);
-  assert.match(text, /summary model ghost\/model is not resolvable/);
-  assert.ok((await readBlockSummaries(stateFile)).includes(FALLBACK));
+  await assert.rejects(run(FALLBACK), /summary model ghost\/model is not resolvable/);
+  assert.deepEqual(await readBlockSummaries(stateFile), []);
 });
 
 test("compress: session mode reuses the captured prefix, system prompt and active tools", async () => {
@@ -365,7 +364,7 @@ test("compress: session mode reuses the captured prefix, system prompt and activ
   assert.ok((await readBlockSummaries(stateFile)).includes(DEDICATED));
 });
 
-test("compress: session mode without a captured prefix takes the extracted-content path (planned fold + caller note)", async () => {
+test("compress: session mode without a captured prefix takes the extracted-content path (planned fold)", async () => {
   const calls: Call[] = [];
   const session = model("mainprov", "main-model");
   const registry = fakeRegistry([session], textReply(DEDICATED), calls);
@@ -378,7 +377,7 @@ test("compress: session mode without a captured prefix takes the extracted-conte
   assert.match(text, /summaries written by session model mainprov\/main-model \(1\/1, extracted content\)/, text);
   const { context } = calls[0]!;
   assert.match(context.systemPrompt, /SOURCE ATTRIBUTION/);
-  assert.ok(String(context.messages[0]!.content).includes("<caller_note>"), "caller fallback is passed as a note");
+  assert.ok(!String(context.messages[0]!.content).includes("<caller_note>"), "no caller note; the dedicated model writes from the transcript");
   assert.ok((await readBlockSummaries(stateFile)).includes(DEDICATED));
 });
 
@@ -507,32 +506,25 @@ test("Lean: detectPlanningLeak catches planning openings, not quoted or late men
   assert.equal(detectPlanningLeak("## Requirements\n- User requested output only summary (m00001)."), null, "the phrase as a fact inside the summary body");
 });
 
-test("Lean: a planning-text leak is retried once with a reminder; the clean retry is folded", async () => {
+test("Lean: a planning-text leak is stored as-is with a warning (observation-only since 2026-10-23)", async () => {
   const calls: Call[] = [];
-  let n = 0;
-  const registry = fakeRegistry([model("cheap", "summarizer")], async () => {
-    n += 1;
-    return { role: "assistant", content: [{ type: "text", text: n === 1 ? B17_LEAK : CLEAN }], stopReason: "stop" };
-  }, calls);
+  const registry = fakeRegistry([model("cheap", "summarizer")], textReply(B17_LEAK), calls);
   const { run, stateFile } = await setup("leak-retry", registry, { acpJson: { compressionModelId: "cheap/summarizer" } });
   const text = await run(FALLBACK);
   assert.match(text, /summaries written by cheap\/summarizer \(1\/1\)/, text);
-  assert.equal(calls.length, 2);
-  assert.ok(!String(calls[0]!.context.systemPrompt).includes("your previous attempt began with notes"));
-  assert.match(String(calls[1]!.context.systemPrompt), /your previous attempt began with notes to yourself/);
+  assert.equal(calls.length, 1, "no retry: single-shot summarization");
   const summaries = await readBlockSummaries(stateFile);
   assert.equal(summaries.length, 1);
-  assert.ok(summaries[0]!.includes("IGSS unit is still unverified"));
-  assert.ok(!summaries[0]!.includes("We need produce summary"));
+  assert.ok(summaries[0]!.includes("We need produce summary"), "the leaky text is stored verbatim");
 });
 
-test("Lean: a leak that survives the retry is not folded; a quoted mention is not retried", async () => {
+test("Lean: leaks are stored with a warning (observation-only); a quoted mention is never flagged", async () => {
   const leaky: Call[] = [];
   const twice = fakeRegistry([model("cheap", "summarizer")], textReply(B17_LEAK), leaky);
   const a = await setup("leak-twice", twice, { acpJson: { compressionModelId: "cheap/summarizer" } });
-  await assert.rejects(a.run(FALLBACK), /wrote planning notes into the summary twice/);
-  assert.equal(leaky.length, 2, "exactly one retry");
-  assert.deepEqual(await readBlockSummaries(a.stateFile), [], "neither the leaky summary nor the fallback is folded");
+  await a.run(FALLBACK);
+  assert.equal(leaky.length, 1, "no retry");
+  assert.ok((await readBlockSummaries(a.stateFile))[0]!.includes("We need produce summary"), "stored as-is");
 
   const quotedCalls: Call[] = [];
   const quoted = `## Leak audit\n- DEDICATED-SUMMARY: b17 began with "Output only summary. Could compress" planning text (m00770).`;
@@ -561,24 +553,13 @@ test("Lean: detectTranscriptEcho catches copied transcript entries, not a quoted
   assert.equal(detectTranscriptEcho("- Output format: `<content>正文</content>` per chapter."), null, "inline tag");
 });
 
-test("Lean: a transcript echo is retried once with its own reminder; a second echo is not folded", async () => {
+test("Lean: a transcript echo is stored as-is with a warning (observation-only since 2026-10-23)", async () => {
   const calls: Call[] = [];
-  let n = 0;
-  const registry = fakeRegistry([model("cheap", "summarizer")], async () => {
-    n += 1;
-    return { role: "assistant", content: [{ type: "text", text: n === 1 ? ECHO : CLEAN }], stopReason: "stop" };
-  }, calls);
+  const registry = fakeRegistry([model("cheap", "summarizer")], textReply(ECHO), calls);
   const a = await setup("echo-retry", registry, { acpJson: { compressionModelId: "cheap/summarizer" } });
   await a.run(FALLBACK);
-  assert.equal(calls.length, 2);
-  assert.match(String(calls[1]!.context.systemPrompt), /your previous attempt copied transcript entries/);
+  assert.equal(calls.length, 1, "no retry");
   const kept = await readBlockSummaries(a.stateFile);
   assert.equal(kept.length, 1);
-  assert.ok(!kept[0]!.includes("</content>"));
-
-  const twice: Call[] = [];
-  const b = await setup("echo-twice", fakeRegistry([model("cheap", "summarizer")], textReply(ECHO), twice), { acpJson: { compressionModelId: "cheap/summarizer" } });
-  await assert.rejects(b.run(FALLBACK), /wrote transcript entries into the summary twice/);
-  assert.equal(twice.length, 2);
-  assert.deepEqual(await readBlockSummaries(b.stateFile), []);
+  assert.ok(kept[0]!.includes("</content>"), "the echoed text is stored verbatim; enforcement is downstream's call");
 });
