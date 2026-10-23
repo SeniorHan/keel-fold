@@ -399,7 +399,7 @@ function wrapCompress(tool: CapturedTool): CapturedTool & { exposure: "model-onl
     get description() {
       const upstreamDescription = String(tool.description ?? "");
       return upstreamDescription.includes(DEDICATED_MARKER)
-        ? "Replace consumed ranges. A dedicated model writes each summary — do not provide summary text; give refs and an optional topic. Failed ranges are not folded; they retry later."
+        ? "专用模型写摘要,勿传summary,传refs+topic;失败范围不折叠,可重试"
         : "Replace consumed conversation ranges with self-contained summaries using mNNNNN or bN refs.";
     },
     promptSnippet: "",

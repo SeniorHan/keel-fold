@@ -244,9 +244,9 @@ test("compress description pins the dedicated-model contract (no caller text, fa
   };
   createLeanAcpExtension(upstream)(pi);
   const description = getTool(pi, "compress").description;
-  assert.match(description, /dedicated model/i);
-  assert.match(description, /do not provide summary text/i);
-  assert.match(description, /Failed ranges are not folded/);
+  assert.match(description, /专用模型/);
+  assert.match(description, /勿传summary/);
+  assert.match(description, /失败范围不折叠/);
   assert.doesNotMatch(description, /bare placeholder|summary: "compressed"/i);
   const result = await getTool(pi, "compress").execute("c1", {}, undefined, undefined, {});
   assert.equal(result.content[0].text, "ok", "no completion hint when nothing was folded");

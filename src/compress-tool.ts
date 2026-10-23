@@ -28,7 +28,7 @@ function formatK(n: number): string {
 const RangeSpec = Type.Object({
   startId: Type.String({ description: 'Inclusive first ref: message ref, e.g. "m00005" (from the fold tag), or a block id "b3".' }),
   endId: Type.String({ description: 'Inclusive end ref. Must be at or after startId.' }),
-  summary: Type.Optional(Type.String({ description: "Only when no dedicated summary model is configured: the full technical summary replacing all content in range (conclusions, file paths, decisions, exact values). With a dedicated model, omit it — that model writes the summaries." })),
+  summary: Type.Optional(Type.String({ description: "无专用摘要模型才填:替换该范围全部内容的技术摘要;有则省略。" })),
   topic: Type.Optional(Type.String({ description: "Short label (3-5 words) for THIS range, e.g. 'Auth System Exploration'." })),
 });
 
@@ -42,8 +42,8 @@ const CompressParams = Type.Object({
     // "[{\"topic\":...}]" with "content.0: must be object" and the turn's
     // only compress attempt was lost. Accept the JSON-encoded form and parse
     // it in normalizeRanges below.
-    Type.String({ description: "JSON-encoded array of ranges — accepted because non-strict-tool providers sometimes stringify array arguments; parsed automatically." }),
-  ], { description: "One or more ranges to compress, each with start/end boundaries (plus summary text only when no dedicated summary model is configured)." }),
+    Type.String(),
+  ], { description: "每条范围必含 startId/endId;数组或 JSON 字符串,自动解析。" }),
   summaryMaxChars: Type.Optional(Type.Number({ description: "Override max summary length in chars (default 20000)." })),
 });
 
@@ -60,7 +60,7 @@ function compressDescription(ref: string | undefined): string {
   return (
     `Replace older conversation ranges. Dedicated summary model ${ref} normally replaces each summary. ` +
     "Give each range a concise but meaningful 1–2 sentence fallback summary; never use a bare placeholder. " +
-    "Preserve the goal, key decisions, exact paths/versions/errors, current state, and TODOs in that fallback."
+    "保留目标,决策,路径/错误,现状,待办"
   );
 }
 
@@ -73,8 +73,8 @@ export function makeCompressTool(runtime: AcpRuntime, overrides?: ToolPromptOver
     promptSnippet: "compress({ content: [{ startId, endId }] }) or batch multiple ranges",
     promptGuidelines: [
       "Each message has a hidden ref tag with its mNNNNN ref, token size, and type. Compress ranges by their refs.",
-      "Batch multiple unrelated ranges in one call — each gets its own topic and summary.",
-      "Write dense, self-contained summaries — preserve file paths, signatures, errors, and decisions verbatim.",
+      "批量压缩无关范围,各带 topic/摘要",
+      "摘要自足,逐字保留路径/签名/错误",
       "Never compress content the current step is actively using.",
     ],
     parameters: CompressParams,
