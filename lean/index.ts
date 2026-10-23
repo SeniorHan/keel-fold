@@ -91,12 +91,12 @@ const FACADE_PARAMETERS = Type.Object({
 });
 
 const COMPRESS_FIELD_DESCRIPTIONS: Readonly<Record<string, string>> = {
-  content: "Direct array; no JSON strings/nesting/mix.",
-  startId: "Inclusive first mNNNNN or bN ref.",
-  endId: "Inclusive last mNNNNN or bN ref.",
-  summary: "Optional; only without a dedicated summary model — the replacement text with the range's exact technical details.",
-  topic: "Short label; per-range overrides top-level.",
-  summaryMaxChars: "Optional summary length limit override.",
+  content: "直接数组;勿传 JSON 字符串/嵌套/混装。",
+  startId: "起始 ref(含端点,mNNNNN 或 bN)。",
+  endId: "结束 ref(含端点)。",
+  summary: "可选;仅无专用摘要模型时:区间的详细替换摘要全文。",
+  topic: "短标签;分区间覆盖顶层。",
+  summaryMaxChars: "可选;摘要长度上限覆盖。",
 };
 
 function compactCompressSchemaDescriptions(
