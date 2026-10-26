@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.3 (2026-10-26)
+
+- Throttle-retry kick is steered instead of dropped: `pi.sendUserMessage(kick)` while a run is active throws `Agent is already processing. Specify streamingBehavior ('steer' or 'followUp')` inside pi's fire-and-forget wrapper, where the extension cannot catch it — the kick vanished and the run stayed stopped, logging only an `Extension "<runtime>" error` line. The kick now carries `{ deliverAs: "steer" }` whenever `ctx.isIdle()` is false (`agent_settled` normally means idle, but the progressive sleep can outlive it), and `kick-sent` logs the channel used.
+
 ## v0.3.1 (2026-10-23)
 
 - Contract surgery on compress: summarization is single-shot — the retry-on-defect machinery is gone; planning-text leaks, transcript echoes and length cuts are logged and the summary is stored as-is.

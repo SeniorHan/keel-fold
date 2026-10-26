@@ -944,7 +944,11 @@ function wireOverflowSelfHeal(pi: ExtensionAPI, runtime: AcpRuntime): void {
 //     blocks nothing; ctx.signal is undefined there, so ACP keeps its own
 //     AbortController. Any non-kick user input cancels the pending kick
 //     (input event, source !== "extension"); the throttled error stays in
-//     context and the system-prompt line guides the model to resume.
+//     context and the system-prompt line guides the model to resume. The sleep
+//     can run for minutes, so the agent need not be idle when it ends: an
+//     input that raced the cancel, or a queued turn, leaves a run active, and a
+//     plain user message then throws inside pi's fire-and-forget wrapper and is
+//     lost. The kick is therefore steered whenever ctx.isIdle() is false.
 function wireThrottleRetry(pi: ExtensionAPI, runtime: AcpRuntime): void {
   pi.on("message_end", (event, ctx) => {
     const th = runtime.throttleFor(ctx.sessionManager.getSessionId());
@@ -995,8 +999,13 @@ function wireThrottleRetry(pi: ExtensionAPI, runtime: AcpRuntime): void {
       return;
     }
     if (!th.readyToKick(cfg.maxRetries)) return;
-    pi.sendUserMessage(THROTTLE_KICK_TEXT);
-    logInfo("throttle-retry", { sid, event: "kick-sent", kickNumber, attempt: th.state.attempts + 1, max: cfg.maxRetries });
+    // A user message sent while the agent is still running throws inside pi's fire-and-forget
+    // wrapper (`Agent is already processing…`) and the kick is lost; steer it into the running
+    // agent instead, which lands it at the next turn boundary — the turn this retry was waiting for.
+    const idle = ctx.isIdle();
+    if (idle) pi.sendUserMessage(THROTTLE_KICK_TEXT);
+    else pi.sendUserMessage(THROTTLE_KICK_TEXT, { deliverAs: "steer" });
+    logInfo("throttle-retry", { sid, event: "kick-sent", kickNumber, attempt: th.state.attempts + 1, max: cfg.maxRetries, delivery: idle ? "turn" : "steer" });
   });
   pi.on("input", (event, ctx) => {
     if (event.source !== "extension") runtime.throttleFor(ctx.sessionManager.getSessionId()).cancelSleep();
